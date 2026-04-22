@@ -22,6 +22,8 @@ import subprocess
 import tempfile
 import threading
 import time
+import urllib.request
+import urllib.parse
 from dataclasses import dataclass, field
 from datetime import date
 from enum import Enum
@@ -439,6 +441,46 @@ class SessionItem:
 def _rand_ratio() -> float:
     """返回 0.2~0.6 之间的随机比例，用于模拟人类点击偏移"""
     return random.uniform(0.2, 0.6)
+
+
+def _is_url(path: str) -> bool:
+    """判断路径是否为网络 URL"""
+    return path.startswith("http://") or path.startswith("https://")
+
+
+def _download_to_temp(url: str, timeout: int = 60) -> str:
+    """
+    下载网络资源到临时文件，返回临时文件路径。
+
+    从 URL 中提取原始文件名，保留后缀以便微信正确识别文件类型。
+    下载失败时抛出 RuntimeError。
+    """
+    parsed = urllib.parse.urlparse(url)
+    url_path = urllib.parse.unquote(parsed.path)
+    basename = os.path.basename(url_path) if url_path else ""
+    _, ext = os.path.splitext(basename) if basename else ("", "")
+    if not ext:
+        ext = ".tmp"
+    if not basename:
+        basename = f"download{ext}"
+
+    tmp_dir = os.path.join(tempfile.gettempdir(), "pywxauto_downloads")
+    os.makedirs(tmp_dir, exist_ok=True)
+    tmp_path = os.path.join(tmp_dir, basename)
+
+    try:
+        req = urllib.request.Request(url, headers={"User-Agent": "pywxauto/1.0"})
+        with urllib.request.urlopen(req, timeout=timeout) as resp:
+            with open(tmp_path, "wb") as f:
+                while True:
+                    chunk = resp.read(8192)
+                    if not chunk:
+                        break
+                    f.write(chunk)
+    except Exception as e:
+        raise RuntimeError(f"下载文件失败: {url} -> {e}")
+
+    return tmp_path
 
 
 def _set_clipboard_file(file_paths: list[str]):
@@ -2467,34 +2509,44 @@ class Chat:
         """
         在当前会话中发送文件，返回发送状态。
 
+        支持本地文件路径和网络 URL（http/https），
+        网络资源会先下载到临时目录再发送。
+
         粘贴后通过 TextPattern.DocumentRange 的长度校验文件是否已粘贴，
         发送后校验文档长度是否已归零。
         """
-        self.clear_input()
-        _set_clipboard_file([file_path])
-        self._win.SendKeys("{Ctrl}v")
+        tmp_file = None
+        if _is_url(file_path):
+            tmp_file = _download_to_temp(file_path)
+            file_path = tmp_file
 
-        # 发送前校验：文档长度应大于 0（说明文件已粘贴）
-        doc_len = self._get_input_doc_length()
-        if doc_len == 0:
-            raise RuntimeError("文件粘贴校验失败: 输入框文档长度为 0，文件可能未粘贴成功")
+        try:
+            self.clear_input()
+            _set_clipboard_file([file_path])
+            self._win.SendKeys("{Ctrl}v")
 
-        # 发送按钮发送消息
-        # send_btn = self._win.ButtonControl(Name="发送", ClassName="mmui::XOutlineButton")
-        # if send_btn.Exists(maxSearchSeconds=1):
-        #     send_btn.Click(ratioX=_rand_ratio(), ratioY=_rand_ratio())
-        #     time.sleep(0.2)
+            # 发送前校验：文档长度应大于 0（说明文件已粘贴）
+            doc_len = self._get_input_doc_length()
+            if doc_len == 0:
+                raise RuntimeError("文件粘贴校验失败: 输入框文档长度为 0，文件可能未粘贴成功")
 
-        self._win.SendKeys("{Enter}")
+            self._win.SendKeys("{Enter}")
 
-        # 发送后校验：文档长度应归零
-        remaining_len = self._get_input_doc_length()
-        if remaining_len > 0:
-            raise RuntimeError(
-                f"发送后输入框未清空: 文档长度={remaining_len}，文件可能未发出"
-            )
+            # 发送后校验：文档长度应归零
+            remaining_len = self._get_input_doc_length()
+            if remaining_len > 0:
+                raise RuntimeError(
+                    f"发送后输入框未清空: 文档长度={remaining_len}，文件可能未发出"
+                )
 
-        return self.check_file_message_status()
+            return self.check_file_message_status()
+        finally:
+            # 清理临时文件
+            if tmp_file and os.path.exists(tmp_file):
+                try:
+                    os.remove(tmp_file)
+                except OSError:
+                    pass
 
     def send_room_at(self, content: str, at_members: list[str]) -> MessageStatus:
         """
@@ -2574,16 +2626,8 @@ class Chat:
             full = [c for c in controls if c.Name == member]
             fuzzy = [c for c in controls if member in c.Name]
 
-            if full:
-                full[0].Click(
-                    waitTime=0.5,
-                    ratioX=_rand_ratio(), ratioY=_rand_ratio(),
-                )
-            elif len(fuzzy) == 1:
-                fuzzy[0].Click(
-                    waitTime=0.5,
-                    ratioX=_rand_ratio(), ratioY=_rand_ratio(),
-                )
+            if full or len(fuzzy) == 1:
+                auto.SendKeys("{Enter}", waitTime=0.5)
             elif len(fuzzy) > 1:
                 names = [c.Name for c in fuzzy]
                 raise RuntimeError(f"@群成员模糊匹配到多个: {names}")
@@ -3274,7 +3318,7 @@ class Weixin:
         return chat.send_text(content)
 
     def send_file(self, nickname: str, file_path: str) -> MessageStatus:
-        """打开指定会话并发送文件"""
+        """打开指定会话并发送文件，支持本地路径和网络 URL"""
         chat = self.open_session_by_search(nickname)
         return chat.send_file(file_path)
 
