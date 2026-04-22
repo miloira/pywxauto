@@ -1,0 +1,5 @@
+include README.md LICENSE
+recursive-include pywxauto *.pyd
+recursive-exclude pywxauto *.py *.c
+# 保留 __init__.py
+include pywxauto/__init__.py
