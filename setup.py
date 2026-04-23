@@ -23,6 +23,7 @@ REQUIRED = [
     "uiautomation",
     "pywin32",
     "Pillow",
+    "requests",
 ]
 
 # What packages are optional?

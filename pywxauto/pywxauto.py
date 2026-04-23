@@ -22,7 +22,7 @@ import subprocess
 import tempfile
 import threading
 import time
-import urllib.request
+import requests
 import urllib.parse
 from dataclasses import dataclass, field
 from datetime import date
@@ -469,14 +469,11 @@ def _download_to_temp(url: str, timeout: int = 60) -> str:
     tmp_path = os.path.join(tmp_dir, basename)
 
     try:
-        req = urllib.request.Request(url, headers={"User-Agent": "pywxauto/1.0"})
-        with urllib.request.urlopen(req, timeout=timeout) as resp:
-            with open(tmp_path, "wb") as f:
-                while True:
-                    chunk = resp.read(8192)
-                    if not chunk:
-                        break
-                    f.write(chunk)
+        resp = requests.get(url, timeout=timeout, stream=True)
+        resp.raise_for_status()
+        with open(tmp_path, "wb") as f:
+            for chunk in resp.iter_content(chunk_size=8192):
+                f.write(chunk)
     except Exception as e:
         raise RuntimeError(f"下载文件失败: {url} -> {e}")
 
