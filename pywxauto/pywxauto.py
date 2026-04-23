@@ -30,6 +30,7 @@ from enum import Enum
 from queue import Queue, Empty
 from typing import Optional
 
+import win32api
 import win32clipboard
 import win32con
 import winreg
@@ -436,6 +437,650 @@ class SessionItem:
     def close(self):
         """关闭该会话（如果处于激活状态则取消选中）"""
         self._require_session().close(self.name)
+
+
+class MomentItem:
+    """朋友圈动态条目"""
+
+    def __init__(self, *, type="", sender="", content="",
+                 raw_text="", timestamp="", image_count=0,
+                 cell_type=""):
+        self.type = type              # 动态类型（文本/图片/视频/分享/文本图片/文本视频/文本分享/其他）
+        self.sender = sender          # 发送者昵称
+        self.content = content        # 文本内容
+        self.raw_text = raw_text      # 原始文本（控件 Name 属性）
+        self.timestamp = timestamp    # 时间文本（如 "8小时前"）
+        self.image_count = image_count  # 图片数量
+        self.cell_type = cell_type    # 原始 Cell ClassName（用于调试）
+
+    def __repr__(self):
+        return (f"MomentItem(type={self.type!r}, sender={self.sender!r}, "
+                f"content={self.content!r}, timestamp={self.timestamp!r})")
+
+    def __str__(self):
+        preview = self.content[:60] + "..." if len(self.content) > 60 else self.content
+        return f"[{self.type}] [{self.timestamp}] {self.sender}: {preview}"
+
+
+class Moment:
+    """
+    朋友圈（Moments）操作类。
+
+    微信 4.x 的朋友圈通过左侧导航栏的"朋友圈"标签页打开，
+    会弹出一个独立窗口。
+
+    关键控件信息（来自 desktop-ui-inspector 对微信 4.x 的实际检查）：
+    - 导航标签: ButtonControl, ClassName="mmui::XTabBarItem", Name="朋友圈"
+    - 独立窗口: WindowControl, ClassName="mmui::SNSWindow",
+                AutomationId="SNSWindow", Name="朋友圈"
+    - 列表容器: ListControl, ClassName="mmui::TimeLineListView",
+                AutomationId="sns_list", Name="朋友圈"
+    - 单条动态: ListItemControl, ClassName 前缀 "mmui::Timeline"
+      （如 mmui::TimelineGridImageCell 等）
+    - 动态的 Name 属性包含完整信息，格式示例：
+      "王芳 Ai漫剧的发展和出海的机遇[玫瑰] 包含2张图片 8小时前 "
+      即: "昵称 正文内容 [附件描述] 时间戳"
+    """
+
+    MOMENT_TAB_NAME = "朋友圈"
+    # 朋友圈独立窗口
+    SNS_WINDOW_CLASS = "mmui::SNSWindow"
+    SNS_WINDOW_ID = "SNSWindow"
+    # 朋友圈 feed 列表
+    SNS_LIST_CLASS = "mmui::TimeLineListView"
+    SNS_LIST_ID = "sns_list"
+    # 单条动态的 ClassName 前缀
+    TIMELINE_CELL_PREFIX = "mmui::Timeline"
+    # 需要跳过的非动态 Cell（评论区、辅助行等）
+    SKIP_CELL_CLASSES = {
+        "mmui::TimelineCommentCell",  # 评论区
+        "mmui::TimelineCell",         # 辅助行（如 "余下0条"）
+    }
+
+    def __init__(self, wx: "Weixin"):
+        self._wx = wx
+
+    def _open_sns_window(self) -> auto.WindowControl:
+        """
+        打开朋友圈独立窗口并返回窗口控件。
+
+        如果窗口已存在则直接激活，否则通过导航栏点击"朋友圈"打开。
+
+        窗口: WindowControl, ClassName="mmui::SNSWindow",
+              AutomationId="SNSWindow", Name="朋友圈"
+        """
+        win = auto.WindowControl(
+            ClassName=self.SNS_WINDOW_CLASS,
+            AutomationId=self.SNS_WINDOW_ID,
+        )
+        if win.Exists(maxSearchSeconds=1):
+            win.SetActive()
+            win.SetFocus()
+            time.sleep(0.5)
+            return win
+
+        # 窗口不存在，通过导航栏打开
+        self._wx.activate()
+        self._wx.navigator.switch_to(self.MOMENT_TAB_NAME)
+        time.sleep(1)
+
+        # 等待独立窗口出现
+        if not win.Exists(maxSearchSeconds=5):
+            raise RuntimeError("朋友圈窗口未打开")
+
+        win.SetActive()
+        win.SetFocus()
+        time.sleep(0.5)
+        return win
+
+    def _find_sns_list(self, win: auto.WindowControl) -> auto.ListControl:
+        """
+        在朋友圈窗口中查找 feed 列表控件。
+
+        列表: ListControl, ClassName="mmui::TimeLineListView",
+              AutomationId="sns_list"
+        """
+        lc = win.ListControl(
+            ClassName=self.SNS_LIST_CLASS,
+            AutomationId=self.SNS_LIST_ID,
+        )
+        if not lc.Exists(maxSearchSeconds=5):
+            raise RuntimeError("未找到朋友圈列表控件 (sns_list)")
+        return lc
+
+    @staticmethod
+    def _parse_moment_name(raw_name: str, cls_name: str = "") -> MomentItem | None:
+        """
+        解析单条朋友圈动态 ListItem 的 Name 属性。
+
+        Name 格式示例（空格分隔，末尾带时间戳）：
+          "王芳 Ai漫剧的发展和出海的机遇[玫瑰] 包含2张图片 8小时前 "
+          "张三 今天天气真好 3分钟前 "
+          "七夏 放大看看[太阳] 包含1张图片 5天前 "
+
+        已知 Cell ClassName 与类型的对应关系：
+          mmui::TimelineGridImageCell  — 多图（九宫格）
+          mmui::TimelineContentCell    — 单图/大图/内容
+          mmui::TimelineVideoCell      — 视频（推测）
+          mmui::TimelineLinkCell / mmui::TimelineUrlCell — 分享链接（推测）
+
+        解析策略：
+        1. 正则匹配末尾时间戳
+        2. 提取 "包含X张图片" 中的图片数量
+        3. 检测 Name 中的视频/链接关键词
+        4. 结合 ClassName 判断类型标识
+        5. 第一个空格前为昵称，中间为正文
+        """
+        if not raw_name or not raw_name.strip():
+            return None
+
+        text = raw_name.strip()
+
+        # 匹配末尾时间戳
+        ts_pattern = (
+            r'(\d+分钟前|\d+小时前|\d+天前|昨天|前天|刚刚'
+            r'|\d{1,2}月\d{1,2}日'
+            r'|\d{4}年\d{1,2}月\d{1,2}日'
+            r')\s*$'
+        )
+        ts_match = re.search(ts_pattern, text)
+        timestamp = ""
+        body = text
+        if ts_match:
+            timestamp = ts_match.group(1)
+            body = text[:ts_match.start()].strip()
+
+        if not body:
+            return None
+
+        # 提取图片数量
+        image_count = 0
+        img_match = re.search(r'包含(\d+)张图片', body)
+        if img_match:
+            image_count = int(img_match.group(1))
+            body = (body[:img_match.start()] + body[img_match.end():]).strip()
+
+        # 检测视频关键词
+        has_video_kw = False
+        video_match = re.search(r'包含\d*段?视频', body)
+        if video_match:
+            has_video_kw = True
+            body = (body[:video_match.start()] + body[video_match.end():]).strip()
+
+        # 检测链接/分享关键词
+        has_link_kw = bool(re.search(r'链接|网页|分享', body))
+
+        # 第一个空格前为昵称
+        parts = body.split(None, 1)
+        sender = parts[0] if parts else ""
+        content = parts[1].strip() if len(parts) > 1 else ""
+
+        # --- 判断类型标识（临时变量，不存入实例） ---
+        cls_lower = cls_name.lower()
+        has_image = image_count > 0 or "image" in cls_lower
+        has_video = "video" in cls_lower or has_video_kw
+        has_link = ("link" in cls_lower or "url" in cls_lower
+                    or has_link_kw)
+        has_text = bool(content)
+
+        # 生成类型文本
+        media = ""
+        if has_image:
+            media = "图片"
+        elif has_video:
+            media = "视频"
+        elif has_link:
+            media = "分享"
+
+        if has_text and media:
+            moment_type = f"文本{media}"
+        elif has_text:
+            moment_type = "文本"
+        elif media:
+            moment_type = media
+        else:
+            moment_type = "其他"
+
+        return MomentItem(
+            type=moment_type,
+            sender=sender,
+            content=content,
+            raw_text=raw_name,
+            timestamp=timestamp,
+            image_count=image_count,
+            cell_type=cls_name,
+        )
+
+    def _collect_moments(self, lc) -> list[tuple[str, str]]:
+        """
+        收集当前可见的动态条目的 (raw_name, cls_name) 列表。
+        跳过评论区、辅助行等非动态 Cell。
+        """
+        items: list[tuple[str, str]] = []
+        for ctrl, _ in auto.WalkControl(lc):
+            if ctrl.ControlType != auto.ControlType.ListItemControl:
+                continue
+            cls_name = ctrl.ClassName or ""
+            if not cls_name.startswith(self.TIMELINE_CELL_PREFIX):
+                continue
+            if cls_name in self.SKIP_CELL_CLASSES:
+                continue
+            raw = ctrl.Name
+            if raw:
+                items.append((raw, cls_name))
+        return items
+
+    def get(self, count: int = 10, position="top") -> list[MomentItem]:
+        """
+        获取指定条数的朋友圈动态列表。
+
+        打开朋友圈独立窗口，从 mmui::TimeLineListView (sns_list) 中
+        遍历 ListItemControl 提取动态信息。
+        当可见条目不足时，通过 PageDown 键滚动加载更多内容，
+        直到收集到指定条数或连续多次滚动无新内容为止。
+
+        Args:
+            count:    要获取的动态条数，默认 10 条
+            position: 起始位置
+                - "current": 从当前滚动位置开始采集（默认）
+                - "top":     先点击"刷新"回到顶部，再从头采集
+
+        Returns:
+            MomentItem 列表
+        """
+        win = self._open_sns_window()
+
+        if position == "top":
+            # 点击"刷新"按钮回到顶部
+            refresh_btn = win.ButtonControl(
+                ClassName="mmui::XTabBarItem",
+                Name="刷新",
+            )
+            if refresh_btn.Exists(maxSearchSeconds=2):
+                refresh_btn.Click(ratioX=_rand_ratio(), ratioY=_rand_ratio())
+                time.sleep(2)  # 等待刷新和回到顶部
+
+        lc = self._find_sns_list(win)
+
+        moments: list[MomentItem] = []
+        seen_texts: set[str] = set()
+        max_scrolls = count * 3
+        no_new_count = 0
+
+        for _ in range(max_scrolls):
+            if len(moments) >= count:
+                break
+
+            # 收集当前可见的动态
+            new_found = False
+            for raw, cls_name in self._collect_moments(lc):
+                if raw in seen_texts:
+                    continue
+                item = self._parse_moment_name(raw, cls_name)
+                if item:
+                    seen_texts.add(raw)
+                    moments.append(item)
+                    new_found = True
+                if len(moments) >= count:
+                    break
+
+            if len(moments) >= count:
+                break
+
+            if not new_found:
+                no_new_count += 1
+                if no_new_count >= 5:
+                    break
+            else:
+                no_new_count = 0
+
+            # 滚动列表：先确保列表有焦点，再用 Down 键滚动
+            lc.SetFocus()
+            time.sleep(0.2)
+            lc.SendKeys("{PageDown}")
+            time.sleep(1)
+
+        return moments[:count]
+
+    # ---- 发布相关控件信息 ----
+    # 发布面板: GroupControl, ClassName="mmui::SnsPublishPanel",
+    #           AutomationId="SnsPublishPanel"
+    # 文本输入: EditControl, ClassName="mmui::XValidatorTextEdit"
+    #           位于 mmui::PublishInputView > mmui::ReplyTextView 内
+    # 表情按钮: ButtonControl, ClassName="mmui::XButton", Name="发送表情"
+    # 提醒谁看: GroupControl, ClassName="mmui::PublishComponent", Name="提醒谁看"
+    # 谁可以看: ButtonControl, ClassName="mmui::PublishPrivacyView", Name 以 "谁可以看" 开头
+    # 发表按钮: ButtonControl, ClassName="mmui::XOutlineButton", Name="发表"
+    # 取消按钮: ButtonControl, ClassName="mmui::XOutlineButton", Name="取消"
+    # 工具栏发表: ButtonControl, ClassName="mmui::XTabBarItem", Name="发表"
+
+    PUBLISH_PANEL_CLASS = "mmui::SnsPublishPanel"
+    PUBLISH_PANEL_ID = "SnsPublishPanel"
+    PUBLISH_INPUT_CLASS = "mmui::XValidatorTextEdit"
+    PUBLISH_BTN_CLASS = "mmui::XOutlineButton"
+    PUBLISH_BTN_NAME = "发表"
+    CANCEL_BTN_NAME = "取消"
+    PUBLISH_TAB_NAME = "发表"
+    TOOLBAR_CLASS = "mmui::SNSWindowToolBar"
+    TOOLBAR_ID = "sns_window_tool_bar"
+
+    def _open_publish_panel(self, win: auto.WindowControl, text_only: bool = False) -> auto.Control:
+        """
+        打开发布面板并返回面板控件。
+
+        如果面板已打开则直接返回，否则通过工具栏"发表"按钮打开。
+
+        当 text_only=True 时，移动鼠标到"发表"按钮并长按 3 秒，
+        触发纯文本发布面板（微信通过长按相机图标进入文字发布模式）。
+
+        当 text_only=False 时，直接左键点击"发表"按钮打开默认发布面板。
+
+        面板: GroupControl, ClassName="mmui::SnsPublishPanel",
+              AutomationId="SnsPublishPanel"
+        """
+        panel = win.GroupControl(
+            ClassName=self.PUBLISH_PANEL_CLASS,
+            AutomationId=self.PUBLISH_PANEL_ID,
+        )
+        if panel.Exists(maxSearchSeconds=1):
+            return panel
+
+        # 查找工具栏
+        toolbar = win.ToolBarControl(
+            ClassName=self.TOOLBAR_CLASS,
+            AutomationId=self.TOOLBAR_ID,
+        )
+        if not toolbar.Exists(maxSearchSeconds=2):
+            raise RuntimeError("未找到朋友圈工具栏")
+
+        # 查找工具栏中的"发表"按钮
+        publish_tab = toolbar.ButtonControl(
+            ClassName="mmui::XTabBarItem",
+            Name=self.PUBLISH_TAB_NAME,
+        )
+        if not publish_tab.Exists(maxSearchSeconds=2):
+            raise RuntimeError("未找到工具栏'发表'按钮")
+
+        if text_only:
+            # 纯文本发布：移动鼠标到"发表"按钮，长按 3 秒触发文字发布面板
+            rect = publish_tab.BoundingRectangle
+            cx = rect.left + int(rect.width() * _rand_ratio())
+            cy = rect.top + int(rect.height() * _rand_ratio())
+            win32api.SetCursorPos((cx, cy))
+            time.sleep(0.1)
+            win32api.mouse_event(win32con.MOUSEEVENTF_LEFTDOWN, cx, cy, 0, 0)
+            time.sleep(3)
+            win32api.mouse_event(win32con.MOUSEEVENTF_LEFTUP, cx, cy, 0, 0)
+            time.sleep(1)
+        else:
+            # 默认发布：左键点击"发表"按钮
+            publish_tab.Click(ratioX=_rand_ratio(), ratioY=_rand_ratio())
+            time.sleep(1)
+
+        # 等待发布面板出现
+        if not panel.Exists(maxSearchSeconds=5):
+            raise RuntimeError("发布面板未打开")
+
+        return panel
+
+    def _find_publish_input(self, panel: auto.Control) -> auto.EditControl:
+        """
+        在发布面板中查找文本输入框。
+
+        输入框: EditControl, ClassName="mmui::XValidatorTextEdit"
+        """
+        edit = panel.EditControl(
+            ClassName=self.PUBLISH_INPUT_CLASS,
+            searchDepth=10,
+        )
+        if not edit.Exists(maxSearchSeconds=3):
+            raise RuntimeError("未找到朋友圈文本输入框")
+        return edit
+
+    def _find_publish_button(self, panel: auto.Control) -> auto.ButtonControl:
+        """
+        在发布面板中查找"发表"按钮。
+
+        按钮: ButtonControl, ClassName="mmui::XOutlineButton", Name="发表"
+        """
+        btn = panel.ButtonControl(
+            ClassName=self.PUBLISH_BTN_CLASS,
+            Name=self.PUBLISH_BTN_NAME,
+            searchDepth=10,
+        )
+        if not btn.Exists(maxSearchSeconds=3):
+            raise RuntimeError("未找到'发表'按钮")
+        return btn
+
+    def _find_cancel_button(self, panel: auto.Control) -> auto.ButtonControl:
+        """
+        在发布面板中查找"取消"按钮。
+
+        按钮: ButtonControl, ClassName="mmui::XOutlineButton", Name="取消"
+        """
+        btn = panel.ButtonControl(
+            ClassName=self.PUBLISH_BTN_CLASS,
+            Name=self.CANCEL_BTN_NAME,
+            searchDepth=10,
+        )
+        if not btn.Exists(maxSearchSeconds=3):
+            raise RuntimeError("未找到'取消'按钮")
+        return btn
+
+    def publish_text(self, content: str) -> bool:
+        """
+        发布纯文本朋友圈。
+
+        流程:
+        1. 打开朋友圈独立窗口
+        2. 长按工具栏"发表"按钮 3 秒，进入纯文本发布模式
+        3. 在文本输入框中输入内容
+        4. 长按"发表"按钮 3 秒确认发布
+        5. 等待发布完成
+
+        Args:
+            content: 要发布的文本内容，不能为空
+
+        Returns:
+            True 发布成功
+
+        Raises:
+            ValueError: content 为空时抛出
+            RuntimeError: 发布过程中出现异常时抛出
+        """
+        if not content or not content.strip():
+            raise ValueError("发布内容不能为空")
+
+        # 1. 打开朋友圈窗口
+        win = self._open_sns_window()
+
+        # 2. 长按"发表"按钮 3 秒，进入纯文本发布模式
+        panel = self._open_publish_panel(win, text_only=True)
+        time.sleep(0.5)
+
+        # 3. 找到文本输入框并输入内容
+        edit = self._find_publish_input(panel)
+        edit.Click(ratioX=0.5, ratioY=0.5)
+        time.sleep(0.3)
+
+        # 清空输入框（如果有残留内容）
+        edit.SendKeys("{Ctrl}a{Del}")
+        time.sleep(0.2)
+
+        # 通过剪贴板粘贴文本，避免 SendKeys 丢字或特殊字符问题
+        win32clipboard.OpenClipboard()
+        win32clipboard.EmptyClipboard()
+        win32clipboard.SetClipboardData(win32con.CF_UNICODETEXT, content)
+        win32clipboard.CloseClipboard()
+        edit.SendKeys("{Ctrl}v")
+        time.sleep(0.5)
+
+        # 4. 点击"发表"按钮
+        publish_btn = self._find_publish_button(panel)
+
+        # 检查按钮是否可用（输入内容后应变为可用）
+        for _ in range(10):
+            if publish_btn.IsEnabled:
+                break
+            time.sleep(0.3)
+        else:
+            raise RuntimeError("'发表'按钮未启用，可能内容未正确输入")
+
+        # 长按"发表"按钮 3 秒（微信要求长按确认发布）
+        # 使用 win32api 底层鼠标事件实现长按
+        rect = publish_btn.BoundingRectangle
+        cx = rect.left + int(rect.width() * _rand_ratio())
+        cy = rect.top + int(rect.height() * _rand_ratio())
+        win32api.SetCursorPos((cx, cy))
+        time.sleep(0.1)
+        win32api.mouse_event(win32con.MOUSEEVENTF_LEFTDOWN, cx, cy, 0, 0)
+        time.sleep(3)
+        win32api.mouse_event(win32con.MOUSEEVENTF_LEFTUP, cx, cy, 0, 0)
+        time.sleep(1)
+
+        # 5. 等待发布面板消失（表示发布成功）
+        for _ in range(30):
+            if not panel.Exists(maxSearchSeconds=1):
+                logger.info("朋友圈文本发布成功")
+                return True
+            time.sleep(1)
+
+        raise RuntimeError("发布超时，发布面板未关闭")
+
+    def cancel_publish(self):
+        """
+        取消当前发布操作。
+
+        如果发布面板已打开，点击"取消"按钮关闭面板。
+        """
+        win = self._open_sns_window()
+        panel = win.GroupControl(
+            ClassName=self.PUBLISH_PANEL_CLASS,
+            AutomationId=self.PUBLISH_PANEL_ID,
+        )
+        if not panel.Exists(maxSearchSeconds=1):
+            return  # 面板未打开，无需取消
+
+        cancel_btn = self._find_cancel_button(panel)
+        cancel_btn.Click(ratioX=_rand_ratio(), ratioY=_rand_ratio())
+        time.sleep(0.5)
+
+    # ---- 工具栏按钮名称 ----
+    REFRESH_BTN_NAME = "刷新"
+    MINIMIZE_BTN_NAME = "最小化"
+    CLOSE_BTN_NAME = "关闭"
+
+    def _find_toolbar_button(self, win: auto.WindowControl, name: str) -> auto.ButtonControl:
+        """
+        在朋友圈工具栏中查找指定名称的按钮。
+
+        工具栏: ToolBarControl, ClassName="mmui::SNSWindowToolBar",
+                AutomationId="sns_window_tool_bar"
+        按钮:   ButtonControl, ClassName="mmui::XTabBarItem"
+
+        Args:
+            win:  朋友圈窗口控件
+            name: 按钮名称（如 "刷新"、"最小化"、"关闭"）
+
+        Returns:
+            ButtonControl 控件
+
+        Raises:
+            RuntimeError: 未找到工具栏或按钮时抛出
+        """
+        toolbar = win.ToolBarControl(
+            ClassName=self.TOOLBAR_CLASS,
+            AutomationId=self.TOOLBAR_ID,
+        )
+        if not toolbar.Exists(maxSearchSeconds=2):
+            raise RuntimeError("未找到朋友圈工具栏")
+
+        btn = toolbar.ButtonControl(
+            ClassName="mmui::XTabBarItem",
+            Name=name,
+        )
+        if not btn.Exists(maxSearchSeconds=2):
+            raise RuntimeError(f"未找到工具栏'{name}'按钮")
+        return btn
+
+    def refresh(self):
+        """
+        刷新朋友圈。
+
+        点击工具栏"刷新"按钮，回到列表顶部并加载最新动态。
+        """
+        win = self._open_sns_window()
+        btn = self._find_toolbar_button(win, self.REFRESH_BTN_NAME)
+        btn.Click(ratioX=_rand_ratio(), ratioY=_rand_ratio())
+        time.sleep(2)
+
+    def minimize(self, by_event: bool = False):
+        """
+        最小化朋友圈窗口。
+
+        Args:
+            by_event: False — 点击工具栏"最小化"按钮（默认）
+                      True  — 通过 WindowPattern 发送最小化事件
+        """
+        win = self._open_sns_window()
+        if by_event:
+            # 通过 WindowPattern 最小化
+            pattern = win.GetWindowPattern()
+            if pattern:
+                pattern.SetWindowVisualState(auto.WindowVisualState.Minimized)
+            else:
+                raise RuntimeError("朋友圈窗口不支持 WindowPattern")
+        else:
+            btn = self._find_toolbar_button(win, self.MINIMIZE_BTN_NAME)
+            btn.Click(ratioX=_rand_ratio(), ratioY=_rand_ratio())
+        time.sleep(0.5)
+
+    def close(self, by_event: bool = False):
+        """
+        关闭朋友圈窗口。
+
+        Args:
+            by_event: False — 点击工具栏"关闭"按钮（默认）
+                      True  — 通过 WindowPattern 发送关闭事件
+        """
+        win = self._open_sns_window()
+        if by_event:
+            pattern = win.GetWindowPattern()
+            if pattern:
+                pattern.Close()
+            else:
+                raise RuntimeError("朋友圈窗口不支持 WindowPattern")
+        else:
+            btn = self._find_toolbar_button(win, self.CLOSE_BTN_NAME)
+            btn.Click(ratioX=_rand_ratio(), ratioY=_rand_ratio())
+        time.sleep(0.5)
+
+    def restore(self):
+        """
+        恢复（还原）朋友圈窗口。
+
+        当窗口处于最小化状态时，通过 WindowPattern 将其恢复为正常显示，
+        并激活到前台。
+        """
+        win = auto.WindowControl(
+            ClassName=self.SNS_WINDOW_CLASS,
+            AutomationId=self.SNS_WINDOW_ID,
+        )
+        if not win.Exists(maxSearchSeconds=3):
+            raise RuntimeError("朋友圈窗口不存在，无法恢复")
+
+        pattern = win.GetWindowPattern()
+        if pattern:
+            pattern.SetWindowVisualState(auto.WindowVisualState.Normal)
+        else:
+            raise RuntimeError("朋友圈窗口不支持 WindowPattern")
+
+        win.SetActive()
+        win.SetFocus()
+        time.sleep(0.5)
+
+    def __str__(self) -> str:
+        return "Moment(朋友圈)"
 
 
 def _rand_ratio() -> float:
@@ -3196,6 +3841,7 @@ class Weixin:
         self.navigator = Navigator(self)
         self.session = Session(self)
         self.file_manager = FileManager(self)
+        self.moment = Moment(self)
 
     @staticmethod
     def _is_process_running(name: str) -> bool:
@@ -3616,8 +4262,5 @@ class Weixin:
 
 if __name__ == "__main__":
     wx = Weixin()
-
-    def on_message(chat: SeparateChat, message: Message):
-        logger.info("[%s] %s", chat.current_name, message)
-
-    wx.listen(on_message)
+    wx.moment.minimize(by_event=True)
+    wx.moment.restore()
