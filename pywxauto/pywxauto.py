@@ -3222,6 +3222,249 @@ class Chat:
 
         return self.check_text_message_status()
 
+    # ---- 发送收藏相关控件信息 ----
+    # 工具栏: ToolBarControl, AutomationId="tool_bar_accessible"
+    # 发送收藏按钮: ButtonControl, Name="发送收藏", ClassName="mmui::XButton"
+    #   注意: 该按钮嵌套在 GroupControl(mmui::XView) 内
+    # 收藏选择面板:
+    #   标题: TextControl, ClassName="mmui::XTextView", Name="发送收藏给"{联系人名}""
+    #   分类列表: ListControl, ClassName="mmui::StickyHeaderRecyclerListView",
+    #             AutomationId="fav_category_list"
+    #   收藏详情列表: ListControl, ClassName="mmui::XRecyclerTableView",
+    #                 AutomationId="fav_detail_list"
+    #     搜索前 Name="全部收藏"，搜索后 Name=搜索关键词
+    #     收藏项: ListItemControl, ClassName="mmui::XTableCell"
+    #       第一个 ListItem 为空（表头），后续为实际收藏项
+    #       Name 格式: "{内容摘要}{日期}" 如 "小程序写诗喂狗2024年5月3日"
+    #   搜索框: EditControl, ClassName="mmui::XValidatorTextEdit", Name="搜索"
+    #     位于分类列表上方，注意主窗口中可能有多个搜索框，
+    #     需通过位置（在收藏面板区域内）区分
+    #   发送按钮: ButtonControl, ClassName="mmui::XOutlineButton", Name="发送"
+    #     选中收藏项后才可用（初始为 disabled）
+    #   取消按钮: ButtonControl, ClassName="mmui::XOutlineButton", Name="取消"
+
+    FAV_SEND_BTN_NAME = "发送收藏"
+    FAV_SEND_BTN_CLASS = "mmui::XButton"
+    FAV_DETAIL_LIST_ID = "fav_detail_list"
+    FAV_DETAIL_LIST_CLASS = "mmui::XRecyclerTableView"
+    FAV_ITEM_CLASS = "mmui::XTableCell"
+    FAV_SEARCH_CLASS = "mmui::XValidatorTextEdit"
+    FAV_SEARCH_NAME = "搜索"
+    FAV_SEND_CONFIRM_NAME = "发送"
+    FAV_SEND_CONFIRM_CLASS = "mmui::XOutlineButton"
+    FAV_CANCEL_NAME = "取消"
+    FAV_CANCEL_CLASS = "mmui::XOutlineButton"
+
+    def _open_collection_panel(self):
+        """
+        打开收藏选择面板。
+
+        点击工具栏中的"发送收藏"按钮，弹出收藏选择面板。
+        如果面板已打开则直接返回。
+
+        Returns:
+            收藏详情列表控件 (fav_detail_list)
+
+        Raises:
+            RuntimeError: 未找到工具栏或按钮时抛出
+        """
+        # 检查面板是否已打开
+        detail_list = self._win.ListControl(
+            ClassName=self.FAV_DETAIL_LIST_CLASS,
+            AutomationId=self.FAV_DETAIL_LIST_ID,
+        )
+        if detail_list.Exists(maxSearchSeconds=1):
+            return detail_list
+
+        # 查找工具栏
+        toolbar = self._win.ToolBarControl(
+            AutomationId="tool_bar_accessible",
+        )
+        if not toolbar.Exists(maxSearchSeconds=2):
+            raise RuntimeError("未找到聊天工具栏")
+
+        # 查找"发送收藏"按钮（嵌套在 GroupControl 内）
+        fav_btn = toolbar.ButtonControl(
+            ClassName=self.FAV_SEND_BTN_CLASS,
+            Name=self.FAV_SEND_BTN_NAME,
+            searchDepth=5,
+        )
+        if not fav_btn.Exists(maxSearchSeconds=2):
+            raise RuntimeError("未找到'发送收藏'按钮")
+
+        fav_btn.Click(ratioX=_rand_ratio(), ratioY=_rand_ratio())
+        time.sleep(0.5)
+
+        # 等待收藏面板出现
+        if not detail_list.Exists(maxSearchSeconds=5):
+            raise RuntimeError("收藏选择面板未打开")
+
+        return detail_list
+
+    def _close_collection_panel(self):
+        """
+        关闭收藏选择面板。
+
+        点击面板中的"取消"按钮关闭面板。
+        """
+        cancel_btn = self._win.ButtonControl(
+            ClassName=self.FAV_CANCEL_CLASS,
+            Name=self.FAV_CANCEL_NAME,
+        )
+        if cancel_btn.Exists(maxSearchSeconds=1):
+            cancel_btn.Click(ratioX=_rand_ratio(), ratioY=_rand_ratio())
+            time.sleep(0.3)
+
+    def _find_fav_search_edit(self) -> auto.EditControl:
+        """
+        在收藏面板中查找搜索框。
+
+        注意: 主窗口中可能存在多个 Name="搜索" 的 EditControl，
+        需要通过收藏面板区域来定位正确的搜索框。
+        收藏面板的搜索框位于分类列表上方区域。
+
+        搜索框: EditControl, ClassName="mmui::XValidatorTextEdit", Name="搜索"
+        """
+        # 遍历所有搜索框，找到位于收藏面板区域内的那个
+        # 收藏面板的搜索框通常是第一个匹配的（位于面板标题下方）
+        detail_list = self._win.ListControl(
+            ClassName=self.FAV_DETAIL_LIST_CLASS,
+            AutomationId=self.FAV_DETAIL_LIST_ID,
+        )
+        if not detail_list.Exists(0, 0):
+            raise RuntimeError("收藏面板未打开，无法查找搜索框")
+
+        detail_rect = detail_list.BoundingRectangle
+
+        # 查找所有搜索框
+        edit = self._win.EditControl(
+            ClassName=self.FAV_SEARCH_CLASS,
+            Name=self.FAV_SEARCH_NAME,
+        )
+        # 第一个搜索框通常就是收藏面板内的
+        # 通过检查其位置是否在收藏面板区域附近来确认
+        if edit.Exists(maxSearchSeconds=2):
+            edit_rect = edit.BoundingRectangle
+            # 搜索框应该在详情列表的左侧或上方区域
+            if edit_rect.top >= detail_rect.top - 100 and edit_rect.left < detail_rect.left:
+                return edit
+
+        raise RuntimeError("未找到收藏面板搜索框")
+
+    def _find_collection_item(self, detail_list, keywords) -> Optional[auto.ListItemControl]:
+        """
+        在收藏详情列表中查找第一个有效的搜索结果项。
+
+        遍历 fav_detail_list 中的 ListItemControl，
+        跳过第一个空的表头项，返回第一个有 Name 的结果项。
+
+        Args:
+            detail_list: 收藏详情列表控件
+
+        Returns:
+            匹配的 ListItemControl，未找到返回 None
+        """
+        for ctrl, _ in auto.WalkControl(detail_list):
+            if ctrl.ControlType != auto.ControlType.ListItemControl:
+                continue
+            if not ctrl.Name:
+                continue
+            cls_name = ctrl.ClassName or ""
+            if cls_name != self.FAV_ITEM_CLASS:
+                continue
+            # 返回第一个有 Name 的搜索结果
+            return ctrl
+        return None
+
+    def send_collection(self, collection_keywords: str) -> bool:
+        """
+        在当前会话中发送收藏内容。
+
+        流程:
+        1. 点击工具栏"发送收藏"按钮，打开收藏选择面板
+        2. 在收藏面板的搜索框中输入 collection_keywords
+        3. 等待搜索结果出现在右侧详情列表中
+        4. 选中第一个搜索结果
+        5. 点击"发送"按钮发送
+
+        Args:
+            collection_keywords: 搜索关键词，输入到收藏面板的搜索框中。
+
+        Returns:
+            True 发送成功
+
+        Raises:
+            ValueError: collection_keywords 为空时抛出
+            RuntimeError: 未找到匹配的收藏项或发送失败时抛出
+        """
+        if not collection_keywords:
+            raise ValueError("collection_keywords 不能为空")
+
+        if self._wx:
+            self._wx.activate()
+
+        # 1. 打开收藏选择面板
+        self._open_collection_panel()
+        time.sleep(0.5)
+
+        # 2. 在搜索框中输入关键词
+        search_edit = self._find_fav_search_edit()
+        search_edit.Click(ratioX=_rand_ratio(), ratioY=_rand_ratio())
+        time.sleep(0.3)
+        search_edit.GetValuePattern().SetValue(collection_keywords)
+        time.sleep(1)  # 等待搜索结果加载
+
+        # 3. 获取搜索后的详情列表
+        detail_list = self._win.ListControl(
+            ClassName=self.FAV_DETAIL_LIST_CLASS,
+            AutomationId=self.FAV_DETAIL_LIST_ID,
+        )
+        if not detail_list.Exists(maxSearchSeconds=3):
+            self._close_collection_panel()
+            raise RuntimeError("搜索后未找到收藏详情列表")
+
+        # 4. 选中第一个搜索结果
+        matched_item = self._find_collection_item(detail_list, collection_keywords)
+
+        if not matched_item:
+            self._close_collection_panel()
+            raise RuntimeError(f"未找到匹配的收藏项: {collection_keywords}")
+
+        matched_item.Click(ratioX=_rand_ratio(), ratioY=_rand_ratio())
+        time.sleep(0.3)
+
+        # 5. 点击"发送"按钮
+        send_btn = self._win.ButtonControl(
+            ClassName=self.FAV_SEND_CONFIRM_CLASS,
+            Name=self.FAV_SEND_CONFIRM_NAME,
+        )
+        if not send_btn.Exists(maxSearchSeconds=2):
+            self._close_collection_panel()
+            raise RuntimeError("未找到'发送'按钮")
+
+        # 等待按钮变为可用
+        for _ in range(10):
+            if send_btn.IsEnabled:
+                break
+            time.sleep(0.3)
+        else:
+            self._close_collection_panel()
+            raise RuntimeError("'发送'按钮未启用，可能收藏项未正确选中")
+
+        send_btn.Click(ratioX=_rand_ratio(), ratioY=_rand_ratio())
+        time.sleep(0.5)
+
+        # 6. 验证面板已关闭（表示发送成功）
+        check_list = self._win.ListControl(
+            ClassName=self.FAV_DETAIL_LIST_CLASS,
+            AutomationId=self.FAV_DETAIL_LIST_ID,
+        )
+        if check_list.Exists(maxSearchSeconds=1):
+            raise RuntimeError("发送收藏失败，选择面板未关闭")
+
+        logger.info("收藏发送成功")
+        return True
+
     def _add_at_members(self, chat_input: auto.EditControl,
                         at_members: list[str]):
         """
@@ -3685,6 +3928,11 @@ class SeparateChat(Chat):
         self.activate()
         return super().send_room_at(content, at_members)
 
+    def send_collection(self, collection_keywords: str) -> bool:
+        """发送收藏内容（重写以添加自动激活）"""
+        self.activate()
+        return super().send_collection(collection_keywords)
+
     def voice_call(self) -> "VoipCallWindow":
         """发起语音通话（重写以添加自动激活）"""
         self.activate()
@@ -3968,6 +4216,11 @@ class Weixin:
         """打开指定群聊会话并 @指定成员发送消息"""
         chat = self.open_session_by_search(nickname)
         return chat.send_room_at(content, at_members)
+
+    def send_collection(self, nickname: str, collection_keywords: str) -> bool:
+        """打开指定会话并发送收藏内容"""
+        chat = self.open_session_by_search(nickname)
+        return chat.send_collection(collection_keywords)
 
     def create_note(self) -> "NoteEditorWindow":
         """新建笔记，返回笔记编辑窗口对象"""
@@ -4261,4 +4514,4 @@ class Weixin:
 
 if __name__ == "__main__":
     wx = Weixin()
-    wx.file_manager.open("表格")
+    wx.send_collection("milo", "Python")
