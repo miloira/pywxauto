@@ -910,7 +910,7 @@ class Moment:
         # 通过剪贴板粘贴文本，避免 SendKeys 丢字或特殊字符问题
         win32clipboard.OpenClipboard()
         win32clipboard.EmptyClipboard()
-        win32clipboard.SetClipboardData(win32con.CF_UNICODETEXT, content)
+        win32clipboard.SetClipboardText(content, win32con.CF_UNICODETEXT)
         win32clipboard.CloseClipboard()
         edit.SendKeys("{Ctrl}v")
         time.sleep(0.5)
@@ -3115,7 +3115,7 @@ class Chat:
         # 通过剪贴板粘贴文本
         win32clipboard.OpenClipboard()
         win32clipboard.EmptyClipboard()
-        win32clipboard.SetClipboardData(win32con.CF_UNICODETEXT, content)
+        win32clipboard.SetClipboardText(content, win32con.CF_UNICODETEXT)
         win32clipboard.CloseClipboard()
         field.SendKeys("{Ctrl}v")
         time.sleep(0.2)
@@ -3191,7 +3191,7 @@ class Chat:
         if content:
             win32clipboard.OpenClipboard()
             win32clipboard.EmptyClipboard()
-            win32clipboard.SetClipboardData(win32con.CF_UNICODETEXT, content)
+            win32clipboard.SetClipboardText(content, win32con.CF_UNICODETEXT)
             win32clipboard.CloseClipboard()
             field.SendKeys("{Ctrl}v")
             time.sleep(0.2)
@@ -4499,4 +4499,4 @@ class Weixin:
 
 if __name__ == "__main__":
     wx = Weixin()
-    wx.moment.publish_text("测试")
+    wx.send_text("文件传输助手", "123")
