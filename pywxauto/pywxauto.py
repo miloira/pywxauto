@@ -1832,15 +1832,8 @@ class FileManager:
         # 先关闭已有的文件管理器窗口
         self.close()
 
-        # 点击"更多"按钮
-        more_btn = self._wx.window.ButtonControl(
-            AutomationId=self.MORE_BTN_AUTOMATION_ID, searchDepth=5
-        )
-        if not more_btn.Exists(maxSearchSeconds=3):
-            raise RuntimeError("未找到'更多'按钮")
-
-        more_btn.Click(simulateMove=False)
-        time.sleep(0.5)
+        # 通过导航栏 TabBar 缩小搜索范围，点击"更多"按钮
+        self._wx.navigator.switch_to("更多")
 
         # 点击"聊天文件"按钮
         chat_file_btn = self._wx.window.ButtonControl(
@@ -2227,18 +2220,24 @@ class Navigator:
         "朋友圈": "朋友圈",
         "视频号": "视频号",
         "搜一搜": "搜一搜",
+        "手机": "手机",
+        "更多": "更多",
     }
 
     def __init__(self, wx: "Weixin"):
         self._wx = wx
         self._win = wx.window
-        self._tabbar = self._win.ToolBarControl(ClassName="mmui::MainTabBar")
+        self._tabbar = self._win.ToolBarControl(ClassName="mmui::MainTabBar", searchDepth=5)
 
     def switch_to(self, tab_name: str):
         if tab_name not in self.TABS:
             raise ValueError(f"未知标签页: {tab_name}，可选: {list(self.TABS.keys())}")
 
-        btn = self._tabbar.ButtonControl(ClassName="mmui::XTabBarItem", Name=self.TABS[tab_name])
+        if tab_name not in ["手机", "更多"]:
+            btn = self._tabbar.ButtonControl(ClassName="mmui::XTabBarItem", Name=self.TABS[tab_name], searchDepth=1)
+        else:
+            btn = self._tabbar.ButtonControl(ClassName="mmui::MainTabBarSettingView", Name=self.TABS[tab_name], searchDepth=1)
+
         btn.Click(ratioX=_rand_ratio(), ratioY=_rand_ratio())
 
     def __str__(self) -> str:
@@ -4262,5 +4261,4 @@ class Weixin:
 
 if __name__ == "__main__":
     wx = Weixin()
-    wx.moment.minimize(by_event=True)
-    wx.moment.restore()
+    wx.file_manager.open("表格")
