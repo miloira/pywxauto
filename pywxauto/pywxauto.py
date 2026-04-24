@@ -809,7 +809,7 @@ class Moment:
             win32api.SetCursorPos((cx, cy))
             time.sleep(0.1)
             win32api.mouse_event(win32con.MOUSEEVENTF_LEFTDOWN, cx, cy, 0, 0)
-            time.sleep(3)
+            time.sleep(2)
             win32api.mouse_event(win32con.MOUSEEVENTF_LEFTUP, cx, cy, 0, 0)
             time.sleep(1)
         else:
@@ -846,7 +846,7 @@ class Moment:
         btn = panel.ButtonControl(
             ClassName=self.PUBLISH_BTN_CLASS,
             Name=self.PUBLISH_BTN_NAME,
-            searchDepth=10,
+            searchDepth=3,
         )
         if not btn.Exists(maxSearchSeconds=3):
             raise RuntimeError("未找到'发表'按钮")
@@ -917,26 +917,7 @@ class Moment:
 
         # 4. 点击"发表"按钮
         publish_btn = self._find_publish_button(panel)
-
-        # 检查按钮是否可用（输入内容后应变为可用）
-        for _ in range(10):
-            if publish_btn.IsEnabled:
-                break
-            time.sleep(0.3)
-        else:
-            raise RuntimeError("'发表'按钮未启用，可能内容未正确输入")
-
-        # 长按"发表"按钮 3 秒（微信要求长按确认发布）
-        # 使用 win32api 底层鼠标事件实现长按
-        rect = publish_btn.BoundingRectangle
-        cx = rect.left + int(rect.width() * _rand_ratio())
-        cy = rect.top + int(rect.height() * _rand_ratio())
-        win32api.SetCursorPos((cx, cy))
-        time.sleep(0.1)
-        win32api.mouse_event(win32con.MOUSEEVENTF_LEFTDOWN, cx, cy, 0, 0)
-        time.sleep(3)
-        win32api.mouse_event(win32con.MOUSEEVENTF_LEFTUP, cx, cy, 0, 0)
-        time.sleep(1)
+        publish_btn.Click(ratioX=_rand_ratio(), ratioY=_rand_ratio())
 
         # 5. 等待发布面板消失（表示发布成功）
         for _ in range(30):
@@ -2898,12 +2879,16 @@ class Chat:
         "title_h_view.title_left_v_view_.title_left_info_v_view_.big_title_line_h_view.current_chat_name_label",
         # 4.1.2.17+
         "content_view.top_content_view.title_h_view.title_left_v_view_.title_left_info_v_view_.big_title_line_h_view.current_chat_name_label",
+        # 4.1.8.28
+        "content_view.top_content_view.title_h_view.left_v_view.left_content_v_view.left_ui_.big_title_line_h_view.current_chat_name_label",
     ]
     MEMBER_COUNT_LABEL_IDS = [
         # 4.1.2.17
         "title_h_view.title_left_v_view_.title_left_info_v_view_.big_title_line_h_view.current_chat_count_label",
         # 4.1.2.17+
         "content_view.top_content_view.title_h_view.title_left_v_view_.title_left_info_v_view_.big_title_line_h_view.current_chat_count_label",
+        # 4.1.8.28
+        "content_view.top_content_view.title_h_view.left_v_view.left_content_v_view.left_ui_.big_title_line_h_view.current_chat_count_label",
     ]
 
     def __init__(self, wx: "Weixin"):
@@ -4514,4 +4499,4 @@ class Weixin:
 
 if __name__ == "__main__":
     wx = Weixin()
-    wx.send_collection("milo", "Python")
+    wx.moment.publish_text("测试")
