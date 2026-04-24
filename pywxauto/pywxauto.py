@@ -2651,6 +2651,7 @@ class Session:
 
     def _click_quick_action_button(self):
         """点击快捷操作按钮"""
+        self._wx.activate()
         btn = self._win.ButtonControl(
             ClassName="mmui::XButton",
             Name="快捷操作",
@@ -2688,9 +2689,111 @@ class Session:
         self._click_quick_action_button()
         self._click_quick_action_item(item_name)
 
-    def create_group_chat(self):
-        """发起群聊"""
+    def create_room(self, nickname_list: list[str]):
+        """
+        发起群聊。
+
+        nickname_list: 好友昵称列表，至少需要两个好友才能创建群聊。
+
+        流程：
+        1. 通过快捷操作菜单打开"发起群聊"弹窗
+        2. 在搜索框中逐个输入好友昵称
+        3. 点击搜索结果中的第一条联系人进行勾选
+        4. 全部添加完成后，点击"完成"按钮
+
+        窗口控件信息：
+        - 发起群聊窗口: mmui::SessionPickerWindow, Name="微信发起群聊"
+        - 搜索框: mmui::XValidatorTextEdit, Name="搜索"
+          (位于左侧 mmui::XSearchField 内)
+        - 搜索前联系人列表: mmui::StickyHeaderRecyclerListView,
+          AutomationId="sp_to_select_contact_list"
+        - 搜索前联系人行: mmui::SPSelectionContactRow (CheckBoxControl)
+        - 搜索后结果列表: mmui::XTableView,
+          AutomationId="sp_search_new_chat_result_list"
+        - 搜索后联系人行: mmui::SearchContactCellView (CheckBoxControl)
+        - 完成按钮: mmui::XOutlineButton, AutomationId="confirm_btn", Name="完成"
+        """
+        if not nickname_list or len(nickname_list) < 2:
+            raise ValueError("至少需要两个好友昵称才能创建群聊")
+
         self._quick_action("发起群聊")
+
+        # --- 第1步：等待发起群聊窗口出现 ---
+        picker_win = self._win.WindowControl(
+            ClassName="mmui::SessionPickerWindow",
+        )
+        if not picker_win.Exists(maxSearchSeconds=3):
+            raise RuntimeError("发起群聊窗口未打开")
+
+        # 定位搜索框（左侧 XSearchField 内的搜索输入框）
+        search_field = picker_win.GroupControl(
+            ClassName="mmui::XSearchField",
+        )
+        if not search_field.Exists(maxSearchSeconds=2):
+            raise RuntimeError("发起群聊窗口中未找到搜索区域")
+
+        search_edit = search_field.EditControl(
+            ClassName="mmui::XValidatorTextEdit", Name="搜索",
+        )
+        if not search_edit.Exists(maxSearchSeconds=2):
+            raise RuntimeError("发起群聊窗口中未找到搜索框")
+
+        # --- 第2步：逐个搜索并勾选好友 ---
+        for nickname in nickname_list:
+            # 点击搜索框获取焦点
+            search_edit.Click(ratioX=_rand_ratio(), ratioY=_rand_ratio())
+            time.sleep(0.3)
+            # 先清空搜索框，确保上一次搜索内容被清除
+            search_edit.SendKeys("{Ctrl}a{Del}")
+            time.sleep(0.5)
+            # 输入昵称进行搜索（使用 SendKeys 触发键盘事件以激活搜索）
+            search_edit.SendKeys(nickname, interval=0.05)
+            time.sleep(1.5)
+
+            # 关键：每次都从桌面根节点重新搜索 picker_win，
+            # 彻底绕过 uiautomation 的控件缓存问题。
+            # 因为 picker_win 是微信主窗口的子窗口，
+            # 如果复用旧的 picker_win 引用，其子控件树可能已过时，
+            # 导致第二次搜索时找到的是旧的/无效的搜索结果列表。
+            fresh_picker = auto.WindowControl(
+                ClassName="mmui::SessionPickerWindow",
+            )
+            if not fresh_picker.Exists(maxSearchSeconds=3):
+                raise RuntimeError("发起群聊窗口已关闭")
+
+            # 在最新的窗口中查找搜索结果列表
+            result_list = fresh_picker.ListControl(
+                ClassName="mmui::XTableView",
+                AutomationId="sp_search_new_chat_result_list",
+            )
+            if not result_list.Exists(maxSearchSeconds=5):
+                raise RuntimeError(f"搜索联系人 '{nickname}' 后未出现结果列表")
+
+            # 在搜索结果列表中查找第一条联系人并点击
+            contact_row = result_list.CheckBoxControl(
+                ClassName="mmui::SearchContactCellView",
+            )
+            if not contact_row.Exists(maxSearchSeconds=3):
+                raise RuntimeError(f"未找到联系人: {nickname}")
+            contact_row.Click(ratioX=_rand_ratio(), ratioY=_rand_ratio())
+            time.sleep(0.5)
+
+            # 勾选后清空搜索框，让UI恢复到默认联系人列表状态
+            search_edit.Click(ratioX=_rand_ratio(), ratioY=_rand_ratio())
+            time.sleep(0.2)
+            search_edit.SendKeys("{Ctrl}a{Del}")
+            time.sleep(0.5)
+
+        # --- 第4步：点击完成按钮 ---
+        confirm_btn = picker_win.ButtonControl(
+            ClassName="mmui::XOutlineButton",
+            AutomationId="confirm_btn",
+            Name="完成",
+        )
+        if not confirm_btn.Exists(maxSearchSeconds=2):
+            raise RuntimeError("未找到完成按钮")
+        confirm_btn.Click(ratioX=_rand_ratio(), ratioY=_rand_ratio())
+        time.sleep(0.5)
 
     def add_friend(self, keyword: str, message: Optional[str] = None, remark: Optional[str] = None,
                    permission: Optional[str] = None, hide_my_posts: bool = False,
@@ -4499,4 +4602,4 @@ class Weixin:
 
 if __name__ == "__main__":
     wx = Weixin()
-    wx.send_text("文件传输助手", "123")
+    wx.session.create_room(["七夏", "写诗喂狗"])
