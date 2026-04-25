@@ -2725,72 +2725,91 @@ class Session:
         if not picker_win.Exists(maxSearchSeconds=3):
             raise RuntimeError("发起群聊窗口未打开")
 
-        # 定位搜索框（左侧 XSearchField 内的搜索输入框）
-        search_field = picker_win.GroupControl(
-            ClassName="mmui::XSearchField",
-        )
-        if not search_field.Exists(maxSearchSeconds=2):
-            raise RuntimeError("发起群聊窗口中未找到搜索区域")
-
-        search_edit = search_field.EditControl(
-            ClassName="mmui::XValidatorTextEdit", Name="搜索",
-        )
-        if not search_edit.Exists(maxSearchSeconds=2):
-            raise RuntimeError("发起群聊窗口中未找到搜索框")
-
         # --- 第2步：逐个搜索并勾选好友 ---
         for nickname in nickname_list:
-            # 点击搜索框获取焦点
-            search_edit.Click(ratioX=_rand_ratio(), ratioY=_rand_ratio())
-            time.sleep(0.3)
-            # 先清空搜索框，确保上一次搜索内容被清除
-            search_edit.SendKeys("{Ctrl}a{Del}")
-            time.sleep(0.5)
-            # 输入昵称进行搜索（使用 SendKeys 触发键盘事件以激活搜索）
-            search_edit.SendKeys(nickname, interval=0.05)
-            time.sleep(1.5)
-
-            # 关键：每次都从桌面根节点重新搜索 picker_win，
-            # 彻底绕过 uiautomation 的控件缓存问题。
-            # 因为 picker_win 是微信主窗口的子窗口，
-            # 如果复用旧的 picker_win 引用，其子控件树可能已过时，
-            # 导致第二次搜索时找到的是旧的/无效的搜索结果列表。
-            fresh_picker = auto.WindowControl(
+            # 从主窗口查找 SessionPickerWindow（它是主窗口的直接子窗口），
+            # 用 searchDepth=1 避免深入遍历右侧 SPDetailView 中的
+            # 无限递归控件树 (SPChoiceContactRow → QWidget → SPChoiceContactRow → ...)
+            fresh_picker = self._win.WindowControl(
                 ClassName="mmui::SessionPickerWindow",
+                searchDepth=1,
             )
             if not fresh_picker.Exists(maxSearchSeconds=3):
                 raise RuntimeError("发起群聊窗口已关闭")
+            fresh_picker.SetActive()
+            fresh_picker.SetFocus()
+            time.sleep(0.3)
 
-            # 在最新的窗口中查找搜索结果列表
-            result_list = fresh_picker.ListControl(
+            # 从左侧 SearchField 容器中查找搜索框，避开右侧面板
+            search_field = fresh_picker.GroupControl(
+                ClassName="mmui::XSearchField",
+                searchDepth=3,
+            )
+            if not search_field.Exists(maxSearchSeconds=2):
+                raise RuntimeError("发起群聊窗口中未找到搜索区域")
+            search_edit = search_field.EditControl(
+                ClassName="mmui::XValidatorTextEdit", Name="搜索",
+                searchDepth=1,
+            )
+            if not search_edit.Exists(maxSearchSeconds=2):
+                raise RuntimeError("发起群聊窗口中未找到搜索框")
+
+            # 清空搜索框并通过键盘输入昵称
+            search_edit.Click(ratioX=_rand_ratio(), ratioY=_rand_ratio())
+            time.sleep(0.3)
+            search_edit.SendKeys("{Ctrl}a{Del}")
+            time.sleep(0.3)
+            search_edit.SendKeys(nickname, interval=0.05)
+            time.sleep(1.5)
+
+            # 从左侧 SearchContactNewChatView 容器中查找搜索结果列表
+            search_view = fresh_picker.GroupControl(
+                ClassName="mmui::SearchContactNewChatView",
+                searchDepth=3,
+            )
+            if not search_view.Exists(maxSearchSeconds=3):
+                raise RuntimeError(f"搜索联系人 '{nickname}' 后未出现搜索视图")
+
+            result_list = search_view.ListControl(
                 ClassName="mmui::XTableView",
                 AutomationId="sp_search_new_chat_result_list",
+                searchDepth=1,
             )
             if not result_list.Exists(maxSearchSeconds=5):
                 raise RuntimeError(f"搜索联系人 '{nickname}' 后未出现结果列表")
 
-            # 在搜索结果列表中查找第一条联系人并点击
             contact_row = result_list.CheckBoxControl(
                 ClassName="mmui::SearchContactCellView",
+                searchDepth=1,
             )
             if not contact_row.Exists(maxSearchSeconds=3):
                 raise RuntimeError(f"未找到联系人: {nickname}")
+
             contact_row.Click(ratioX=_rand_ratio(), ratioY=_rand_ratio())
             time.sleep(0.5)
 
-            # 勾选后清空搜索框，让UI恢复到默认联系人列表状态
-            search_edit.Click(ratioX=_rand_ratio(), ratioY=_rand_ratio())
-            time.sleep(0.2)
-            search_edit.SendKeys("{Ctrl}a{Del}")
-            time.sleep(0.5)
-
         # --- 第4步：点击完成按钮 ---
-        confirm_btn = picker_win.ButtonControl(
+        # 先定位右侧 SPDetailView（searchDepth=3），
+        # 再从中查找完成按钮（searchDepth=2 避免深入递归区域）
+        final_picker = self._win.WindowControl(
+            ClassName="mmui::SessionPickerWindow",
+            searchDepth=1,
+        )
+        if not final_picker.Exists(maxSearchSeconds=3):
+            raise RuntimeError("发起群聊窗口已关闭")
+        detail_view = final_picker.GroupControl(
+            ClassName="mmui::SPDetailView",
+            searchDepth=3,
+        )
+        if not detail_view.Exists(maxSearchSeconds=2):
+            raise RuntimeError("未找到详情面板")
+        confirm_btn = detail_view.ButtonControl(
             ClassName="mmui::XOutlineButton",
             AutomationId="confirm_btn",
             Name="完成",
+            searchDepth=2,
         )
-        if not confirm_btn.Exists(maxSearchSeconds=2):
+        if not confirm_btn.Exists(maxSearchSeconds=3):
             raise RuntimeError("未找到完成按钮")
         confirm_btn.Click(ratioX=_rand_ratio(), ratioY=_rand_ratio())
         time.sleep(0.5)
@@ -3902,6 +3921,290 @@ class Chat:
                     f"第 {index} 个自定义表情不可见（offscreen），无法点击"
                 )
 
+    # -- 发送名片 --
+    # 聊天信息按钮: ButtonControl, Name="聊天信息", ClassName="mmui::XButton",
+    #   AutomationId 末尾为 "more_button"
+    # 联系人头像: ButtonControl, ClassName="mmui::ChatMemberCell",
+    #   AutomationId="single_chat_member_cell"
+    # 资料面板更多: ButtonControl, Name="更多", ClassName="mmui::XButton"
+    # 推荐菜单项: MenuItemControl, Name="把他推荐给朋友",
+    #   ClassName="mmui::XMenuView", AutomationId="XMenuItem"
+    # 发送给弹窗: WindowControl, Name="微信发送给",
+    #   ClassName="mmui::SessionPickerWindow"
+    # 弹窗搜索框: EditControl, Name="搜索",
+    #   ClassName="mmui::XValidatorTextEdit"
+    # 搜索结果列表: ListControl, AutomationId="sp_search_result_list"
+    # 搜索结果项: CheckBoxControl, ClassName="mmui::SearchContactCellView"
+    # 发送按钮: ButtonControl, AutomationId="confirm_btn", Name="发送"
+    # 取消按钮: ButtonControl, AutomationId="cancel_btn", Name="取消"
+
+    def send_card(self, receiver_nickname: str) -> bool:
+        """
+        将当前私聊联系人的名片发送给指定接收者。
+
+        流程:
+        1. 点击聊天标题栏右上角"聊天信息"按钮，打开聊天信息面板
+        2. 点击联系人头像，打开资料面板
+        3. 点击资料面板右上角"更多"按钮
+        4. 在弹出菜单中点击"把他推荐给朋友"
+        5. 在"微信发送给"弹窗中搜索并勾选接收者
+        6. 点击"发送"按钮
+
+        Args:
+            receiver_nickname: 接收名片的联系人昵称
+
+        Returns:
+            True 发送成功
+
+        Raises:
+            ValueError: receiver_nickname 为空时抛出
+            RuntimeError: 当前非私聊、控件未找到或发送失败时抛出
+        """
+        if not receiver_nickname:
+            raise ValueError("receiver_nickname 不能为空")
+
+        if self.chat_type != "私聊":
+            raise RuntimeError("发送名片仅支持私聊会话")
+
+        contact_name = self.current_name
+        if not contact_name:
+            raise RuntimeError("无法获取当前聊天联系人名称")
+
+        if self._wx:
+            self._wx.activate()
+
+        try:
+            # 1. 点击"聊天信息"按钮
+            self._click_chat_info_button()
+            time.sleep(0.5)
+
+            # 2. 点击联系人头像
+            self._click_contact_avatar()
+            time.sleep(0.5)
+
+            # 3. 点击资料面板"更多"按钮
+            self._click_profile_more_button()
+            time.sleep(0.3)
+
+            # 4. 点击"把他推荐给朋友"
+            self._click_recommend_to_friend()
+            time.sleep(0.5)
+
+            # 5. 在弹窗中搜索、勾选接收者并点击发送
+            self._search_and_select_receiver(receiver_nickname)
+
+            logger.info(f"名片发送成功: {contact_name} -> {receiver_nickname}")
+            return True
+
+        except Exception:
+            # 6. 点击"发送"按钮‘
+            pass
+        except Exception:
+            # 出错时尝试关闭可能残留的弹窗
+            self._cleanup_send_card()
+            raise
+
+    def _click_chat_info_button(self):
+        """点击聊天标题栏右上角的"聊天信息"按钮"""
+        btn = self._win.ButtonControl(
+            ClassName="mmui::XButton",
+            Name="聊天信息",
+        )
+        if not btn.Exists(maxSearchSeconds=2):
+            raise RuntimeError("未找到'聊天信息'按钮")
+        btn.Click(ratioX=_rand_ratio(), ratioY=_rand_ratio())
+
+    def _click_contact_avatar(self):
+        """点击聊天信息面板中的联系人头像"""
+        avatar = self._win.ButtonControl(
+            ClassName="mmui::ChatMemberCell",
+            AutomationId="single_chat_member_cell",
+        )
+        if not avatar.Exists(maxSearchSeconds=3):
+            raise RuntimeError("未找到联系人头像")
+        avatar.Click(ratioX=_rand_ratio(), ratioY=_rand_ratio())
+
+    def _click_profile_more_button(self):
+        """点击资料面板右上角的"更多"按钮（排除导航栏的同名按钮）"""
+        # 资料面板的"更多"按钮 ClassName 为 mmui::XButton，
+        # 位于窗口右侧区域；导航栏的同名按钮位于左下角。
+        # 通过坐标位置区分。
+        win_rect = self._win.BoundingRectangle
+        win_center_x = (win_rect.left + win_rect.right) // 2
+
+        for child, _ in auto.WalkControl(self._win, maxDepth=20):
+            if (child.ControlType == auto.ControlType.ButtonControl
+                    and child.ClassName == "mmui::XButton"
+                    and child.Name == "更多"):
+                child_rect = child.BoundingRectangle
+                if child_rect.left > win_center_x:
+                    child.Click(ratioX=_rand_ratio(), ratioY=_rand_ratio())
+                    return
+
+        raise RuntimeError("未找到资料面板'更多'按钮")
+
+    def _click_recommend_to_friend(self):
+        """点击弹出菜单中的"把他推荐给朋友" """
+        menu_item = self._win.MenuItemControl(
+            ClassName="mmui::XMenuView",
+            Name="把他推荐给朋友",
+        )
+        if not menu_item.Exists(maxSearchSeconds=2):
+            raise RuntimeError("未找到'把他推荐给朋友'菜单项")
+        menu_item.Click(ratioX=_rand_ratio(), ratioY=_rand_ratio())
+
+    def _search_and_select_receiver(self, receiver_nickname: str):
+        """在"微信发送给"弹窗中搜索并勾选接收者"""
+        # SessionPickerWindow 是微信主窗口的子控件，从 self._win 查找
+        picker_win = self._win.WindowControl(
+            ClassName="mmui::SessionPickerWindow",
+        )
+        if not picker_win.Exists(maxSearchSeconds=3):
+            raise RuntimeError("'微信发送给'弹窗未打开")
+
+        # 定位搜索框
+        search_field = picker_win.GroupControl(
+            ClassName="mmui::XSearchField",
+        )
+        if not search_field.Exists(maxSearchSeconds=2):
+            raise RuntimeError("弹窗中未找到搜索区域")
+
+        search_edit = search_field.EditControl(
+            ClassName="mmui::XValidatorTextEdit", Name="搜索",
+        )
+        if not search_edit.Exists(maxSearchSeconds=2):
+            raise RuntimeError("弹窗中未找到搜索框")
+
+        # 输入接收者昵称（通过剪贴板粘贴，确保触发搜索）
+        search_edit.Click(ratioX=_rand_ratio(), ratioY=_rand_ratio())
+        time.sleep(0.3)
+        search_edit.SendKeys("{Ctrl}a{Del}")
+        time.sleep(0.2)
+        win32clipboard.OpenClipboard()
+        win32clipboard.EmptyClipboard()
+        win32clipboard.SetClipboardData(win32con.CF_UNICODETEXT, receiver_nickname)
+        win32clipboard.CloseClipboard()
+        search_edit.SendKeys("{Ctrl}v")
+        time.sleep(1.5)
+
+        # 重新获取 picker_win，避免控件缓存问题
+        fresh_picker = auto.WindowControl(
+            ClassName="mmui::SessionPickerWindow",
+        )
+        if not fresh_picker.Exists(maxSearchSeconds=3):
+            raise RuntimeError("'微信发送给'弹窗已关闭")
+
+        # 在搜索结果列表中查找并勾选接收者
+        result_list = fresh_picker.ListControl(
+            ClassName="mmui::XTableView",
+            AutomationId="sp_search_result_list",
+        )
+        if not result_list.Exists(maxSearchSeconds=5):
+            raise RuntimeError(f"搜索 '{receiver_nickname}' 后未出现结果列表")
+
+        contact_row = result_list.CheckBoxControl(
+            ClassName="mmui::SearchContactCellView",
+        )
+        if not contact_row.Exists(maxSearchSeconds=3):
+            raise RuntimeError(f"搜索结果中未找到联系人: {receiver_nickname}")
+
+        # 关键：在选中联系人之前先获取发送按钮引用，
+        # 因为选中后 SPDetailView 面板会刷新重建，旧控件引用会失效，
+        # 此时面板尚未刷新，控件树是稳定的，可以可靠地找到按钮。
+        send_btn = fresh_picker.ButtonControl(
+            AutomationId="confirm_btn",
+        )
+        if not send_btn.Exists(maxSearchSeconds=2):
+            raise RuntimeError("未找到'发送'按钮")
+
+        # 移动鼠标到搜索结果上，再按空格键选中
+        contact_row.Click(ratioX=_rand_ratio(), ratioY=_rand_ratio())
+
+        # 选中后等待面板刷新完成，再点击之前预获取的发送按钮
+        # 等待按钮变为可用
+        for _ in range(10):
+            try:
+                if send_btn.IsEnabled:
+                    break
+            except Exception:
+                pass
+            time.sleep(0.3)
+        else:
+            raise RuntimeError("'发送'按钮未启用，可能接收者未正确选中")
+
+        send_btn.Click(ratioX=_rand_ratio(), ratioY=_rand_ratio())
+        time.sleep(0.5)
+
+    def _click_picker_send_button(self):
+        """点击"微信发送给"弹窗中的"发送"按钮"""
+        # confirm_btn 位于 SPDetailView（右侧详情面板）下，
+        # 选择联系人后面板会刷新重建，旧的控件引用会失效。
+        # 关键：每次重试都必须从桌面根节点重新查找 SessionPickerWindow，
+        # 彻底绕过 uiautomation 的控件缓存问题。
+        send_btn = None
+        for attempt in range(8):
+            time.sleep(0.5)
+            try:
+                # 每次都从桌面根节点重新查找，获取全新的控件引用
+                fresh_picker = auto.WindowControl(
+                    ClassName="mmui::SessionPickerWindow",
+                )
+                if not fresh_picker.Exists(maxSearchSeconds=2):
+                    continue
+                fresh_picker.SetActive()
+                fresh_picker.SetFocus()
+                time.sleep(0.3)
+                # 从全新的窗口引用中查找发送按钮
+                btn = fresh_picker.ButtonControl(
+                    AutomationId="confirm_btn",
+                )
+                if btn.Exists(maxSearchSeconds=1):
+                    send_btn = btn
+                    break
+            except Exception:
+                continue
+
+        if send_btn is None:
+            raise RuntimeError("未找到'发送'按钮")
+
+        # 等待按钮变为可用
+        for _ in range(10):
+            try:
+                if send_btn.IsEnabled:
+                    break
+            except Exception:
+                pass
+            time.sleep(0.3)
+        else:
+            raise RuntimeError("'发送'按钮未启用，可能接收者未正确选中")
+
+        send_btn.Click(ratioX=_rand_ratio(), ratioY=_rand_ratio())
+        time.sleep(0.5)
+
+    def _cleanup_send_card(self):
+        """清理 send_card 过程中可能残留的弹窗和面板"""
+        try:
+            picker_win = self._win.WindowControl(
+                ClassName="mmui::SessionPickerWindow",
+            )
+            if picker_win.Exists(maxSearchSeconds=0.5):
+                cancel_btn = picker_win.ButtonControl(
+                    AutomationId="cancel_btn",
+                )
+                if cancel_btn.Exists(maxSearchSeconds=0.5):
+                    cancel_btn.Click(ratioX=_rand_ratio(), ratioY=_rand_ratio())
+                    time.sleep(0.3)
+        except Exception:
+            pass
+
+        try:
+            self._win.SendKeys("{Esc}")
+            time.sleep(0.2)
+            self._win.SendKeys("{Esc}")
+            time.sleep(0.2)
+        except Exception:
+            pass
+
     def _add_at_members(self, chat_input: auto.EditControl,
                         at_members: list[str]):
         """
@@ -4375,6 +4678,11 @@ class SeparateChat(Chat):
         self.activate()
         return super().send_emotion(emotion_keywords, index)
 
+    def send_card(self, receiver_nickname: str) -> bool:
+        """发送名片（重写以添加自动激活）"""
+        self.activate()
+        return super().send_card(receiver_nickname)
+
     def voice_call(self) -> "VoipCallWindow":
         """发起语音通话（重写以添加自动激活）"""
         self.activate()
@@ -4669,11 +4977,36 @@ class Weixin:
         chat = self.open_session_by_search(nickname)
         return chat.send_emotion(emotion_keywords, index)
 
+    def send_card(self, nickname: str, share_nickname: str) -> bool:
+        """
+        将指定联系人的名片发送给接收者。
+
+        Args:
+            share_contact_nickname: 要分享名片的联系人昵称
+            receiver_nickname: 接收名片的联系人昵称
+
+        Returns:
+            True 发送成功
+        """
+        chat = self.open_session_by_search(share_nickname)
+        return chat.send_card(nickname)
+
     def create_note(self) -> "NoteEditorWindow":
         """新建笔记，返回笔记编辑窗口对象"""
         self.activate()
         self.navigator.switch_to("微信")
         return self.session.create_note()
+
+    def create_room(self, nickname_list: list[str]):
+        """
+        发起群聊。
+
+        nickname_list: 好友昵称列表，至少需要两个好友才能创建群聊。
+        """
+        self.activate()
+        if not self.has_session:
+            self.navigator.switch_to("微信")
+        self.session.create_room(nickname_list)
 
     def get_separate_chat(self, contact_name: str) -> Optional[SeparateChat]:
         """
@@ -4961,4 +5294,4 @@ class Weixin:
 
 if __name__ == "__main__":
     wx = Weixin()
-    wx.send_emotion("写诗喂狗", "哈哈哈", 1)
+    wx.session.create_room(["写诗喂狗", "江南"])
