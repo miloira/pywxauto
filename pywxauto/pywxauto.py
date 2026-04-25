@@ -3752,11 +3752,7 @@ class Chat:
         if not search_tab.Exists(maxSearchSeconds=2):
             raise RuntimeError("未找到'搜索表情'标签")
 
-        rect = search_tab.BoundingRectangle
-        auto.Click(
-            int(rect.left + rect.width() / 2),
-            int(rect.top + rect.height() / 2),
-        )
+        search_tab.Click()
 
     def _find_emoji_search_edit(
         self, popover: auto.WindowControl,
@@ -4965,4 +4961,4 @@ class Weixin:
 
 if __name__ == "__main__":
     wx = Weixin()
-    wx.send_emotion("写诗喂狗", "蒜鸟", 1)
+    wx.send_emotion("写诗喂狗", "哈哈哈", 1)
