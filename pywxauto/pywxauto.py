@@ -1069,6 +1069,127 @@ def _rand_ratio() -> float:
     return random.uniform(0.2, 0.6)
 
 
+class WeixinWindow:
+    """
+    微信窗口基类，封装通用的窗口操作。
+
+    子类需要设置 self._win 为 uiautomation 的 WindowControl 实例。
+    提供 activate、pin、unpin、minimize、maximize、restore、close 等通用操作，
+    支持两种模式：
+    - use_message=True（默认）: 通过 Windows 消息 API 操作，不需要窗口可见
+    - use_message=False: 通过点击标题栏按钮操作，模拟用户行为
+    """
+
+    # 子类可覆盖，指定标题栏按钮的 ClassName
+    _PIN_BTN_CLASS = "mmui::PinnedButton"
+    _BTN_CLASS = "mmui::XButton"
+
+    @property
+    def _window(self) -> auto.WindowControl:
+        """获取窗口控件，子类可覆盖"""
+        return self._win
+
+    @property
+    def is_topmost(self) -> bool:
+        """窗口是否已置顶"""
+        return self._window.IsTopmost()
+
+    @property
+    def is_minimized(self) -> bool:
+        """窗口是否已最小化"""
+        return self._window.IsMinimize()
+
+    @property
+    def is_maximized(self) -> bool:
+        """窗口是否已最大化"""
+        return self._window.IsMaximize()
+
+    def activate(self):
+        """激活窗口（置前并聚焦）"""
+        self._window.SetActive()
+        self._window.SetFocus()
+        time.sleep(0.2)
+
+    def pin(self, use_message: bool = True, simulate_move: bool = True):
+        """置顶窗口"""
+        if use_message:
+            self._window.SetTopmost(True)
+        else:
+            self.activate()
+            btn = self._window.ButtonControl(
+                ClassName=self._PIN_BTN_CLASS, Name="置顶",
+            )
+            if btn.Exists(0, 0):
+                btn.Click(simulateMove=simulate_move)
+
+    def unpin(self, use_message: bool = True, simulate_move: bool = True):
+        """取消置顶窗口"""
+        if use_message:
+            self._window.SetTopmost(False)
+        else:
+            self.activate()
+            btn = self._window.ButtonControl(
+                ClassName=self._PIN_BTN_CLASS, Name="取消置顶",
+            )
+            if btn.Exists(0, 0):
+                btn.Click(simulateMove=simulate_move)
+
+    def minimize(self, use_message: bool = True, simulate_move: bool = True):
+        """最小化窗口"""
+        if use_message:
+            self._window.Minimize()
+        else:
+            self.activate()
+            btn = self._window.ButtonControl(
+                ClassName=self._BTN_CLASS, Name="最小化",
+            )
+            if not btn.Exists(maxSearchSeconds=1):
+                raise RuntimeError("未找到最小化按钮")
+            btn.Click(ratioX=_rand_ratio(), ratioY=_rand_ratio(),
+                      simulateMove=simulate_move)
+
+    def maximize(self, use_message: bool = True, simulate_move: bool = True):
+        """最大化/还原窗口"""
+        if use_message:
+            if self.is_maximized:
+                self._window.Restore()
+            else:
+                self._window.Maximize()
+        else:
+            self.activate()
+            for name in ("最大化", "还原"):
+                btn = self._window.ButtonControl(
+                    ClassName=self._BTN_CLASS, Name=name,
+                )
+                if btn.Exists(0, 0):
+                    btn.Click(ratioX=_rand_ratio(), ratioY=_rand_ratio(),
+                              simulateMove=simulate_move)
+                    return
+            raise RuntimeError("未找到最大化/还原按钮")
+
+    def restore(self):
+        """还原窗口"""
+        self._window.Restore()
+
+    def close(self, use_message: bool = True, simulate_move: bool = True):
+        """关闭窗口"""
+        if use_message:
+            wp = self._window.GetWindowPattern()
+            if wp:
+                wp.Close()
+            else:
+                raise RuntimeError("窗口不支持 WindowPattern.Close")
+        else:
+            self.activate()
+            btn = self._window.ButtonControl(
+                ClassName=self._BTN_CLASS, Name="关闭",
+            )
+            if not btn.Exists(maxSearchSeconds=1):
+                raise RuntimeError("未找到关闭按钮")
+            btn.Click(ratioX=_rand_ratio(), ratioY=_rand_ratio(),
+                      simulateMove=simulate_move)
+
+
 def _is_url(path: str) -> bool:
     """判断路径是否为网络 URL"""
     return path.startswith("http://") or path.startswith("https://")
@@ -1357,7 +1478,7 @@ class VoipCallWindow:
                 f"status={self.status!r})")
 
 
-class NoteEditorWindow:
+class NoteEditorWindow(WeixinWindow):
     """
     笔记编辑窗口控制。
 
@@ -1384,15 +1505,6 @@ class NoteEditorWindow:
     MAIN_CONTAINER_ID = "mainContainer"
 
     def __init__(self, handle: int = 0):
-        """
-        初始化笔记编辑窗口。
-
-        handle: 窗口句柄。为 0 时自动按 Name="笔记" 查找新建的笔记窗口。
-
-        注意：笔记窗口标题会随内容动态变化（标题 = 笔记第一行文本），
-        因此初始化后通过 NativeWindowHandle 锁定窗口实例，
-        避免后续因标题变化而找不到窗口。
-        """
         if handle:
             self._handle = handle
             self._win = auto.ControlFromHandle(handle)
@@ -1412,11 +1524,10 @@ class NoteEditorWindow:
             try:
                 self._win = auto.ControlFromHandle(self._handle)
             except Exception:
-                pass  # 窗口已关闭，保留旧引用让 Exists 返回 False
+                pass
 
     @property
     def exists(self) -> bool:
-        """笔记窗口是否存在"""
         try:
             self._refresh_win()
             return self._win.Exists(maxSearchSeconds=2)
@@ -1429,50 +1540,41 @@ class NoteEditorWindow:
             raise RuntimeError("笔记编辑窗口未找到")
 
     def activate(self):
-        """激活笔记窗口（置前并聚焦）"""
         self._ensure_exists()
-        self._win.SetActive()
-        self._win.SetFocus()
-        time.sleep(0.2)
+        super().activate()
 
-    # -- 标题栏操作 --
+    # -- 笔记窗口特有的 pin/unpin（Chrome WebView 按钮无 ClassName 区分） --
 
-    def _find_title_button(self, *names: str) -> auto.ButtonControl:
-        """在标题栏中查找按钮"""
+    def pin(self, **kwargs):
+        """置顶窗口（通过标题栏按钮）"""
         self._ensure_exists()
-        for name in names:
-            btn = self._win.ButtonControl(Name=name)
-            if btn.Exists(0, 0):
-                return btn
-        raise RuntimeError(f"标题栏中未找到按钮: {names}")
+        btn = self._win.ButtonControl(Name="置顶")
+        if btn.Exists(0, 0):
+            btn.Click(ratioX=_rand_ratio(), ratioY=_rand_ratio())
+            time.sleep(0.2)
 
-    def pin(self):
-        """置顶窗口"""
-        btn = self._find_title_button("置顶")
-        btn.Click(ratioX=_rand_ratio(), ratioY=_rand_ratio())
-        time.sleep(0.2)
-
-    def unpin(self):
+    def unpin(self, **kwargs):
         """取消置顶窗口"""
-        btn = self._find_title_button("取消置顶")
-        btn.Click(ratioX=_rand_ratio(), ratioY=_rand_ratio())
-        time.sleep(0.2)
+        self._ensure_exists()
+        btn = self._win.ButtonControl(Name="取消置顶")
+        if btn.Exists(0, 0):
+            btn.Click(ratioX=_rand_ratio(), ratioY=_rand_ratio())
+            time.sleep(0.2)
 
     @property
     def is_pinned(self) -> bool:
-        """窗口是否已置顶"""
         self._ensure_exists()
         btn = self._win.ButtonControl(Name="取消置顶")
         return btn.Exists(0, 0)
 
-    def minimize(self):
-        """最小化窗口（Chrome WebView 标题栏按钮可能不可见，优先用窗口 API）"""
+    def minimize(self, **kwargs):
+        """最小化窗口（Chrome WebView 优先用窗口 API）"""
         self._ensure_exists()
         self._win.Minimize()
         time.sleep(0.2)
 
-    def maximize(self):
-        """最大化/还原窗口（Chrome WebView 标题栏按钮可能不可见，优先用窗口 API）"""
+    def maximize(self, **kwargs):
+        """最大化/还原窗口"""
         self._ensure_exists()
         if self._win.IsMaximize():
             self._win.Restore()
@@ -1480,10 +1582,9 @@ class NoteEditorWindow:
             self._win.Maximize()
         time.sleep(0.2)
 
-    def close(self):
-        """关闭笔记窗口"""
+    def close(self, **kwargs):
+        """关闭笔记窗口（窗口有两个关闭按钮，取可见的）"""
         self._ensure_exists()
-        # 窗口有两个"关闭"按钮（TitleBar 隐藏的 + 可见的），取可见的
         btns = self._win.GetChildren()
         for child in btns:
             btn = child.ButtonControl(Name="关闭")
@@ -1493,7 +1594,6 @@ class NoteEditorWindow:
                     btn.Click(ratioX=_rand_ratio(), ratioY=_rand_ratio())
                     time.sleep(0.2)
                     return
-        # 兜底：用 WindowPattern 关闭
         wp = self._win.GetWindowPattern()
         if wp:
             wp.Close()
@@ -4608,11 +4708,12 @@ class Chat:
         return msg_cls(**base, content=actual_name)
 
 
-class SeparateChat(Chat):
+class SeparateChat(Chat, WeixinWindow):
     """
     独立窗口显示的聊天会话控制。
 
     继承自 Chat 类，复用所有消息发送和读取逻辑。
+    继承自 WeixinWindow 类，复用通用窗口操作（pin/unpin/minimize/maximize/restore/close/activate）。
     独立窗口与主窗口的聊天区域控件结构完全一致
     （chat_message_list、chat_input_field、current_chat_name_label 等），
     但窗口类名不同：
@@ -4623,163 +4724,65 @@ class SeparateChat(Chat):
     WINDOW_CLASS = "mmui::ChatSingleWindow"
 
     def __init__(self, contact_name: str):
-        """
-        初始化独立聊天窗口。
-
-        contact_name: 联系人名称，用于按窗口标题查找
-        """
         if not contact_name:
             raise ValueError("contact_name 不能为空")
-        # 不调用父类 __init__，因为父类需要 Weixin 实例
         self._win = auto.WindowControl(
             ClassName=self.WINDOW_CLASS,
             Name=contact_name,
             Depth=1
         )
-
         if not self._win.Exists(maxSearchSeconds=3):
             raise RuntimeError(f"独立聊天窗口未找到: {contact_name}")
-
-        self._wx = None  # 独立窗口不需要 Weixin 实例
+        self._wx = None
 
     @property
     def exists(self) -> bool:
         """独立窗口是否存在"""
         return self._win.Exists(maxSearchSeconds=2)
 
-    def activate(self):
-        """激活独立窗口（置前并聚焦）"""
-        self._win.SetActive()
-        self._win.SetFocus()
-        time.sleep(0.2)
+    @property
+    def is_pinned(self) -> bool:
+        """窗口是否已置顶"""
+        return self.is_topmost
 
     def send_text(self, content: str) -> MessageStatus:
-        """发送文本消息（重写以添加自动激活）"""
         self.activate()
         return super().send_text(content)
 
     def send_file(self, file_path: str) -> MessageStatus:
-        """发送文件（重写以添加自动激活）"""
         self.activate()
         return super().send_file(file_path)
 
     def send_room_at(self, content: str, at_members: list[str]) -> MessageStatus:
-        """在群聊中 @指定成员并发送消息（重写以添加自动激活）"""
         self.activate()
         return super().send_room_at(content, at_members)
 
     def send_collection(self, collection_keywords: str) -> bool:
-        """发送收藏内容（重写以添加自动激活）"""
         self.activate()
         return super().send_collection(collection_keywords)
 
     def send_emotion(self, emotion_keywords: str = None, index: int = 1) -> bool:
-        """发送表情（重写以添加自动激活）"""
         self.activate()
         return super().send_emotion(emotion_keywords, index)
 
     def send_card(self, receiver_nickname: str) -> bool:
-        """发送名片（重写以添加自动激活）"""
         self.activate()
         return super().send_card(receiver_nickname)
 
     def voice_call(self) -> "VoipCallWindow":
-        """发起语音通话（重写以添加自动激活）"""
         self.activate()
         return super().voice_call()
 
     def video_call(self) -> "VoipCallWindow":
-        """发起视频通话（重写以添加自动激活）"""
         self.activate()
         return super().video_call()
 
-    def pin(self, use_message: bool = True, simulate_move: bool = True):
-        """置顶窗口"""
-        if use_message:
-            self._win.SetTopmost(True)
-        else:
-            self.activate()
-            btn = self._win.ButtonControl(
-                ClassName="mmui::PinnedButton", Name="置顶",
-            )
-            if btn.Exists(0, 0):
-                btn.Click(simulateMove=simulate_move)
-
-    def unpin(self, use_message: bool = True, simulate_move: bool = True):
-        """取消置顶窗口"""
-        if use_message:
-            self._win.SetTopmost(False)
-        else:
-            self.activate()
-            btn = self._win.ButtonControl(
-                ClassName="mmui::PinnedButton", Name="取消置顶",
-            )
-            if btn.Exists(0, 0):
-                btn.Click(simulateMove=simulate_move)
-
-    @property
-    def is_pinned(self) -> bool:
-        """窗口是否已置顶"""
-        return self._win.IsTopmost()
-
-    @property
-    def is_minimized(self) -> bool:
-        """窗口是否已最小化"""
-        return self._win.IsMinimize()
-
-    @property
-    def is_maximized(self) -> bool:
-        """窗口是否已最大化"""
-        return self._win.IsMaximize()
-
-    def minimize(self, use_message: bool = True, simulate_move: bool = True):
-        """最小化窗口"""
-        if use_message:
-            self._win.Minimize()
-        else:
-            self.activate()
-            btn = self._win.ButtonControl(
-                ClassName="mmui::XButton", Name="最小化",
-            )
-            if not btn.Exists(maxSearchSeconds=1):
-                raise RuntimeError("未找到最小化按钮")
-            btn.Click(ratioX=_rand_ratio(), ratioY=_rand_ratio(), simulateMove=simulate_move)
-
-    def maximize(self, use_message: bool = True, simulate_move: bool = True):
-        """最大化/还原窗口"""
-        if use_message:
-            if self.is_maximized:
-                self._win.Restore()
-            else:
-                self._win.Maximize()
-        else:
-            self.activate()
-            for name in ("最大化", "还原"):
-                btn = self._win.ButtonControl(
-                    ClassName="mmui::XButton", Name=name,
-                )
-                if btn.Exists(0, 0):
-                    btn.Click(ratioX=_rand_ratio(), ratioY=_rand_ratio(), simulateMove=simulate_move)
-                    return
-            raise RuntimeError("未找到最大化/还原按钮")
-
-    def restore(self):
-        """还原窗口"""
-        self._win.Restore()
-
     def move_offscreen(self):
-        """
-        将窗口移到屏幕外（不可见但仍处于正常状态）。
-
-        窗口不是最小化，UI Automation 控件树仍然正常工作。
-        记录原始位置，以便 move_back 恢复。
-        """
+        """将窗口移到屏幕外（不可见但仍处于正常状态）。"""
         hwnd = self._win.NativeWindowHandle
         rect = self._win.BoundingRectangle
-        # 记录原始位置和大小
         self._offscreen_rect = (rect.left, rect.top,
                                 rect.width(), rect.height())
-        # 移到屏幕外
         ctypes.windll.user32.MoveWindow(hwnd, -9999, 0,
                                         rect.width(), rect.height(), True)
 
@@ -4798,23 +4801,6 @@ class SeparateChat(Chat):
         rect = self._win.BoundingRectangle
         return rect.right <= 0
 
-    def close(self, use_message: bool = True, simulate_move: bool = True):
-        """关闭独立窗口"""
-        if use_message:
-            wp = self._win.GetWindowPattern()
-            if wp:
-                wp.Close()
-            else:
-                raise RuntimeError("窗口不支持 WindowPattern.Close")
-        else:
-            self.activate()
-            btn = self._win.ButtonControl(
-                ClassName="mmui::XButton", Name="关闭",
-            )
-            if not btn.Exists(maxSearchSeconds=1):
-                raise RuntimeError("未找到关闭按钮")
-            btn.Click(ratioX=_rand_ratio(), ratioY=_rand_ratio(), simulateMove=simulate_move)
-
     def __str__(self) -> str:
         if not self._win.Exists(0, 0):
             return "SeparateChat(closed)"
@@ -4822,7 +4808,7 @@ class SeparateChat(Chat):
                 f"name={self.current_name!r})")
 
 
-class Weixin:
+class Weixin(WeixinWindow):
 
     WINDOW_CLASS = "mmui::MainWindow"
     WINDOW_REGEX = "微信|Weixin"
@@ -4871,18 +4857,6 @@ class Weixin:
     def is_locked(self) -> bool:
         txt = self.window.TextControl(ClassName="mmui::XTextView", Name="Windows 微信已被锁定")
         return txt.Exists(0, 0)
-
-    @property
-    def is_topmost(self) -> bool:
-        return self.window.IsTopmost()
-
-    @property
-    def is_minimized(self) -> bool:
-        return self.window.IsMinimize()
-
-    @property
-    def is_maximized(self) -> bool:
-        return self.window.IsMaximize()
 
     @property
     def has_session(self) -> bool:
@@ -5041,75 +5015,10 @@ class Weixin:
             raise RuntimeError("弹出菜单中未找到锁定按钮")
         lock_btn.Click(ratioX=_rand_ratio(), ratioY=_rand_ratio())
 
-    def activate(self):
-        self.window.SetActive()
-        self.window.SetFocus()
-
-    def pin(self, use_message: bool = True, simulate_move: bool = True):
-        if use_message:
-            self.window.SetTopmost(True)
-        else:
-            self.activate()
-            btn = self.window.ButtonControl(ClassName="mmui::PinnedButton", Name="置顶")
-            if btn.Exists(0, 0):
-                btn.Click(simulateMove=simulate_move)
-
-    def unpin(self, use_message: bool = True, simulate_move: bool = True):
-        if use_message:
-            self.window.SetTopmost(False)
-        else:
-            self.activate()
-            btn = self.window.ButtonControl(ClassName="mmui::PinnedButton", Name="取消置顶")
-            if btn.Exists(0, 0):
-                btn.Click(simulateMove=simulate_move)
-
-    def minimize(self, use_message: bool = True, simulate_move: bool = True):
-        if use_message:
-            self.window.Minimize()
-        else:
-            self.activate()
-            btn = self.window.ButtonControl(
-                ClassName="mmui::XButton", Name="最小化",
-            )
-            if not btn.Exists(maxSearchSeconds=1):
-                raise RuntimeError("未找到最小化按钮")
-            btn.Click(ratioX=_rand_ratio(), ratioY=_rand_ratio(), simulateMove=simulate_move)
-
-    def maximize(self, use_message: bool = True, simulate_move: bool = True):
-        if use_message:
-            if self.is_maximized:
-                self.window.Restore()
-            else:
-                self.window.Maximize()
-        else:
-            self.activate()
-            for name in ("最大化", "还原"):
-                btn = self.window.ButtonControl(
-                    ClassName="mmui::XButton", Name=name,
-                )
-                if btn.Exists(0, 0):
-                    btn.Click(ratioX=_rand_ratio(), ratioY=_rand_ratio(), simulateMove=simulate_move)
-                    return
-            raise RuntimeError("未找到最大化/还原按钮")
-
-    def restore(self):
-        self.window.Restore()
-
-    def close(self, use_message: bool = True, simulate_move: bool = True):
-        if use_message:
-            wp = self.window.GetWindowPattern()
-            if wp:
-                wp.Close()
-            else:
-                raise RuntimeError("窗口不支持 WindowPattern.Close")
-        else:
-            self.activate()
-            btn = self.window.ButtonControl(
-                ClassName="mmui::XButton", Name="关闭",
-            )
-            if not btn.Exists(maxSearchSeconds=1):
-                raise RuntimeError("未找到关闭按钮")
-            btn.Click(ratioX=_rand_ratio(), ratioY=_rand_ratio(), simulateMove=simulate_move)
+    @property
+    def _window(self) -> auto.WindowControl:
+        """覆盖基类属性，Weixin 使用 self.window 而非 self._win"""
+        return self.window
 
     def listen(
         self,
@@ -5301,8 +5210,4 @@ class Weixin:
 
 if __name__ == "__main__":
     wx = Weixin()
-    wx.create_note("""关键改动：
-
-所有 auto.WindowControl() 改回 self._win.WindowControl(searchDepth=1) — SessionPickerWindow 是主窗口的直接子窗口，searchDepth=1 只搜一层，不会深入递归区域
-搜索框从 XSearchField 容器中找（searchDepth=3 到达搜索框层级），搜索结果从 SearchContactNewChatView 中找（searchDepth=1），都限制了深度
-完成按钮先定位 SPDetailView（searchDepth=3），再从中用 searchDepth=2 找按钮，避免深入 sp_choice_contact_list 的无限递归""")
+    wx.send_text("文件传输助手", "测试")
