@@ -3553,6 +3553,359 @@ class Chat:
         logger.info("收藏发送成功")
         return True
 
+    # -- 发送表情 --
+    # 表情按钮: ButtonControl, Name="发送表情(Alt+E)", ClassName="mmui::XButton"
+    #   位于工具栏 tool_bar_accessible 内
+    # 表情面板: 独立弹窗 WindowControl, ClassName="mmui::XPopover",
+    #           AutomationId="EmoticonPopover"
+    #   面板工具栏: TabControl, AutomationId="emoticon_panel_tool_bar"
+    #     搜索表情: TabItemControl, Name="搜索表情", ClassName="mmui::EmoticonToolbarItem"
+    #     默认表情: TabItemControl, Name="默认表情", ClassName="mmui::EmoticonToolbarItem"
+    #     自定义表情: TabItemControl, Name="自定义表情", ClassName="mmui::EmoticonToolbarItem"
+    #   搜索页面: GroupControl, ClassName="mmui::SearchPageView"
+    #     搜索框容器: GroupControl, ClassName="mmui::XSearchField"
+    #     搜索输入框: EditControl, Name="搜索", ClassName="mmui::XValidatorTextEdit"
+    #   搜索结果区: DocumentControl, Name="表情搜索",
+    #               ClassName="Chrome_RenderWidgetHostHWND"
+    #     搜索结果为 Chromium 内嵌网页渲染，表情项为 ListItemControl，
+    #     Name 格式: "{关键词}表情，来自{来源}"，支持 InvokePattern 直接点击发送。
+
+    EMOJI_BTN_NAME = "发送表情(Alt+E)"
+    EMOJI_BTN_CLASS = "mmui::XButton"
+    EMOJI_POPOVER_CLASS = "mmui::XPopover"
+    EMOJI_POPOVER_ID = "EmoticonPopover"
+    EMOJI_PANEL_TOOLBAR_ID = "emoticon_panel_tool_bar"
+    EMOJI_SEARCH_TAB_NAME = "搜索表情"
+    EMOJI_SEARCH_TAB_CLASS = "mmui::EmoticonToolbarItem"
+    EMOJI_SEARCH_INPUT_NAME = "搜索"
+    EMOJI_SEARCH_INPUT_CLASS = "mmui::XValidatorTextEdit"
+    EMOJI_SEARCH_FIELD_CLASS = "mmui::XSearchField"
+    EMOJI_SEARCH_RESULT_CLASS = "Chrome_RenderWidgetHostHWND"
+    EMOJI_SEARCH_RESULT_NAME = "表情搜索"
+    EMOJI_CUSTOM_TAB_NAME = "自定义表情"
+    EMOJI_CUSTOM_TAB_CLASS = "mmui::EmoticonToolbarItem"
+    EMOJI_CUSTOM_GRID_CLASS = "mmui::EmoticonGridView"
+    EMOJI_CUSTOM_ITEM_CLASS = "mmui::FavEmoticonItemView"
+
+    def send_emotion(self, emotion_keywords: str = None, index: int = 1) -> bool:
+        """
+        在当前会话中发送表情。
+
+        当 emotion_keywords 不为 None 时，通过搜索关键词发送表情；
+        当 emotion_keywords 为 None 时，发送自定义表情列表中第 index 个表情。
+
+        Args:
+            emotion_keywords: 表情搜索关键词，如 "哈喽"、"开心" 等。
+                为 None 时发送自定义表情。
+            index: 选择第几个表情，从 1 开始，默认为 1。
+
+        Returns:
+            True 发送成功
+
+        Raises:
+            ValueError: index < 1 时抛出
+            RuntimeError: 未找到控件或发送失败时抛出
+        """
+        if index < 1:
+            raise ValueError("index 必须 >= 1")
+
+        if self._wx:
+            self._wx.activate()
+
+        try:
+            # 1. 打开表情面板
+            self._open_emoji_panel()
+            time.sleep(0.3)
+
+            popover = self._get_emoji_popover()
+
+            if emotion_keywords is not None:
+                # 搜索表情模式
+                # 2. 点击"搜索表情"标签
+                self._click_emoji_search_tab(popover)
+                time.sleep(0.3)
+
+                # 3. 在搜索框中输入关键词
+                search_edit = self._find_emoji_search_edit(popover)
+                search_edit.Click(ratioX=_rand_ratio(), ratioY=_rand_ratio())
+                time.sleep(0.2)
+                # 清空已有内容后键盘输入，确保触发搜索
+                search_edit.SendKeys("{Ctrl}a", waitTime=0.1)
+                search_edit.SendKeys(emotion_keywords, waitTime=0.1)
+                time.sleep(1.5)  # 等待搜索结果加载（Chromium 渲染）
+
+                # 4. 在搜索结果中点击第 index 个表情
+                popover = self._get_emoji_popover()
+                self._click_emoji_search_result(popover, index)
+            else:
+                # 自定义表情模式
+                # 2. 点击"自定义表情"标签
+                self._click_custom_emoji_tab(popover)
+                time.sleep(0.3)
+
+                # 3. 在自定义表情列表中点击第 index 个表情
+                popover = self._get_emoji_popover()
+                self._click_custom_emoji_item(popover, index)
+
+            time.sleep(0.5)
+
+            # 验证表情面板已关闭（表示发送成功）
+            emoji_popover = auto.WindowControl(
+                ClassName=self.EMOJI_POPOVER_CLASS,
+                AutomationId=self.EMOJI_POPOVER_ID,
+            )
+            if emoji_popover.Exists(maxSearchSeconds=1):
+                self._close_emoji_panel()
+                label = "自定义表情" if emotion_keywords is None else "表情"
+                raise RuntimeError(f"发送{label}失败，表情面板未关闭")
+
+            logger.info("表情发送成功")
+            return True
+
+        except Exception:
+            self._close_emoji_panel()
+            raise
+
+    def _get_emoji_popover(self) -> auto.WindowControl:
+        """
+        获取表情弹窗（独立窗口 mmui::XPopover）。
+        """
+        popover = auto.WindowControl(
+            ClassName=self.EMOJI_POPOVER_CLASS,
+            AutomationId=self.EMOJI_POPOVER_ID,
+        )
+        if not popover.Exists(maxSearchSeconds=3):
+            raise RuntimeError("未找到表情弹窗")
+        return popover
+
+    def _open_emoji_panel(self):
+        """
+        打开表情选择面板。
+
+        点击工具栏中的"发送表情"按钮。
+        如果面板已打开则直接返回。
+        """
+        # 检查面板是否已打开（表情弹窗是独立窗口）
+        emoji_popover = auto.WindowControl(
+            ClassName=self.EMOJI_POPOVER_CLASS,
+            AutomationId=self.EMOJI_POPOVER_ID,
+        )
+        if emoji_popover.Exists(maxSearchSeconds=0.5):
+            return
+
+        # 查找工具栏
+        toolbar = self._win.ToolBarControl(
+            AutomationId="tool_bar_accessible",
+        )
+        if not toolbar.Exists(maxSearchSeconds=2):
+            raise RuntimeError("未找到聊天工具栏")
+
+        # 查找"发送表情"按钮
+        emoji_btn = toolbar.ButtonControl(
+            ClassName=self.EMOJI_BTN_CLASS,
+            Name=self.EMOJI_BTN_NAME,
+            searchDepth=5,
+        )
+        if not emoji_btn.Exists(maxSearchSeconds=2):
+            raise RuntimeError("未找到'发送表情'按钮")
+
+        emoji_btn.Click(ratioX=_rand_ratio(), ratioY=_rand_ratio())
+        time.sleep(0.5)
+
+        # 等待表情弹窗出现
+        if not emoji_popover.Exists(maxSearchSeconds=5):
+            raise RuntimeError("表情选择面板未打开")
+
+    def _close_emoji_panel(self):
+        """
+        关闭表情面板。
+
+        通过按 Escape 键关闭面板。
+        """
+        try:
+            emoji_popover = auto.WindowControl(
+                ClassName=self.EMOJI_POPOVER_CLASS,
+                AutomationId=self.EMOJI_POPOVER_ID,
+            )
+            if emoji_popover.Exists(maxSearchSeconds=0.5):
+                emoji_popover.SendKeys("{Esc}")
+                time.sleep(0.3)
+        except Exception:
+            # 兜底：向主窗口发送 Esc
+            self._win.SendKeys("{Esc}")
+            time.sleep(0.3)
+
+    def _click_emoji_search_tab(self, popover: auto.WindowControl):
+        """
+        在表情面板工具栏中点击"搜索表情"标签。
+        """
+        panel_toolbar = popover.TabControl(
+            AutomationId=self.EMOJI_PANEL_TOOLBAR_ID,
+        )
+        if not panel_toolbar.Exists(maxSearchSeconds=2):
+            raise RuntimeError("未找到表情面板工具栏")
+
+        search_tab = panel_toolbar.TabItemControl(
+            ClassName=self.EMOJI_SEARCH_TAB_CLASS,
+            Name=self.EMOJI_SEARCH_TAB_NAME,
+        )
+        if not search_tab.Exists(maxSearchSeconds=2):
+            raise RuntimeError("未找到'搜索表情'标签")
+
+        rect = search_tab.BoundingRectangle
+        auto.Click(
+            int(rect.left + rect.width() / 2),
+            int(rect.top + rect.height() / 2),
+        )
+
+    def _find_emoji_search_edit(
+        self, popover: auto.WindowControl,
+    ) -> auto.EditControl:
+        """
+        在表情搜索面板中查找搜索输入框。
+
+        搜索输入框位于 mmui::XSearchField 容器内。
+        """
+        search_field = popover.GroupControl(
+            ClassName=self.EMOJI_SEARCH_FIELD_CLASS,
+        )
+        if search_field.Exists(maxSearchSeconds=3):
+            edit = search_field.EditControl(
+                ClassName=self.EMOJI_SEARCH_INPUT_CLASS,
+                Name=self.EMOJI_SEARCH_INPUT_NAME,
+            )
+            if edit.Exists(maxSearchSeconds=2):
+                return edit
+
+        raise RuntimeError("未找到表情搜索输入框")
+
+    def _click_emoji_search_result(
+        self, popover: auto.WindowControl, index: int,
+    ):
+        """
+        在表情搜索结果中点击第 index 个表情（从 1 开始）。
+
+        搜索结果在 Chrome_RenderWidgetHostHWND 内渲染，
+        表情项为 ListItemControl，Name 格式: "{关键词}表情，来自{来源}"，
+        支持 InvokePattern 直接点击发送。
+        """
+        result_doc = popover.DocumentControl(
+            ClassName=self.EMOJI_SEARCH_RESULT_CLASS,
+            Name=self.EMOJI_SEARCH_RESULT_NAME,
+        )
+        if not result_doc.Exists(maxSearchSeconds=3):
+            raise RuntimeError("未找到表情搜索结果区域")
+
+        # 收集所有 ListItemControl（即表情项）
+        items = result_doc.GetChildren()
+        emotion_items = []
+        for child in items:
+            self._collect_emotion_items(child, emotion_items)
+
+        if not emotion_items:
+            raise RuntimeError("搜索结果为空，未找到任何表情")
+
+        if index > len(emotion_items):
+            raise RuntimeError(
+                f"第 {index} 个表情不存在，"
+                f"搜索结果共 {len(emotion_items)} 个表情"
+            )
+
+        target = emotion_items[index - 1]
+        try:
+            target.GetInvokePattern().Invoke()
+        except Exception:
+            # InvokePattern 失败时回退到坐标点击
+            rect = target.BoundingRectangle
+            if rect.width() > 0 and rect.height() > 0:
+                auto.Click(
+                    int(rect.left + rect.width() / 2),
+                    int(rect.top + rect.height() / 2),
+                )
+            else:
+                raise RuntimeError(
+                    f"第 {index} 个表情不可见（offscreen），无法点击"
+                )
+
+    def _collect_emotion_items(self, control, result: list):
+        """递归收集 ListItemControl 表情项。"""
+        if control.ControlType == auto.ControlType.ListItemControl:
+            name = control.Name or ""
+            if "表情" in name:
+                result.append(control)
+                return
+        for child in control.GetChildren():
+            self._collect_emotion_items(child, result)
+
+    def _click_custom_emoji_tab(self, popover: auto.WindowControl):
+        """
+        在表情面板工具栏中点击"自定义表情"标签。
+        """
+        panel_toolbar = popover.TabControl(
+            AutomationId=self.EMOJI_PANEL_TOOLBAR_ID,
+        )
+        if not panel_toolbar.Exists(maxSearchSeconds=2):
+            raise RuntimeError("未找到表情面板工具栏")
+
+        custom_tab = panel_toolbar.TabItemControl(
+            ClassName=self.EMOJI_CUSTOM_TAB_CLASS,
+            Name=self.EMOJI_CUSTOM_TAB_NAME,
+        )
+        if not custom_tab.Exists(maxSearchSeconds=2):
+            raise RuntimeError("未找到'自定义表情'标签")
+
+        rect = custom_tab.BoundingRectangle
+        auto.Click(
+            int(rect.left + rect.width() / 2),
+            int(rect.top + rect.height() / 2),
+        )
+
+    def _click_custom_emoji_item(
+        self, popover: auto.WindowControl, index: int,
+    ):
+        """
+        在自定义表情列表中点击第 index 个表情（从 1 开始）。
+
+        自定义表情项为 mmui::FavEmoticonItemView（TextControl），
+        位于 mmui::EmoticonGridView（ListControl）内，
+        支持 InvokePattern 直接点击发送。
+        """
+        grid = popover.ListControl(
+            ClassName=self.EMOJI_CUSTOM_GRID_CLASS,
+        )
+        if not grid.Exists(maxSearchSeconds=3):
+            raise RuntimeError("未找到自定义表情列表")
+
+        items = grid.GetChildren()
+        emoji_items = [
+            item for item in items
+            if item.ClassName == self.EMOJI_CUSTOM_ITEM_CLASS
+        ]
+
+        if not emoji_items:
+            raise RuntimeError("自定义表情列表为空")
+
+        if index > len(emoji_items):
+            raise RuntimeError(
+                f"第 {index} 个自定义表情不存在，"
+                f"共 {len(emoji_items)} 个自定义表情"
+            )
+
+        target = emoji_items[index - 1]
+        try:
+            target.GetInvokePattern().Invoke()
+        except Exception:
+            rect = target.BoundingRectangle
+            if rect.width() > 0 and rect.height() > 0:
+                auto.Click(
+                    int(rect.left + rect.width() / 2),
+                    int(rect.top + rect.height() / 2),
+                )
+            else:
+                raise RuntimeError(
+                    f"第 {index} 个自定义表情不可见（offscreen），无法点击"
+                )
+
     def _add_at_members(self, chat_input: auto.EditControl,
                         at_members: list[str]):
         """
@@ -4021,6 +4374,11 @@ class SeparateChat(Chat):
         self.activate()
         return super().send_collection(collection_keywords)
 
+    def send_emotion(self, emotion_keywords: str = None, index: int = 1) -> bool:
+        """发送表情（重写以添加自动激活）"""
+        self.activate()
+        return super().send_emotion(emotion_keywords, index)
+
     def voice_call(self) -> "VoipCallWindow":
         """发起语音通话（重写以添加自动激活）"""
         self.activate()
@@ -4309,6 +4667,11 @@ class Weixin:
         """打开指定会话并发送收藏内容"""
         chat = self.open_session_by_search(nickname)
         return chat.send_collection(collection_keywords)
+
+    def send_emotion(self, nickname: str, emotion_keywords: str = None, index: int = 1) -> bool:
+        """打开指定会话并发送表情，emotion_keywords 为 None 时发送自定义表情"""
+        chat = self.open_session_by_search(nickname)
+        return chat.send_emotion(emotion_keywords, index)
 
     def create_note(self) -> "NoteEditorWindow":
         """新建笔记，返回笔记编辑窗口对象"""
@@ -4602,4 +4965,4 @@ class Weixin:
 
 if __name__ == "__main__":
     wx = Weixin()
-    wx.session.create_room(["七夏", "写诗喂狗"])
+    wx.send_emotion("写诗喂狗", "蒜鸟", 1)
