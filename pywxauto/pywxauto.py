@@ -2951,7 +2951,7 @@ class Session:
         confirm_btn.Click(ratioX=_rand_ratio(), ratioY=_rand_ratio())
         time.sleep(0.5)
 
-    def create_note(self) -> "NoteEditorWindow":
+    def new_note(self) -> "NoteEditorWindow":
         """
         新建笔记，返回笔记编辑窗口对象。
 
@@ -4991,11 +4991,18 @@ class Weixin:
         chat = self.open_session_by_search(share_nickname)
         return chat.send_card(nickname)
 
-    def create_note(self) -> "NoteEditorWindow":
-        """新建笔记，返回笔记编辑窗口对象"""
+    def create_note(self, content: str):
+        """
+        创建笔记并写入内容，完成后关闭笔记窗口。
+
+        content: 笔记内容
+        """
         self.activate()
         self.navigator.switch_to("微信")
-        return self.session.create_note()
+        note = self.session.new_note()
+        note.set_content(content)
+        note.save()
+        note.close()
 
     def create_room(self, nickname_list: list[str]):
         """
@@ -5294,4 +5301,8 @@ class Weixin:
 
 if __name__ == "__main__":
     wx = Weixin()
-    wx.session.create_room(["写诗喂狗", "江南"])
+    wx.create_note("""关键改动：
+
+所有 auto.WindowControl() 改回 self._win.WindowControl(searchDepth=1) — SessionPickerWindow 是主窗口的直接子窗口，searchDepth=1 只搜一层，不会深入递归区域
+搜索框从 XSearchField 容器中找（searchDepth=3 到达搜索框层级），搜索结果从 SearchContactNewChatView 中找（searchDepth=1），都限制了深度
+完成按钮先定位 SPDetailView（searchDepth=3），再从中用 searchDepth=2 找按钮，避免深入 sp_choice_contact_list 的无限递归""")
