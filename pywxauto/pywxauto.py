@@ -5518,6 +5518,106 @@ class Weixin(WeixinWindow):
             self._cleanup_profile()
             raise
 
+    def add_label_to_contact(self, nickname: str, labels: list):
+        """
+        为联系人添加标签。
+
+        在"设置备注和标签"弹窗（mmui::ProfileUniquePop）中操作标签区域
+        （mmui::ProfileFormTagView），点击"修改标签"按钮后，
+        在搜索框中输入标签名，按 Down 键选中搜索结果，按 Enter 键确认。
+        所有标签添加完成后点击"完成"按钮保存。
+
+        Args:
+            nickname: 联系人昵称
+            labels: 标签名列表，如 ["朋友", "同事"]
+
+        Raises:
+            ValueError: labels 为空时抛出
+            RuntimeError: 操作失败时抛出
+        """
+        if not labels:
+            raise ValueError("labels 不能为空")
+
+        self.activate()
+        try:
+            chat = self._open_contact_profile(nickname)
+            self._click_profile_menu_item(chat, "设置备注和标签")
+            time.sleep(0.5)
+
+            # 等待"设置备注和标签"弹窗出现
+            remark_pop = self.window.WindowControl(
+                ClassName="mmui::ProfileUniquePop",
+                Name="设置备注和标签",
+            )
+            if not remark_pop.Exists(maxSearchSeconds=3):
+                raise RuntimeError("未找到'设置备注和标签'弹窗")
+
+            # 在弹窗中查找标签区域的"修改标签"按钮
+            tag_btn = remark_pop.ButtonControl(
+                Name="修改标签",
+                AutomationId="button",
+            )
+            if not tag_btn.Exists(maxSearchSeconds=3):
+                raise RuntimeError("未找到'修改标签'按钮")
+
+            tag_btn.Click(ratioX=_rand_ratio(), ratioY=_rand_ratio())
+            time.sleep(0.3)
+
+            import win32clipboard
+            import win32con
+
+            # 逐个添加标签
+            for label in labels:
+                # 搜索框在弹窗内但不在 ProfileFormTagView 子树中，
+                # 需要在弹窗范围内通过 Name="搜索" 精确定位
+                tag_edit = remark_pop.EditControl(
+                    ClassName="mmui::XValidatorTextEdit",
+                    Name="搜索",
+                )
+                if not tag_edit.Exists(maxSearchSeconds=3):
+                    raise RuntimeError("未找到标签搜索输入框")
+
+                tag_edit.Click(ratioX=_rand_ratio(), ratioY=_rand_ratio())
+                time.sleep(0.2)
+                tag_edit.SendKeys("{Ctrl}a{Del}")
+                time.sleep(0.1)
+
+                # 通过剪贴板粘贴标签名（支持中文等特殊字符）
+                win32clipboard.OpenClipboard()
+                win32clipboard.EmptyClipboard()
+                win32clipboard.SetClipboardData(
+                    win32con.CF_UNICODETEXT, label
+                )
+                win32clipboard.CloseClipboard()
+                tag_edit.SendKeys("{Ctrl}v")
+                time.sleep(0.5)
+
+                # 检查是否有搜索结果下拉列表出现
+                # 如果没有结果说明该标签已存在于联系人上，跳过
+                result_list = remark_pop.ListControl(searchDepth=8)
+                if result_list.Exists(maxSearchSeconds=1):
+                    # 按 Down 键选中搜索结果，按 Enter 键确认
+                    tag_edit.SendKeys("{Down}{Enter}")
+                    time.sleep(0.3)
+                else:
+                    # 标签已存在，清空搜索框后跳过
+                    tag_edit.SendKeys("{Ctrl}a{Del}")
+                    time.sleep(0.2)
+                    logger.info(f"标签已存在，跳过: {label}")
+
+            # 点击"完成"按钮保存；若按钮为 disabled 状态则点击"取消"
+            ok_btn = remark_pop.ButtonControl(
+                ClassName="mmui::XOutlineButton",
+                Name="完成",
+            )
+            ok_btn.Click(ratioX=_rand_ratio(), ratioY=_rand_ratio())
+            time.sleep(0.3)
+            logger.info(f"添加标签成功: {nickname} -> {labels}")
+
+        except Exception:
+            self._cleanup_profile()
+            raise
+
     def set_star_friend(self, nickname: str):
         """
         将联系人设为/取消星标朋友。
@@ -5531,6 +5631,23 @@ class Weixin(WeixinWindow):
             self._click_profile_menu_item(chat, "设为星标朋友")
             time.sleep(0.3)
             logger.info(f"设为星标朋友操作完成: {nickname}")
+        except Exception:
+            self._cleanup_profile()
+            raise
+
+    def cancel_star_friend(self, nickname: str):
+        """
+        取消联系人的星标朋友。
+
+        Args:
+            nickname: 联系人昵称
+        """
+        self.activate()
+        try:
+            chat = self._open_contact_profile(nickname)
+            self._click_profile_menu_item(chat, "不再设为星标朋友")
+            time.sleep(0.3)
+            logger.info(f"取消星标朋友操作完成: {nickname}")
         except Exception:
             self._cleanup_profile()
             raise
@@ -5576,6 +5693,23 @@ class Weixin(WeixinWindow):
             else:
                 logger.warning(f"未找到确认按钮，加入黑名单可能未完成: {nickname}")
 
+        except Exception:
+            self._cleanup_profile()
+            raise
+
+    def remove_from_blacklist(self, nickname: str):
+        """
+        将联系人移出黑名单。
+
+        Args:
+            nickname: 联系人昵称
+        """
+        self.activate()
+        try:
+            chat = self._open_contact_profile(nickname)
+            self._click_profile_menu_item(chat, "移出黑名单")
+            time.sleep(0.3)
+            logger.info(f"移出黑名单成功: {nickname}")
         except Exception:
             self._cleanup_profile()
             raise
@@ -5832,4 +5966,4 @@ class Weixin(WeixinWindow):
 
 if __name__ == "__main__":
     wx = Weixin()
-    wx.delete_contact("写诗喂狗")
+    wx.add_label_to_contact("写诗喂狗", ["测试7"])
