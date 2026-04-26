@@ -5334,6 +5334,316 @@ class Chat:
         finally:
             self._close_chat_info_panel()
 
+    # ---- 群聊信息面板操作（仅群聊可用） ----
+
+    def _ensure_room_chat(self):
+        """确保当前是群聊会话，否则抛出异常"""
+        if self.chat_type != "群聊":
+            raise RuntimeError("群聊信息操作仅支持群聊会话")
+
+    def _click_room_info_item(self, item_name: str):
+        """
+        在群聊信息面板中点击指定的信息项按钮。
+
+        群聊信息面板中的"群聊名称"、"群公告"、"备注"、"我在本群的昵称"
+        等条目均为 ButtonControl，ClassName="mmui::XMouseEventView"。
+
+        Args:
+            item_name: 按钮名称（如 "群聊名称"、"群公告"、"备注"、"我在本群的昵称"）
+
+        Returns:
+            ButtonControl 控件
+
+        Raises:
+            RuntimeError: 未找到按钮时抛出
+        """
+        btn = self._win.ButtonControl(
+            Name=item_name,
+        )
+        if not btn.Exists(maxSearchSeconds=3):
+            raise RuntimeError(f"未找到'{item_name}'按钮")
+        btn.Click(ratioX=_rand_ratio(), ratioY=_rand_ratio())
+        time.sleep(0.5)
+
+    def set_room_name(self, name: str):
+        """
+        设置群聊名称。
+
+        仅群聊可用。
+
+        流程：
+        1. 点击"聊天信息"按钮，展开聊天信息面板
+        2. 在面板中找到"群聊名称"按钮并点击
+        3. 在弹出的编辑弹窗中修改群聊名称
+        4. 点击"完成"按钮保存
+        5. 收回聊天信息面板
+
+        Args:
+            name: 新的群聊名称
+
+        Raises:
+            ValueError: name 为空时抛出
+            RuntimeError: 操作失败时抛出
+        """
+        if not name:
+            raise ValueError("群聊名称不能为空")
+
+        self._ensure_room_chat()
+        if self._wx:
+            self._wx.activate()
+
+        self._click_chat_info_button()
+        time.sleep(0.5)
+
+        try:
+            # 点击"群聊名称"按钮
+            self._click_room_info_item("群聊名称")
+
+            # 查找编辑弹窗中的输入框
+            edit = self._win.EditControl(
+                ClassName="mmui::XValidatorTextEdit",
+            )
+            if not edit.Exists(maxSearchSeconds=3):
+                # 尝试查找 mmui::XLineEdit
+                edit = self._win.EditControl(
+                    ClassName="mmui::XLineEdit",
+                )
+            if not edit.Exists(maxSearchSeconds=3):
+                raise RuntimeError("未找到群聊名称编辑框")
+
+            edit.Click(ratioX=0.5, ratioY=0.5)
+            time.sleep(0.2)
+            edit.SendKeys("{Ctrl}a{Del}")
+            time.sleep(0.1)
+
+            # 通过剪贴板粘贴文本
+            paste(name)
+            time.sleep(0.3)
+
+            # 点击"完成"按钮
+            ok_btn = self._win.ButtonControl(
+                ClassName="mmui::XOutlineButton",
+                Name="完成",
+            )
+            if not ok_btn.Exists(maxSearchSeconds=2):
+                raise RuntimeError("未找到'完成'按钮")
+            ok_btn.Click(ratioX=_rand_ratio(), ratioY=_rand_ratio())
+            time.sleep(0.3)
+
+            logger.info(f"设置群聊名称成功: {name}")
+
+        finally:
+            self._close_chat_info_panel()
+
+    def set_room_announcement(self, content: str):
+        """
+        设置群公告。
+
+        仅群聊可用。
+
+        流程：
+        1. 点击"聊天信息"按钮，展开聊天信息面板
+        2. 在面板中找到"群公告"按钮并点击
+        3. 在弹出的编辑弹窗中修改群公告内容
+        4. 点击"发布"按钮保存
+        5. 收回聊天信息面板
+
+        Args:
+            content: 群公告内容
+
+        Raises:
+            ValueError: content 为空时抛出
+            RuntimeError: 操作失败时抛出
+        """
+        if not content:
+            raise ValueError("群公告内容不能为空")
+
+        self._ensure_room_chat()
+        if self._wx:
+            self._wx.activate()
+
+        self._click_chat_info_button()
+        time.sleep(0.5)
+
+        try:
+            # 点击"群公告"按钮
+            self._click_room_info_item("群公告")
+
+            # 查找编辑弹窗中的输入框
+            edit = self._win.EditControl(
+                ClassName="mmui::XValidatorTextEdit",
+            )
+            if not edit.Exists(maxSearchSeconds=3):
+                raise RuntimeError("未找到群公告编辑框")
+
+            edit.Click(ratioX=0.5, ratioY=0.5)
+            time.sleep(0.2)
+            edit.SendKeys("{Ctrl}a{Del}")
+            time.sleep(0.1)
+
+            # 通过剪贴板粘贴文本
+            paste(content)
+            time.sleep(0.3)
+
+            # 点击"发布"按钮
+            ok_btn = self._win.ButtonControl(
+                ClassName="mmui::XOutlineButton",
+                Name="发布",
+            )
+            if not ok_btn.Exists(maxSearchSeconds=2):
+                # 尝试查找"完成"按钮
+                ok_btn = self._win.ButtonControl(
+                    ClassName="mmui::XOutlineButton",
+                    Name="完成",
+                )
+            if not ok_btn.Exists(maxSearchSeconds=2):
+                raise RuntimeError("未找到'发布'或'完成'按钮")
+            ok_btn.Click(ratioX=_rand_ratio(), ratioY=_rand_ratio())
+            time.sleep(0.3)
+
+            logger.info(f"设置群公告成功: {self.current_name}")
+
+        finally:
+            self._close_chat_info_panel()
+
+    def set_room_remark(self, remark: str):
+        """
+        设置群聊备注。
+
+        仅群聊可用。群聊的备注仅自己可见。
+
+        流程：
+        1. 点击"聊天信息"按钮，展开聊天信息面板
+        2. 在面板中找到"备注"按钮并点击
+        3. 在弹出的编辑弹窗中修改备注
+        4. 点击"完成"按钮保存
+        5. 收回聊天信息面板
+
+        Args:
+            remark: 备注内容
+
+        Raises:
+            ValueError: remark 为空时抛出
+            RuntimeError: 操作失败时抛出
+        """
+        if not remark:
+            raise ValueError("备注不能为空")
+
+        self._ensure_room_chat()
+        if self._wx:
+            self._wx.activate()
+
+        self._click_chat_info_button()
+        time.sleep(0.5)
+
+        try:
+            # 点击"备注"按钮
+            self._click_room_info_item("备注")
+
+            # 查找编辑弹窗中的输入框
+            edit = self._win.EditControl(
+                ClassName="mmui::XLineEdit",
+            )
+            if not edit.Exists(maxSearchSeconds=3):
+                edit = self._win.EditControl(
+                    ClassName="mmui::XValidatorTextEdit",
+                )
+            if not edit.Exists(maxSearchSeconds=3):
+                raise RuntimeError("未找到备注编辑框")
+
+            edit.Click(ratioX=0.5, ratioY=0.5)
+            time.sleep(0.2)
+            edit.SendKeys("{Ctrl}a{Del}")
+            time.sleep(0.1)
+
+            # 通过剪贴板粘贴文本
+            paste(remark)
+            time.sleep(0.3)
+
+            # 点击"完成"按钮
+            ok_btn = self._win.ButtonControl(
+                ClassName="mmui::XOutlineButton",
+                Name="完成",
+            )
+            if not ok_btn.Exists(maxSearchSeconds=2):
+                raise RuntimeError("未找到'完成'按钮")
+            ok_btn.Click(ratioX=_rand_ratio(), ratioY=_rand_ratio())
+            time.sleep(0.3)
+
+            logger.info(f"设置群聊备注成功: {self.current_name} -> {remark}")
+
+        finally:
+            self._close_chat_info_panel()
+
+    def set_room_nickname(self, nickname: str):
+        """
+        设置我在本群的昵称。
+
+        仅群聊可用。
+
+        流程：
+        1. 点击"聊天信息"按钮，展开聊天信息面板
+        2. 在面板中找到"我在本群的昵称"按钮并点击
+        3. 在弹出的编辑弹窗中修改昵称
+        4. 点击"完成"按钮保存
+        5. 收回聊天信息面板
+
+        Args:
+            nickname: 新的群内昵称
+
+        Raises:
+            ValueError: nickname 为空时抛出
+            RuntimeError: 操作失败时抛出
+        """
+        if not nickname:
+            raise ValueError("群内昵称不能为空")
+
+        self._ensure_room_chat()
+        if self._wx:
+            self._wx.activate()
+
+        self._click_chat_info_button()
+        time.sleep(0.5)
+
+        try:
+            # 点击"我在本群的昵称"按钮
+            self._click_room_info_item("我在本群的昵称")
+
+            # 查找编辑弹窗中的输入框
+            edit = self._win.EditControl(
+                ClassName="mmui::XLineEdit",
+            )
+            if not edit.Exists(maxSearchSeconds=3):
+                edit = self._win.EditControl(
+                    ClassName="mmui::XValidatorTextEdit",
+                )
+            if not edit.Exists(maxSearchSeconds=3):
+                raise RuntimeError("未找到昵称编辑框")
+
+            edit.Click(ratioX=0.5, ratioY=0.5)
+            time.sleep(0.2)
+            edit.SendKeys("{Ctrl}a{Del}")
+            time.sleep(0.1)
+
+            # 通过剪贴板粘贴文本
+            paste(nickname)
+            time.sleep(0.3)
+
+            # 点击"完成"按钮
+            ok_btn = self._win.ButtonControl(
+                ClassName="mmui::XOutlineButton",
+                Name="完成",
+            )
+            if not ok_btn.Exists(maxSearchSeconds=2):
+                raise RuntimeError("未找到'完成'按钮")
+            ok_btn.Click(ratioX=_rand_ratio(), ratioY=_rand_ratio())
+            time.sleep(0.3)
+
+            logger.info(f"设置群内昵称成功: {self.current_name} -> {nickname}")
+
+        finally:
+            self._close_chat_info_panel()
+
     # ---- 联系人资料面板操作（仅私聊可用） ----
 
     def _ensure_contact_chat(self):
@@ -7406,6 +7716,26 @@ class Weixin(WeixinWindow):
         chat = self.open_session_by_search(nickname)
         chat.unfold_chat()
 
+    def set_room_name(self, nickname: str, name: str):
+        """设置指定群聊的名称，委托给 Chat.set_room_name"""
+        chat = self.open_session_by_search(nickname)
+        chat.set_room_name(name)
+
+    def set_room_announcement(self, nickname: str, content: str):
+        """设置指定群聊的群公告，委托给 Chat.set_room_announcement"""
+        chat = self.open_session_by_search(nickname)
+        chat.set_room_announcement(content)
+
+    def set_room_remark(self, nickname: str, remark: str):
+        """设置指定群聊的备注，委托给 Chat.set_room_remark"""
+        chat = self.open_session_by_search(nickname)
+        chat.set_room_remark(remark)
+
+    def set_room_nickname(self, nickname: str, my_nickname: str):
+        """设置我在指定群聊中的昵称，委托给 Chat.set_room_nickname"""
+        chat = self.open_session_by_search(nickname)
+        chat.set_room_nickname(my_nickname)
+
     def lock(self):
         self.activate()
         more_btn = self.navigator._win.ButtonControl(Name="更多")
@@ -7615,5 +7945,4 @@ class Weixin(WeixinWindow):
 
 if __name__ == "__main__":
     wx = Weixin()
-    wx.fold_chat("写诗喂狗")
-    wx.unfold_chat("写诗喂狗")
+    wx.set_room_name("test", "test2")
