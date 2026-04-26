@@ -5709,7 +5709,6 @@ class Weixin(WeixinWindow):
             description: 描述信息（最大200字符），None 不修改
             images: 图片路径列表（覆盖式：先清空再添加），None 不修改，[] 清空所有图片
         """
-        # 全部为 None 则无需操作
         if all(v is None for v in (remark, labels, phones, description, images)):
             return
 
@@ -5717,7 +5716,6 @@ class Weixin(WeixinWindow):
         try:
             chat = self._open_contact_profile(nickname)
             self._click_profile_menu_item(chat, "设置备注和标签")
-            time.sleep(0.5)
 
             remark_pop = self.window.WindowControl(
                 ClassName="mmui::ProfileUniquePop",
@@ -5734,12 +5732,9 @@ class Weixin(WeixinWindow):
                 )
                 if remark_edit.Exists(maxSearchSeconds=2):
                     remark_edit.Click(ratioX=_rand_ratio(), ratioY=_rand_ratio())
-                    time.sleep(0.2)
                     remark_edit.SendKeys("{Ctrl}a{Del}")
-                    time.sleep(0.1)
                     if remark:
                         paste(remark)
-                    time.sleep(0.3)
 
             # 辅助函数：将弹窗滚动区域滚动到底部
             def _scroll_to_bottom():
@@ -5749,18 +5744,13 @@ class Weixin(WeixinWindow):
                 rect = scroll_area.BoundingRectangle
                 cx = rect.left + rect.width() // 2
                 cy = rect.top + rect.height() // 2
-                # 用 win32api 发送鼠标滚轮消息，WHEEL_DELTA=120，负值向下
-                # 滚动量 = 滚动区域高度对应的行数（按每行40px估算）
                 lines = max(rect.height() // 40, 10)
                 win32api.SetCursorPos((cx, cy))
                 time.sleep(0.1)
                 win32api.mouse_event(
-                    win32con.MOUSEEVENTF_WHEEL,
-                    cx, cy,
-                    -120 * lines,  # 负值向下滚动
-                    0,
+                    win32con.MOUSEEVENTF_WHEEL, cx, cy, -120 * lines, 0,
                 )
-                time.sleep(0.5)
+                time.sleep(0.3)
 
             # ---- 2. 标签（覆盖式） ----
             if labels is not None:
@@ -5768,7 +5758,6 @@ class Weixin(WeixinWindow):
                     Name="修改标签", AutomationId="button",
                 )
                 if tag_btn.Exists(maxSearchSeconds=2):
-                    # 读取已有标签
                     existing_labels = set()
                     tag_text = tag_btn.TextControl(ClassName="mmui::XTextView")
                     if tag_text.Exists(0, 0):
@@ -5776,53 +5765,41 @@ class Weixin(WeixinWindow):
                         if name and name != "搜索或创建标签...":
                             existing_labels = {t.strip() for t in name.split(",") if t.strip()}
 
-                    # 计算需要添加和移除的标签
                     target_set = set(labels)
                     to_add = [l for l in labels if l not in existing_labels]
                     to_remove = [l for l in existing_labels if l not in target_set]
 
                     if to_add or to_remove:
                         tag_btn.Click(ratioX=_rand_ratio(), ratioY=_rand_ratio())
-                        time.sleep(0.3)
 
-                        # 移除不需要的标签
                         for label in to_remove:
                             label_item = remark_pop.ListItemControl(
                                 Name=label, searchDepth=8,
                             )
                             if label_item.Exists(maxSearchSeconds=1):
                                 label_item.Click(ratioX=_rand_ratio(), ratioY=_rand_ratio())
-                                time.sleep(0.3)
 
-                        # 添加新标签
                         for label in to_add:
                             tag_edit = remark_pop.EditControl(
                                 ClassName="mmui::XValidatorTextEdit", Name="搜索",
                             )
                             if tag_edit.Exists(maxSearchSeconds=2):
                                 tag_edit.Click(ratioX=_rand_ratio(), ratioY=_rand_ratio())
-                                time.sleep(0.2)
                                 tag_edit.SendKeys("{Ctrl}a{Del}")
-                                time.sleep(0.1)
                                 paste(label)
-                                time.sleep(0.5)
                                 label_item = remark_pop.ListItemControl(
                                     Name=label, searchDepth=8,
                                 )
                                 if label_item.Exists(maxSearchSeconds=1):
                                     label_item.Click(ratioX=_rand_ratio(), ratioY=_rand_ratio())
-                                    time.sleep(0.3)
                                 tag_edit.SendKeys("{Ctrl}a{Del}")
-                                time.sleep(0.2)
 
-                        # 点击弹窗标题关闭标签搜索列表遮罩
                         title_text = remark_pop.TextControl(
                             ClassName="mmui::XTextView",
                             Name="设置备注和标签",
                         )
                         if title_text.Exists(0, 0):
                             title_text.Click(ratioX=0.5, ratioY=0.5)
-                            time.sleep(0.3)
 
             # ---- 3. 电话（覆盖式） ----
             if phones is not None:
@@ -5830,7 +5807,6 @@ class Weixin(WeixinWindow):
                     ClassName="mmui::ProfileFormPhoneView",
                 )
                 if phone_area.Exists(maxSearchSeconds=2):
-                    # 先删除所有已有电话
                     for _ in range(20):
                         phone_field = phone_area.TextControl(
                             ClassName="mmui::XLineField",
@@ -5847,11 +5823,9 @@ class Weixin(WeixinWindow):
                                 del_btn = num_view.ButtonControl(Name="删除电话")
                                 if del_btn.Exists(0, 0):
                                     del_btn.Click(ratioX=_rand_ratio(), ratioY=_rand_ratio())
-                                    time.sleep(0.3)
                                     continue
                         break
 
-                    # 添加新电话
                     for phone in phones:
                         empty_field = phone_area.TextControl(
                             ClassName="mmui::XLineField", Name="填写电话",
@@ -5862,7 +5836,6 @@ class Weixin(WeixinWindow):
                             )
                             if add_btn.Exists(maxSearchSeconds=1):
                                 add_btn.Click(ratioX=_rand_ratio(), ratioY=_rand_ratio())
-                                time.sleep(0.5)
 
                         empty_field = phone_area.TextControl(
                             ClassName="mmui::XLineField", Name="填写电话",
@@ -5873,17 +5846,12 @@ class Weixin(WeixinWindow):
                             )
                             if phone_edit.Exists(0, 0):
                                 phone_edit.Click(ratioX=_rand_ratio(), ratioY=_rand_ratio())
-                                time.sleep(0.2)
-                                # 用 ValuePattern 写入号码，避免 paste 对纯数字的特殊处理
                                 vp = phone_edit.GetValuePattern()
                                 if vp:
                                     vp.SetValue(phone)
                                 else:
                                     paste(phone)
-                                time.sleep(0.3)
-                                # Tab 让输入框失焦确认值
                                 phone_edit.SendKeys("{Tab}")
-                                time.sleep(0.3)
 
             # ---- 4. 描述 ----
             if description is not None:
@@ -5893,12 +5861,9 @@ class Weixin(WeixinWindow):
                 if desc_edit.Exists(maxSearchSeconds=2):
                     _scroll_to_bottom()
                     desc_edit.Click(ratioX=_rand_ratio(), ratioY=_rand_ratio())
-                    time.sleep(0.2)
                     desc_edit.SendKeys("{Ctrl}a{Del}")
-                    time.sleep(0.1)
                     if description:
                         paste(description[:200])
-                    time.sleep(0.3)
 
             # ---- 5. 图片（覆盖式） ----
             if images is not None:
@@ -5906,7 +5871,6 @@ class Weixin(WeixinWindow):
                     AutomationId="desc_img_list_view_",
                 )
                 _scroll_to_bottom()
-                # 先清空已有图片
                 if img_list.Exists(0, 0):
                     for _ in range(20):
                         img_item = img_list.GroupControl(
@@ -5921,7 +5885,6 @@ class Weixin(WeixinWindow):
                         if not img_btn.Exists(0, 0):
                             break
                         img_btn.RightClick(ratioX=_rand_ratio(), ratioY=_rand_ratio())
-                        time.sleep(0.5)
                         menu_win = self.window.WindowControl(ClassName="mmui::XMenu")
                         if not menu_win.Exists(maxSearchSeconds=2):
                             break
@@ -5932,9 +5895,7 @@ class Weixin(WeixinWindow):
                             self.window.SendKeys("{Esc}")
                             break
                         del_item.Click(ratioX=_rand_ratio(), ratioY=_rand_ratio())
-                        time.sleep(0.3)
 
-                # 添加新图片
                 for img_path in images:
                     add_img_btn = remark_pop.GroupControl(
                         Name="添加图片",
@@ -5943,20 +5904,17 @@ class Weixin(WeixinWindow):
                     if not add_img_btn.Exists(maxSearchSeconds=2):
                         break
                     add_img_btn.Click(ratioX=_rand_ratio(), ratioY=_rand_ratio())
-                    time.sleep(1)
                     dlg = auto.WindowControl(ClassName="#32770")
                     if not dlg.Exists(maxSearchSeconds=5):
                         break
                     dlg.SendKeys("{Alt}N")
-                    time.sleep(0.3)
                     edit = dlg.ComboBoxControl(AutomationId="1148").EditControl()
                     if not edit.Exists(0, 0):
                         edit = dlg.EditControl(AutomationId="1148")
                     if edit.Exists(maxSearchSeconds=2):
                         edit.GetValuePattern().SetValue(os.path.abspath(img_path))
-                        time.sleep(0.3)
                         dlg.SendKeys("{Alt}O")
-                        time.sleep(1)
+                        time.sleep(0.5)
 
             # ---- 点击"完成"保存 ----
             ok_btn = remark_pop.ButtonControl(
@@ -5964,7 +5922,6 @@ class Weixin(WeixinWindow):
             )
             if ok_btn.Exists(maxSearchSeconds=2):
                 ok_btn.Click(ratioX=_rand_ratio(), ratioY=_rand_ratio())
-                time.sleep(0.3)
 
             logger.info(f"设置联系人信息成功: {nickname}")
 
