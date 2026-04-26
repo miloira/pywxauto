@@ -5142,6 +5142,51 @@ class Chat:
         # EmotionMessage, MergeMessage, NoteMessage, OtherMessage
         return msg_cls(**base, content=actual_name)
 
+    # ---- 聊天信息面板操作 ----
+
+    def clear_chat_history(self):
+        """
+        清空当前会话的聊天记录。
+
+        流程：
+        1. 点击标题栏右上角"聊天信息"按钮，展开聊天信息面板
+        2. 在面板中找到"清空聊天记录"按钮并点击
+        3. 在确认弹窗中点击"清空"按钮
+        4. 收回聊天信息面板
+        """
+        if self._wx:
+            self._wx.activate()
+
+        # 1. 展开聊天信息面板
+        self._click_chat_info_button()
+        time.sleep(0.5)
+
+        try:
+            # 2. 点击"清空聊天记录"按钮
+            clear_btn = self._win.ButtonControl(
+                Name="清空聊天记录",
+            )
+            if not clear_btn.Exists(maxSearchSeconds=3):
+                raise RuntimeError("未找到'清空聊天记录'按钮")
+            clear_btn.Click(ratioX=_rand_ratio(), ratioY=_rand_ratio())
+            time.sleep(0.5)
+
+            # 3. 确认弹窗中点击"清空"
+            confirm_btn = self._win.ButtonControl(
+                Name="清空",
+                ClassName="mmui::XOutlineButton",
+            )
+            if not confirm_btn.Exists(maxSearchSeconds=3):
+                raise RuntimeError("未找到'清空'确认按钮")
+            confirm_btn.Click(ratioX=_rand_ratio(), ratioY=_rand_ratio())
+            time.sleep(0.3)
+
+            logger.info(f"清空聊天记录成功: {self.current_name}")
+
+        finally:
+            # 4. 收回聊天信息面板
+            self._close_chat_info_panel()
+
     # ---- 联系人资料面板操作（仅私聊可用） ----
 
     def _ensure_contact_chat(self):
@@ -7179,6 +7224,11 @@ class Weixin(WeixinWindow):
         chat = self.open_session_by_search(nickname)
         return chat.recommend_contact(receiver_nickname)
 
+    def clear_chat_history(self, nickname: str):
+        """清空指定会话的聊天记录，委托给 Chat.clear_chat_history"""
+        chat = self.open_session_by_search(nickname)
+        chat.clear_chat_history()
+
     def lock(self):
         self.activate()
         more_btn = self.navigator._win.ButtonControl(Name="更多")
@@ -7388,6 +7438,3 @@ class Weixin(WeixinWindow):
 
 if __name__ == "__main__":
     wx = Weixin()
-    # wx.remove_contact_label("写诗喂狗", ["测试2", "测试3", "测试4"])
-    # wx.remove_contact_phone("写诗喂狗", ["1", "2", "3", "4", "5"])
-    wx.save_contact_image ("写诗喂狗", [1,3], r"C:\Users\690126048\Desktop\github\pywxauto")
