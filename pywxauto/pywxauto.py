@@ -41,6 +41,57 @@ import uiautomation as auto
 logging.basicConfig(level=logging.INFO, format="%(asctime)s [%(levelname)s] %(message)s")
 logger = logging.getLogger(__name__)
 
+import struct
+import time
+import win32api
+import win32clipboard
+import win32con
+
+# DROPFILES struct: pFiles(uint), x(long), y(long), fNC(int), fWide(bool)
+_DROPFILES_FORMAT = "Illii"
+_DROPFILES_SIZE = struct.calcsize(_DROPFILES_FORMAT)
+
+
+def set_clipboard(fmt, data):
+    win32clipboard.OpenClipboard()
+    try:
+        win32clipboard.EmptyClipboard()
+        win32clipboard.SetClipboardData(fmt, data)
+    finally:
+        win32clipboard.CloseClipboard()
+
+
+def simulate_paste():
+    win32api.keybd_event(win32con.VK_CONTROL, 0, 0, 0)
+    win32api.keybd_event(ord("V"), 0, 0, 0)
+    win32api.keybd_event(ord("V"), 0, win32con.KEYEVENTF_KEYUP, 0)
+    win32api.keybd_event(win32con.VK_CONTROL, 0, win32con.KEYEVENTF_KEYUP, 0)
+
+
+def copy_text(text):
+    if text.isdigit():
+        text += "\0"
+    set_clipboard(win32con.CF_UNICODETEXT, text)
+
+
+def copy_files(file_paths):
+    header = struct.pack(_DROPFILES_FORMAT, _DROPFILES_SIZE, 0, 0, 0, True)
+    files = "\0".join(p.replace("/", "\\") for p in file_paths)
+    payload = files.encode("utf-16-le") + b"\0\0\0\0"
+    set_clipboard(win32con.CF_HDROP, header + payload)
+
+
+def paste(content, interval=0):
+    if isinstance(content, str):
+        copy_text(content)
+    elif isinstance(content, list):
+        copy_files(content)
+    else:
+        raise TypeError(f"Not support type: {type(content)}")
+
+    time.sleep(interval)
+    simulate_paste()
+
 
 class RegistryError(Exception):
     """注册表操作异常"""
@@ -1479,11 +1530,7 @@ class Moment(WeixinWindow):
         time.sleep(0.2)
 
         # 通过剪贴板粘贴文本，避免 SendKeys 丢字或特殊字符问题
-        win32clipboard.OpenClipboard()
-        win32clipboard.EmptyClipboard()
-        win32clipboard.SetClipboardText(content, win32con.CF_UNICODETEXT)
-        win32clipboard.CloseClipboard()
-        edit.SendKeys("{Ctrl}v")
+        paste(content)
         time.sleep(0.5)
 
         # 4. 点击"发表"按钮
@@ -2227,8 +2274,7 @@ class NoteEditorWindow(WeixinWindow):
         file_path: 文件路径
         """
         self.focus_editor()
-        _set_clipboard_file([file_path])
-        self._editor.SendKeys("{Ctrl}v")
+        paste([file_path])
         time.sleep(0.5)
 
     def __str__(self) -> str:
@@ -3712,11 +3758,7 @@ class Chat:
             raise RuntimeError("未找到聊天输入框")
 
         # 通过剪贴板粘贴文本
-        win32clipboard.OpenClipboard()
-        win32clipboard.EmptyClipboard()
-        win32clipboard.SetClipboardText(content, win32con.CF_UNICODETEXT)
-        win32clipboard.CloseClipboard()
-        field.SendKeys("{Ctrl}v")
+        paste(content)
         time.sleep(0.2)
 
         self._win.SendKeys("{Enter}")
@@ -3747,8 +3789,7 @@ class Chat:
 
         try:
             self.clear_input()
-            _set_clipboard_file([file_path])
-            self._win.SendKeys("{Ctrl}v")
+            paste([file_path])
 
             # 发送前校验：文档长度应大于 0（说明文件已粘贴）
             doc_len = self._get_input_doc_length()
@@ -3788,11 +3829,7 @@ class Chat:
         self._add_at_members(field, at_members)
 
         if content:
-            win32clipboard.OpenClipboard()
-            win32clipboard.EmptyClipboard()
-            win32clipboard.SetClipboardText(content, win32con.CF_UNICODETEXT)
-            win32clipboard.CloseClipboard()
-            field.SendKeys("{Ctrl}v")
+            paste(content)
             time.sleep(0.2)
 
         self._win.SendKeys("{Enter}")
@@ -4557,11 +4594,7 @@ class Chat:
         time.sleep(0.3)
         search_edit.SendKeys("{Ctrl}a{Del}")
         time.sleep(0.2)
-        win32clipboard.OpenClipboard()
-        win32clipboard.EmptyClipboard()
-        win32clipboard.SetClipboardData(win32con.CF_UNICODETEXT, receiver_nickname)
-        win32clipboard.CloseClipboard()
-        search_edit.SendKeys("{Ctrl}v")
+        paste(receiver_nickname)
         time.sleep(1.5)
 
         # 重新获取 picker_win，避免控件缓存问题
@@ -5494,14 +5527,7 @@ class Weixin(WeixinWindow):
             remark_edit.SendKeys("{Ctrl}a{Del}")
             time.sleep(0.1)
 
-            # 通过剪贴板粘贴备注名（支持中文等特殊字符）
-            import win32clipboard
-            import win32con
-            win32clipboard.OpenClipboard()
-            win32clipboard.EmptyClipboard()
-            win32clipboard.SetClipboardData(win32con.CF_UNICODETEXT, remark)
-            win32clipboard.CloseClipboard()
-            remark_edit.SendKeys("{Ctrl}v")
+            paste(remark)
             time.sleep(0.3)
 
             # 点击"完成"按钮（输入内容后按钮从 disabled 变为 enabled）
@@ -5554,7 +5580,10 @@ class Weixin(WeixinWindow):
             if not remark_pop.Exists(maxSearchSeconds=3):
                 raise RuntimeError("未找到'设置备注和标签'弹窗")
 
-            # 在弹窗中查找标签区域的"修改标签"按钮
+            # 读取已有标签
+            # "修改标签"按钮(mmui::XView)内部有 mmui::XTextView 子控件，
+            # 无标签时 Name="搜索或创建标签..."，有标签时 Name 为逗号分隔的列表
+            existing_labels = set()
             tag_btn = remark_pop.ButtonControl(
                 Name="修改标签",
                 AutomationId="button",
@@ -5562,14 +5591,28 @@ class Weixin(WeixinWindow):
             if not tag_btn.Exists(maxSearchSeconds=3):
                 raise RuntimeError("未找到'修改标签'按钮")
 
+            tag_text = tag_btn.TextControl(
+                ClassName="mmui::XTextView",
+            )
+            if tag_text.Exists(maxSearchSeconds=1):
+                name = tag_text.Name
+                if name and name != "搜索或创建标签...":
+                    existing_labels = {t.strip() for t in name.split(",") if t.strip()}
+
+            # 过滤掉已存在的标签
+            new_labels = [l for l in labels if l not in existing_labels]
+            if not new_labels:
+                logger.info(f"所有标签已存在，跳过: {nickname} -> {labels}")
+                cancel_btn = remark_pop.ButtonControl(Name="取消")
+                if cancel_btn.Exists(maxSearchSeconds=1):
+                    cancel_btn.Click(ratioX=_rand_ratio(), ratioY=_rand_ratio())
+                return
+
             tag_btn.Click(ratioX=_rand_ratio(), ratioY=_rand_ratio())
             time.sleep(0.3)
 
-            import win32clipboard
-            import win32con
-
-            # 逐个添加标签
-            for label in labels:
+            # 逐个添加标签（仅添加新标签）
+            for label in new_labels:
                 # 搜索框在弹窗内但不在 ProfileFormTagView 子树中，
                 # 需要在弹窗范围内通过 Name="搜索" 精确定位
                 tag_edit = remark_pop.EditControl(
@@ -5584,28 +5627,23 @@ class Weixin(WeixinWindow):
                 tag_edit.SendKeys("{Ctrl}a{Del}")
                 time.sleep(0.1)
 
-                # 通过剪贴板粘贴标签名（支持中文等特殊字符）
-                win32clipboard.OpenClipboard()
-                win32clipboard.EmptyClipboard()
-                win32clipboard.SetClipboardData(
-                    win32con.CF_UNICODETEXT, label
-                )
-                win32clipboard.CloseClipboard()
-                tag_edit.SendKeys("{Ctrl}v")
+                paste(label)
                 time.sleep(0.5)
 
-                # 检查是否有搜索结果下拉列表出现
-                # 如果没有结果说明该标签已存在于联系人上，跳过
-                result_list = remark_pop.ListControl(searchDepth=8)
-                if result_list.Exists(maxSearchSeconds=1):
-                    # 按 Down 键选中搜索结果，按 Enter 键确认
-                    tag_edit.SendKeys("{Down}{Enter}")
+                # 检查搜索结果中是否出现匹配的标签项
+                label_item = remark_pop.ListItemControl(
+                    Name=label,
+                    searchDepth=8,
+                )
+                if label_item.Exists(maxSearchSeconds=1):
+                    label_item.Click(ratioX=_rand_ratio(), ratioY=_rand_ratio())
                     time.sleep(0.3)
                 else:
-                    # 标签已存在，清空搜索框后跳过
-                    tag_edit.SendKeys("{Ctrl}a{Del}")
-                    time.sleep(0.2)
-                    logger.info(f"标签已存在，跳过: {label}")
+                    logger.info(f"搜索结果中未找到标签，跳过: {label}")
+
+                # 清空搜索框，准备下一个
+                tag_edit.SendKeys("{Ctrl}a{Del}")
+                time.sleep(0.2)
 
             # 点击"完成"按钮保存；若按钮为 disabled 状态则点击"取消"
             ok_btn = remark_pop.ButtonControl(
@@ -5615,6 +5653,319 @@ class Weixin(WeixinWindow):
             ok_btn.Click(ratioX=_rand_ratio(), ratioY=_rand_ratio())
             time.sleep(0.3)
             logger.info(f"添加标签成功: {nickname} -> {labels}")
+
+        except Exception:
+            self._cleanup_profile()
+            raise
+
+    def remove_label_from_contact(self, nickname: str, labels: list):
+        """
+        移除联系人的标签。
+
+        在"设置备注和标签"弹窗中，先读取已有标签，
+        仅对确实存在的标签执行移除操作：点击"修改标签"按钮后，
+        直接在标签列表中找到对应标签项点击取消勾选。
+        所有操作完成后点击"完成"按钮保存。
+
+        Args:
+            nickname: 联系人昵称
+            labels: 要移除的标签名列表，如 ["朋友", "同事"]
+
+        Raises:
+            ValueError: labels 为空时抛出
+            RuntimeError: 操作失败时抛出
+        """
+        if not labels:
+            raise ValueError("labels 不能为空")
+
+        self.activate()
+        try:
+            chat = self._open_contact_profile(nickname)
+            self._click_profile_menu_item(chat, "设置备注和标签")
+            time.sleep(0.5)
+
+            # 等待"设置备注和标签"弹窗出现
+            remark_pop = self.window.WindowControl(
+                ClassName="mmui::ProfileUniquePop",
+                Name="设置备注和标签",
+            )
+            if not remark_pop.Exists(maxSearchSeconds=3):
+                raise RuntimeError("未找到'设置备注和标签'弹窗")
+
+            # 读取已有标签
+            existing_labels = set()
+            tag_btn = remark_pop.ButtonControl(
+                Name="修改标签",
+                AutomationId="button",
+            )
+            if not tag_btn.Exists(maxSearchSeconds=3):
+                raise RuntimeError("未找到'修改标签'按钮")
+
+            tag_text = tag_btn.TextControl(
+                ClassName="mmui::XTextView",
+            )
+            if tag_text.Exists(maxSearchSeconds=1):
+                name = tag_text.Name
+                if name and name != "搜索或创建标签...":
+                    existing_labels = {t.strip() for t in name.split(",") if t.strip()}
+
+            # 只移除确实存在的标签
+            to_remove = [l for l in labels if l in existing_labels]
+            if not to_remove:
+                logger.info(f"标签均不存在，跳过: {nickname} -> {labels}")
+                cancel_btn = remark_pop.ButtonControl(Name="取消")
+                if cancel_btn.Exists(maxSearchSeconds=1):
+                    cancel_btn.Click(ratioX=_rand_ratio(), ratioY=_rand_ratio())
+                return
+
+            tag_btn.Click(ratioX=_rand_ratio(), ratioY=_rand_ratio())
+            time.sleep(0.3)
+
+            # 直接在列表中找到对应标签项点击取消勾选
+            for label in to_remove:
+                label_item = remark_pop.ListItemControl(
+                    Name=label,
+                    searchDepth=8,
+                )
+                if label_item.Exists(maxSearchSeconds=2):
+                    label_item.Click(ratioX=_rand_ratio(), ratioY=_rand_ratio())
+                    time.sleep(0.3)
+                else:
+                    logger.warning(f"列表中未找到标签项: {label}")
+
+            # 点击"完成"按钮保存
+            ok_btn = remark_pop.ButtonControl(
+                ClassName="mmui::XOutlineButton",
+                Name="完成",
+            )
+            ok_btn.Click(ratioX=_rand_ratio(), ratioY=_rand_ratio())
+            time.sleep(0.3)
+            logger.info(f"移除标签成功: {nickname} -> {labels}")
+
+        except Exception:
+            self._cleanup_profile()
+            raise
+
+    def add_phone_to_contact(self, nickname: str, phones: list):
+        """
+        为联系人添加电话号码。
+
+        在"设置备注和标签"弹窗（mmui::ProfileUniquePop）中操作电话区域
+        （mmui::ProfileFormPhoneView）。
+
+        电话区域结构：
+        - "添加电话"按钮（Name="添加电话", AutomationId="button"）：点击后新增一行输入框
+        - 已有号码项（AutomationId="num_view.self"）：每项包含
+          - "删除电话"按钮（Name="删除电话"）
+          - 输入框（mmui::XLineField -> mmui::XLineEdit, Name="填写电话"）
+
+        添加前先读取已有号码，跳过已存在的。
+
+        Args:
+            nickname: 联系人昵称
+            phones: 电话号码列表，如 ["13800138000", "13900139000"]
+
+        Raises:
+            ValueError: phones 为空时抛出
+            RuntimeError: 操作失败时抛出
+        """
+        if not phones:
+            raise ValueError("phones 不能为空")
+
+        self.activate()
+        try:
+            chat = self._open_contact_profile(nickname)
+            self._click_profile_menu_item(chat, "设置备注和标签")
+            time.sleep(0.5)
+
+            remark_pop = self.window.WindowControl(
+                ClassName="mmui::ProfileUniquePop",
+                Name="设置备注和标签",
+            )
+            if not remark_pop.Exists(maxSearchSeconds=3):
+                raise RuntimeError("未找到'设置备注和标签'弹窗")
+
+            # 读取已有电话号码
+            # 电话区域在 mmui::ProfileFormPhoneView 中
+            # 已有号码以 mmui::XLineField 形式展示，Name 为号码值或"填写电话"（空）
+            existing_phones = set()
+            phone_area = remark_pop.GroupControl(
+                ClassName="mmui::ProfileFormPhoneView",
+            )
+            if phone_area.Exists(maxSearchSeconds=2):
+                # 遍历所有 XLineField 获取已有号码
+                idx = 0
+                while True:
+                    field = phone_area.TextControl(
+                        ClassName="mmui::XLineField",
+                        foundIndex=idx + 1,
+                    )
+                    if not field.Exists(0, 0):
+                        break
+                    name = field.Name
+                    if name and name != "填写电话":
+                        existing_phones.add(name.strip())
+                    idx += 1
+
+            # 过滤掉已存在的电话号码
+            new_phones = [p for p in phones if p not in existing_phones]
+            if not new_phones:
+                logger.info(f"所有电话号码已存在，跳过: {nickname} -> {phones}")
+                cancel_btn = remark_pop.ButtonControl(Name="取消")
+                if cancel_btn.Exists(maxSearchSeconds=1):
+                    cancel_btn.Click(ratioX=_rand_ratio(), ratioY=_rand_ratio())
+                return
+
+            for phone in new_phones:
+                # 先查找是否有空的"填写电话"输入框可用
+                empty_field = phone_area.TextControl(
+                    ClassName="mmui::XLineField",
+                    Name="填写电话",
+                )
+                if not empty_field.Exists(0, 0):
+                    # 没有空输入框，点击"添加电话"按钮新增一行
+                    add_btn = phone_area.ButtonControl(
+                        Name="添加电话",
+                        AutomationId="button",
+                    )
+                    if not add_btn.Exists(maxSearchSeconds=2):
+                        raise RuntimeError("未找到'添加电话'按钮")
+                    add_btn.Click(ratioX=_rand_ratio(), ratioY=_rand_ratio())
+                    time.sleep(0.3)
+
+                # 找到空的输入框中的 XLineEdit
+                empty_field = phone_area.TextControl(
+                    ClassName="mmui::XLineField",
+                    Name="填写电话",
+                )
+                if not empty_field.Exists(maxSearchSeconds=2):
+                    raise RuntimeError("未找到空的电话号码输入框")
+
+                phone_edit = empty_field.EditControl(
+                    ClassName="mmui::XLineEdit",
+                )
+                if not phone_edit.Exists(maxSearchSeconds=2):
+                    raise RuntimeError("未找到电话号码编辑框")
+
+                phone_edit.Click(ratioX=_rand_ratio(), ratioY=_rand_ratio())
+                time.sleep(0.2)
+
+                paste(phone)
+                time.sleep(0.3)
+
+            # 点击"完成"按钮保存
+            ok_btn = remark_pop.ButtonControl(
+                ClassName="mmui::XOutlineButton",
+                Name="完成",
+            )
+            ok_btn.Click(ratioX=_rand_ratio(), ratioY=_rand_ratio())
+            time.sleep(0.3)
+            logger.info(f"添加电话号码成功: {nickname} -> {phones}")
+
+        except Exception:
+            self._cleanup_profile()
+            raise
+
+    def remove_phone_from_contact(self, nickname: str, phones: list):
+        """
+        移除联系人的电话号码。
+
+        在"设置备注和标签"弹窗中操作电话区域（mmui::ProfileFormPhoneView）。
+        先读取已有号码，仅对确实存在的号码执行移除操作：
+        找到对应号码的 num_view.self 容器，点击其中的"删除电话"按钮。
+        所有操作完成后点击"完成"按钮保存。
+
+        Args:
+            nickname: 联系人昵称
+            phones: 要移除的电话号码列表，如 ["13800138000"]
+
+        Raises:
+            ValueError: phones 为空时抛出
+            RuntimeError: 操作失败时抛出
+        """
+        if not phones:
+            raise ValueError("phones 不能为空")
+
+        self.activate()
+        try:
+            chat = self._open_contact_profile(nickname)
+            self._click_profile_menu_item(chat, "设置备注和标签")
+            time.sleep(0.5)
+
+            remark_pop = self.window.WindowControl(
+                ClassName="mmui::ProfileUniquePop",
+                Name="设置备注和标签",
+            )
+            if not remark_pop.Exists(maxSearchSeconds=3):
+                raise RuntimeError("未找到'设置备注和标签'弹窗")
+
+            # 读取已有电话号码
+            existing_phones = set()
+            phone_area = remark_pop.GroupControl(
+                ClassName="mmui::ProfileFormPhoneView",
+            )
+            if not phone_area.Exists(maxSearchSeconds=2):
+                raise RuntimeError("未找到电话区域")
+
+            idx = 0
+            while True:
+                field = phone_area.TextControl(
+                    ClassName="mmui::XLineField",
+                    foundIndex=idx + 1,
+                )
+                if not field.Exists(0, 0):
+                    break
+                name = field.Name
+                if name and name != "填写电话":
+                    existing_phones.add(name.strip())
+                idx += 1
+
+            # 只移除确实存在的电话号码
+            to_remove = [p for p in phones if p in existing_phones]
+            if not to_remove:
+                logger.info(f"电话号码均不存在，跳过: {nickname} -> {phones}")
+                cancel_btn = remark_pop.ButtonControl(Name="取消")
+                if cancel_btn.Exists(maxSearchSeconds=1):
+                    cancel_btn.Click(ratioX=_rand_ratio(), ratioY=_rand_ratio())
+                return
+
+            # 找到对应号码项，点击"删除电话"按钮
+            # 每个号码项的结构：
+            #   GroupControl(AutomationId="num_view.self")
+            #     ButtonControl(Name="删除电话", AutomationId="num_view.self.button")
+            #     GroupControl(AutomationId="num_view.self.phone_num_separator_view")
+            #       XLineField(Name=号码值)
+            for phone in to_remove:
+                # 通过号码值找到对应的 XLineField
+                phone_field = phone_area.TextControl(
+                    ClassName="mmui::XLineField",
+                    Name=phone,
+                )
+                if phone_field.Exists(maxSearchSeconds=1):
+                    # XLineField -> phone_num_separator_view -> num_view.self
+                    separator_view = phone_field.GetParentControl()
+                    if separator_view:
+                        num_view = separator_view.GetParentControl()
+                        if num_view:
+                            del_btn = num_view.ButtonControl(
+                                Name="删除电话",
+                            )
+                            if del_btn.Exists(maxSearchSeconds=1):
+                                del_btn.Click(ratioX=_rand_ratio(), ratioY=_rand_ratio())
+                                time.sleep(0.3)
+                            else:
+                                logger.warning(f"未找到删除按钮: {phone}")
+                else:
+                    logger.warning(f"未找到电话号码项: {phone}")
+
+            # 点击"完成"按钮保存
+            ok_btn = remark_pop.ButtonControl(
+                ClassName="mmui::XOutlineButton",
+                Name="完成",
+            )
+            ok_btn.Click(ratioX=_rand_ratio(), ratioY=_rand_ratio())
+            time.sleep(0.3)
+            logger.info(f"移除电话号码成功: {nickname} -> {phones}")
 
         except Exception:
             self._cleanup_profile()
@@ -5968,4 +6319,3 @@ class Weixin(WeixinWindow):
 
 if __name__ == "__main__":
     wx = Weixin()
-    wx.add_label_to_contact("写诗喂狗", ["测试7"])
