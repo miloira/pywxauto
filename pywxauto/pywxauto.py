@@ -5595,14 +5595,14 @@ class Weixin(WeixinWindow):
             self._click_profile_menu_item(chat, "删除联系人")
             time.sleep(0.5)
 
-            # 等待确认对话框并点击确定
-            confirm_btn = self.window.ButtonControl(Name="确定")
+            # 等待确认对话框并点击"删除"按钮
+            confirm_btn = self.window.ButtonControl(Name="删除")
             if confirm_btn.Exists(maxSearchSeconds=3):
                 confirm_btn.Click(ratioX=_rand_ratio(), ratioY=_rand_ratio())
                 time.sleep(0.3)
                 logger.info(f"删除联系人成功: {nickname}")
             else:
-                logger.warning(f"未找到确认按钮，删除联系人可能未完成: {nickname}")
+                logger.warning(f"未找到'删除'确认按钮，删除联系人可能未完成: {nickname}")
 
         except Exception:
             self._cleanup_profile()
@@ -5832,3 +5832,4 @@ class Weixin(WeixinWindow):
 
 if __name__ == "__main__":
     wx = Weixin()
+    wx.delete_contact("写诗喂狗")
