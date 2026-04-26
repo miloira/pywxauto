@@ -5187,6 +5187,153 @@ class Chat:
             # 4. 收回聊天信息面板
             self._close_chat_info_panel()
 
+    def _get_chat_info_switch(self, name: str) -> tuple:
+        """
+        获取聊天信息面板中指定开关的当前状态。
+
+        先展开聊天信息面板，查找 mmui::XSwitchButton 开关控件，
+        通过 TogglePattern 读取状态。
+
+        Args:
+            name: 开关名称（"消息免打扰" 或 "置顶聊天"）
+
+        Returns:
+            (switch_control, is_on: bool) 元组
+        """
+        sw = self._win.CheckBoxControl(
+            ClassName="mmui::XSwitchButton",
+            Name=name,
+        )
+        if not sw.Exists(maxSearchSeconds=3):
+            raise RuntimeError(f"未找到'{name}'开关")
+        toggle = sw.GetTogglePattern()
+        is_on = toggle.ToggleState == 1 if toggle else False
+        return sw, is_on
+
+    def _set_chat_info_switch(self, name: str, enable: bool):
+        """
+        设置聊天信息面板中指定开关的状态。
+
+        Args:
+            name: 开关名称（"消息免打扰" 或 "置顶聊天"）
+            enable: True 开启，False 关闭
+        """
+        if self._wx:
+            self._wx.activate()
+
+        self._click_chat_info_button()
+        time.sleep(0.5)
+
+        try:
+            sw, is_on = self._get_chat_info_switch(name)
+            if is_on != enable:
+                sw.Click(ratioX=_rand_ratio(), ratioY=_rand_ratio())
+                time.sleep(0.3)
+                action = "开启" if enable else "关闭"
+                logger.info(f"{action}{name}成功: {self.current_name}")
+        finally:
+            self._close_chat_info_panel()
+
+    @property
+    def is_pinned(self) -> bool:
+        """当前会话是否已置顶"""
+        if self._wx:
+            self._wx.activate()
+        self._click_chat_info_button()
+        time.sleep(0.5)
+        try:
+            _, is_on = self._get_chat_info_switch("置顶聊天")
+            return is_on
+        finally:
+            self._close_chat_info_panel()
+
+    def pin_chat(self):
+        """置顶当前会话"""
+        self._set_chat_info_switch("置顶聊天", True)
+
+    def unpin_chat(self):
+        """取消置顶当前会话"""
+        self._set_chat_info_switch("置顶聊天", False)
+
+    @property
+    def is_muted(self) -> bool:
+        """当前会话是否已开启消息免打扰"""
+        if self._wx:
+            self._wx.activate()
+        self._click_chat_info_button()
+        time.sleep(0.5)
+        try:
+            _, is_on = self._get_chat_info_switch("消息免打扰")
+            return is_on
+        finally:
+            self._close_chat_info_panel()
+
+    def mute(self):
+        """开启消息免打扰"""
+        self._set_chat_info_switch("消息免打扰", True)
+
+    def unmute(self):
+        """关闭消息免打扰"""
+        self._set_chat_info_switch("消息免打扰", False)
+
+    def fold_chat(self):
+        """
+        折叠当前会话。
+
+        "折叠该聊天"是"消息免打扰"的子选项，
+        只有在消息免打扰开启时才会出现。
+        如果消息免打扰未开启，会先自动开启。
+        """
+        if self._wx:
+            self._wx.activate()
+
+        self._click_chat_info_button()
+        time.sleep(0.5)
+
+        try:
+            # 检查消息免打扰是否开启，未开启则先开启
+            mute_sw, mute_on = self._get_chat_info_switch("消息免打扰")
+            if not mute_on:
+                mute_sw.Click(ratioX=_rand_ratio(), ratioY=_rand_ratio())
+                time.sleep(0.5)
+
+            # 设置折叠该聊天
+            fold_sw, fold_on = self._get_chat_info_switch("折叠该聊天")
+            if not fold_on:
+                fold_sw.Click(ratioX=_rand_ratio(), ratioY=_rand_ratio())
+                time.sleep(0.3)
+                logger.info(f"折叠聊天成功: {self.current_name}")
+        finally:
+            self._close_chat_info_panel()
+
+    def unfold_chat(self):
+        """
+        取消折叠当前会话。
+
+        "折叠该聊天"是"消息免打扰"的子选项，
+        只有在消息免打扰开启时才会出现。
+        """
+        if self._wx:
+            self._wx.activate()
+
+        self._click_chat_info_button()
+        time.sleep(0.5)
+
+        try:
+            # 折叠该聊天只在消息免打扰开启时存在
+            fold_sw = self._win.CheckBoxControl(
+                ClassName="mmui::XSwitchButton",
+                Name="折叠该聊天",
+            )
+            if fold_sw.Exists(maxSearchSeconds=2):
+                toggle = fold_sw.GetTogglePattern()
+                if toggle and toggle.ToggleState == 1:
+                    fold_sw.Click(ratioX=_rand_ratio(), ratioY=_rand_ratio())
+                    time.sleep(0.3)
+                    logger.info(f"取消折叠聊天成功: {self.current_name}")
+        finally:
+            self._close_chat_info_panel()
+
     # ---- 联系人资料面板操作（仅私聊可用） ----
 
     def _ensure_contact_chat(self):
@@ -7229,6 +7376,36 @@ class Weixin(WeixinWindow):
         chat = self.open_session_by_search(nickname)
         chat.clear_chat_history()
 
+    def pin_chat(self, nickname: str):
+        """置顶指定会话，委托给 Chat.pin_chat"""
+        chat = self.open_session_by_search(nickname)
+        chat.pin_chat()
+
+    def unpin_chat(self, nickname: str):
+        """取消置顶指定会话，委托给 Chat.unpin_chat"""
+        chat = self.open_session_by_search(nickname)
+        chat.unpin_chat()
+
+    def mute_chat(self, nickname: str):
+        """开启指定会话的消息免打扰，委托给 Chat.mute"""
+        chat = self.open_session_by_search(nickname)
+        chat.mute()
+
+    def unmute_chat(self, nickname: str):
+        """关闭指定会话的消息免打扰，委托给 Chat.unmute"""
+        chat = self.open_session_by_search(nickname)
+        chat.unmute()
+
+    def fold_chat(self, nickname: str):
+        """折叠指定会话，委托给 Chat.fold_chat"""
+        chat = self.open_session_by_search(nickname)
+        chat.fold_chat()
+
+    def unfold_chat(self, nickname: str):
+        """取消折叠指定会话，委托给 Chat.unfold_chat"""
+        chat = self.open_session_by_search(nickname)
+        chat.unfold_chat()
+
     def lock(self):
         self.activate()
         more_btn = self.navigator._win.ButtonControl(Name="更多")
@@ -7438,3 +7615,5 @@ class Weixin(WeixinWindow):
 
 if __name__ == "__main__":
     wx = Weixin()
+    wx.fold_chat("写诗喂狗")
+    wx.unfold_chat("写诗喂狗")
