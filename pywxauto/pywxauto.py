@@ -60,22 +60,24 @@ def ensure_narrator_registry() -> bool:
     reg_path = r"SOFTWARE\Microsoft\Narrator\NoRoam"
     key_name = "RunningState"
     try:
-        key = winreg.OpenKey(
+        # CreateKeyEx 在键不存在时自动创建，存在时直接打开
+        key = winreg.CreateKeyEx(
             winreg.HKEY_CURRENT_USER, reg_path, 0,
             winreg.KEY_READ | winreg.KEY_WRITE,
         )
         try:
-            value, _ = winreg.QueryValueEx(key, key_name)
-            if value == 0:
+            try:
+                value, _ = winreg.QueryValueEx(key, key_name)
+                if value == 0:
+                    winreg.SetValueEx(key, key_name, 0, winreg.REG_DWORD, 1)
+                    return True
+                return False
+            except FileNotFoundError:
+                # RunningState 值不存在，创建它
                 winreg.SetValueEx(key, key_name, 0, winreg.REG_DWORD, 1)
-                winreg.CloseKey(key)
                 return True
+        finally:
             winreg.CloseKey(key)
-            return False
-        except FileNotFoundError:
-            winreg.SetValueEx(key, key_name, 0, winreg.REG_DWORD, 1)
-            winreg.CloseKey(key)
-            return True
     except PermissionError as e:
         raise RegistryError(f"注册表访问被拒绝: {e}")
     except Exception as e:
