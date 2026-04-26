@@ -354,6 +354,572 @@ class ChatFile:
                 f"大小: {self.file_size} | 状态: {status}")
 
 
+
+def _rand_ratio() -> float:
+    """返回 0.2~0.6 之间的随机比例，用于模拟人类点击偏移"""
+    return random.uniform(0.2, 0.6)
+
+
+class WeixinWindow:
+    """
+    微信窗口基类，封装通用的窗口操作。
+
+    子类需要设置 self._win 为 uiautomation 的 WindowControl 实例。
+    提供 activate、pin、unpin、minimize、maximize、restore、close 等通用操作，
+    支持两种模式：
+    - use_message=True（默认）: 通过 Windows 消息 API 操作，不需要窗口可见
+    - use_message=False: 通过点击标题栏按钮操作，模拟用户行为
+    """
+
+    # 子类可覆盖，指定标题栏按钮的 ClassName
+    _PIN_BTN_CLASS = "mmui::PinnedButton"
+    _BTN_CLASS = "mmui::XButton"
+
+    @property
+    def _window(self) -> auto.WindowControl:
+        """获取窗口控件，子类可覆盖"""
+        return self._win
+
+    @property
+    def is_topmost(self) -> bool:
+        """窗口是否已置顶"""
+        return self._window.IsTopmost()
+
+    @property
+    def is_minimized(self) -> bool:
+        """窗口是否已最小化"""
+        return self._window.IsMinimize()
+
+    @property
+    def is_maximized(self) -> bool:
+        """窗口是否已最大化"""
+        return self._window.IsMaximize()
+
+    def activate(self):
+        """激活窗口（置前并聚焦）"""
+        self._window.SetActive()
+        self._window.SetFocus()
+        time.sleep(0.2)
+
+    def pin(self, use_message: bool = True, simulate_move: bool = True):
+        """置顶窗口"""
+        if use_message:
+            self._window.SetTopmost(True)
+        else:
+            self.activate()
+            btn = self._window.ButtonControl(
+                ClassName=self._PIN_BTN_CLASS, Name="置顶",
+            )
+            if btn.Exists(0, 0):
+                btn.Click(simulateMove=simulate_move)
+
+    def unpin(self, use_message: bool = True, simulate_move: bool = True):
+        """取消置顶窗口"""
+        if use_message:
+            self._window.SetTopmost(False)
+        else:
+            self.activate()
+            btn = self._window.ButtonControl(
+                ClassName=self._PIN_BTN_CLASS, Name="取消置顶",
+            )
+            if btn.Exists(0, 0):
+                btn.Click(simulateMove=simulate_move)
+
+    def minimize(self, use_message: bool = True, simulate_move: bool = True):
+        """最小化窗口"""
+        if use_message:
+            self._window.Minimize()
+        else:
+            self.activate()
+            btn = self._window.ButtonControl(
+                ClassName=self._BTN_CLASS, Name="最小化",
+            )
+            if not btn.Exists(maxSearchSeconds=1):
+                raise RuntimeError("未找到最小化按钮")
+            btn.Click(ratioX=_rand_ratio(), ratioY=_rand_ratio(),
+                      simulateMove=simulate_move)
+
+    def maximize(self, use_message: bool = True, simulate_move: bool = True):
+        """最大化/还原窗口"""
+        if use_message:
+            if self.is_maximized:
+                self._window.Restore()
+            else:
+                self._window.Maximize()
+        else:
+            self.activate()
+            for name in ("最大化", "还原"):
+                btn = self._window.ButtonControl(
+                    ClassName=self._BTN_CLASS, Name=name,
+                )
+                if btn.Exists(0, 0):
+                    btn.Click(ratioX=_rand_ratio(), ratioY=_rand_ratio(),
+                              simulateMove=simulate_move)
+                    return
+            raise RuntimeError("未找到最大化/还原按钮")
+
+    def restore(self):
+        """还原窗口"""
+        self._window.Restore()
+
+    def close(self, use_message: bool = True, simulate_move: bool = True):
+        """关闭窗口"""
+        if use_message:
+            wp = self._window.GetWindowPattern()
+            if wp:
+                wp.Close()
+            else:
+                raise RuntimeError("窗口不支持 WindowPattern.Close")
+        else:
+            self.activate()
+            btn = self._window.ButtonControl(
+                ClassName=self._BTN_CLASS, Name="关闭",
+            )
+            if not btn.Exists(maxSearchSeconds=1):
+                raise RuntimeError("未找到关闭按钮")
+            btn.Click(ratioX=_rand_ratio(), ratioY=_rand_ratio(),
+                      simulateMove=simulate_move)
+
+
+class Login(WeixinWindow):
+    """
+    微信登录窗口操作类。
+
+    微信 4.x 的登录窗口在启动后、进入主界面前显示，
+    提供"进入微信"、"切换账号"、"仅传输文件"等操作。
+
+    关键控件信息（来自 desktop-ui-inspector 对微信 4.x 的实际检查）：
+    - 窗口: WindowControl, ClassName="mmui::LoginWindow", Name="微信"
+    - 标题栏: ToolBarControl, ClassName="mmui::TitleBar"
+      - 关闭按钮: ButtonControl, ClassName="mmui::XButton", Name="关闭"
+      - 标题文本: TextControl, ClassName="mmui::XTextView", Name="微信"
+      - 网络代理设置: ButtonControl, ClassName="mmui::XButton", Name="网络代理设置"
+    - 头像: ButtonControl, ClassName="mmui::XAvatarImage"
+    - 用户名: TextControl, ClassName="mmui::XTextView",
+              AutomationId="current_login_nick_name",
+              Name 格式: "当前登录用户{昵称}"
+    - 进入微信: ButtonControl, ClassName="mmui::XOutlineButton", Name="进入微信"
+    - 切换账号: ButtonControl, ClassName="mmui::XButton", Name="切换账号"
+    - 仅传输文件: ButtonControl, ClassName="mmui::XButton", Name="仅传输文件"
+    """
+
+    WINDOW_CLASS = "mmui::LoginWindow"
+    WINDOW_NAME = "微信"
+    NICKNAME_ID = "current_login_nick_name"
+    ENTER_BTN_NAME = "进入微信"
+    ENTER_BTN_CLASS = "mmui::XOutlineButton"
+    SWITCH_ACCOUNT_BTN_NAME = "切换账号"
+    TRANSFER_ONLY_BTN_NAME = "仅传输文件"
+    PROXY_BTN_NAME = "网络代理设置"
+
+    def __init__(self):
+        self._win = auto.WindowControl(
+            ClassName=self.WINDOW_CLASS,
+            Name=self.WINDOW_NAME,
+            Depth=1,
+        )
+
+    @property
+    def exists(self) -> bool:
+        """登录窗口是否存在"""
+        return self._win.Exists(maxSearchSeconds=3)
+
+    def _ensure_exists(self):
+        if not self._win.Exists(maxSearchSeconds=3):
+            raise RuntimeError("微信登录窗口未找到")
+
+    @property
+    def nickname(self) -> str:
+        """
+        获取当前登录用户昵称。
+
+        从 AutomationId="current_login_nick_name" 的 TextControl 中提取，
+        Name 格式为 "当前登录用户{昵称}"，去掉前缀后返回昵称部分。
+
+        Returns:
+            用户昵称字符串，未找到时返回空字符串
+        """
+        self._ensure_exists()
+        txt = self._win.TextControl(
+            AutomationId=self.NICKNAME_ID,
+        )
+        if not txt.Exists(maxSearchSeconds=2):
+            return ""
+        name = txt.Name or ""
+        prefix = "当前登录用户"
+        if name.startswith(prefix):
+            return name[len(prefix):]
+        return name
+
+    def enter(self, timeout: int = 30) -> bool:
+        """
+        点击"进入微信"按钮登录。
+
+        点击后等待登录窗口消失（表示已进入主界面）。
+
+        Args:
+            timeout: 等待登录窗口消失的超时时间（秒），默认 30 秒
+
+        Returns:
+            True 登录成功（窗口已消失）
+
+        Raises:
+            RuntimeError: 未找到按钮或登录超时
+        """
+        self._ensure_exists()
+        self.activate()
+        btn = self._win.ButtonControl(
+            ClassName=self.ENTER_BTN_CLASS,
+            Name=self.ENTER_BTN_NAME,
+        )
+        if not btn.Exists(maxSearchSeconds=2):
+            raise RuntimeError("未找到'进入微信'按钮")
+        btn.Click(ratioX=_rand_ratio(), ratioY=_rand_ratio())
+
+        # 等待登录窗口消失
+        for _ in range(timeout):
+            if not self._win.Exists(maxSearchSeconds=1):
+                logger.info("已进入微信")
+                return True
+            time.sleep(1)
+
+        raise RuntimeError("登录超时，登录窗口未关闭")
+
+    def switch_account(self):
+        """
+        点击"切换账号"按钮。
+
+        切换到账号选择/扫码登录界面。
+        """
+        self._ensure_exists()
+        self.activate()
+        btn = self._win.ButtonControl(
+            ClassName="mmui::XButton",
+            Name=self.SWITCH_ACCOUNT_BTN_NAME,
+        )
+        if not btn.Exists(maxSearchSeconds=2):
+            raise RuntimeError("未找到'切换账号'按钮")
+        btn.Click(ratioX=_rand_ratio(), ratioY=_rand_ratio())
+        time.sleep(0.5)
+
+    def transfer_only(self):
+        """
+        点击"仅传输文件"按钮。
+
+        进入仅文件传输模式，不登录完整微信。
+        """
+        self._ensure_exists()
+        self.activate()
+        btn = self._win.ButtonControl(
+            ClassName="mmui::XButton",
+            Name=self.TRANSFER_ONLY_BTN_NAME,
+        )
+        if not btn.Exists(maxSearchSeconds=2):
+            raise RuntimeError("未找到'仅传输文件'按钮")
+        btn.Click(ratioX=_rand_ratio(), ratioY=_rand_ratio())
+        time.sleep(0.5)
+
+    # ---- 网络代理设置相关控件信息 ----
+    # 代理设置页面在 LoginWindow 内部通过 QStackedWidget 切换显示，
+    # 不是独立窗口，所有控件仍在 self._win 下。
+    #
+    # 标题栏变化:
+    #   - "网络代理设置"按钮消失，出现"返回"按钮
+    #   - 返回按钮: ButtonControl, ClassName="mmui::XButton", Name="返回"
+    # 页面标题: TextControl, ClassName="mmui::XTextView", Name="网络代理设置"
+    # 使用代理开关: CheckBoxControl, ClassName="mmui::XSwitchButton", Name="使用代理"
+    #   支持 TogglePattern (toggleState: 0=关, 1=开)
+    # 开启代理后显示的表单字段:
+    #   - 地址: EditControl, ClassName="mmui::XLineEdit", Name="地址"
+    #   - 端口: EditControl, ClassName="mmui::XLineEdit", Name="端口"
+    #   - 账户: EditControl, ClassName="mmui::XLineEdit", Name="账户"
+    #   - 密码: EditControl, ClassName="mmui::XLineEdit", Name="密码"
+    # 保存按钮: ButtonControl, ClassName="mmui::XOutlineButton", Name="保存"
+
+    PROXY_BACK_BTN_NAME = "返回"
+    PROXY_SWITCH_NAME = "使用代理"
+    PROXY_SWITCH_CLASS = "mmui::XSwitchButton"
+    PROXY_SAVE_BTN_NAME = "保存"
+    PROXY_SAVE_BTN_CLASS = "mmui::XOutlineButton"
+    PROXY_EDIT_CLASS = "mmui::XLineEdit"
+    PROXY_ADDR_NAME = "地址"
+    PROXY_PORT_NAME = "端口"
+    PROXY_USER_NAME = "账户"
+    PROXY_PASS_NAME = "密码"
+
+    def _is_proxy_page_open(self) -> bool:
+        """判断当前是否在代理设置页面（通过检测"返回"按钮是否存在）"""
+        back_btn = self._win.ButtonControl(
+            ClassName="mmui::XButton",
+            Name=self.PROXY_BACK_BTN_NAME,
+        )
+        return back_btn.Exists(0, 0)
+
+    def _ensure_proxy_page(self):
+        """确保当前在代理设置页面，如果不在则打开"""
+        if not self._is_proxy_page_open():
+            self.open_proxy_settings()
+
+    def open_proxy_settings(self):
+        """
+        点击"网络代理设置"按钮，进入代理配置页面。
+
+        代理设置页面在 LoginWindow 内部通过 QStackedWidget 切换显示，
+        点击后标题栏的"网络代理设置"按钮消失，出现"返回"按钮。
+        """
+        self._ensure_exists()
+        self.activate()
+        btn = self._win.ButtonControl(
+            ClassName="mmui::XButton",
+            Name=self.PROXY_BTN_NAME,
+        )
+        if not btn.Exists(maxSearchSeconds=2):
+            raise RuntimeError("未找到'网络代理设置'按钮")
+        btn.Click(ratioX=_rand_ratio(), ratioY=_rand_ratio())
+        time.sleep(0.5)
+
+        # 等待代理设置页面出现
+        back_btn = self._win.ButtonControl(
+            ClassName="mmui::XButton",
+            Name=self.PROXY_BACK_BTN_NAME,
+        )
+        if not back_btn.Exists(maxSearchSeconds=3):
+            raise RuntimeError("代理设置页面未打开")
+
+    def close_proxy_settings(self):
+        """
+        点击"返回"按钮，从代理设置页面返回登录页面。
+        """
+        self._ensure_exists()
+        if not self._is_proxy_page_open():
+            return
+
+        btn = self._win.ButtonControl(
+            ClassName="mmui::XButton",
+            Name=self.PROXY_BACK_BTN_NAME,
+        )
+        if not btn.Exists(maxSearchSeconds=2):
+            raise RuntimeError("未找到'返回'按钮")
+        btn.Click(ratioX=_rand_ratio(), ratioY=_rand_ratio())
+        time.sleep(0.5)
+
+    @property
+    def is_proxy_enabled(self) -> bool:
+        """
+        获取"使用代理"开关的当前状态。
+
+        Returns:
+            True 代理已开启，False 代理已关闭
+        """
+        self._ensure_exists()
+        self._ensure_proxy_page()
+        sw = self._win.CheckBoxControl(
+            ClassName=self.PROXY_SWITCH_CLASS,
+            Name=self.PROXY_SWITCH_NAME,
+        )
+        if not sw.Exists(maxSearchSeconds=2):
+            raise RuntimeError("未找到'使用代理'开关")
+        toggle = sw.GetTogglePattern()
+        if toggle:
+            return toggle.ToggleState == 1
+        return False
+
+    def enable_proxy(self):
+        """
+        开启代理。
+
+        如果代理已开启则不操作。
+        """
+        self._ensure_exists()
+        self._ensure_proxy_page()
+        if self.is_proxy_enabled:
+            return
+        sw = self._win.CheckBoxControl(
+            ClassName=self.PROXY_SWITCH_CLASS,
+            Name=self.PROXY_SWITCH_NAME,
+        )
+        if not sw.Exists(maxSearchSeconds=2):
+            raise RuntimeError("未找到'使用代理'开关")
+        sw.Click(ratioX=_rand_ratio(), ratioY=_rand_ratio())
+        time.sleep(0.5)
+
+    def disable_proxy(self):
+        """
+        关闭代理。
+
+        如果代理已关闭则不操作。
+        """
+        self._ensure_exists()
+        self._ensure_proxy_page()
+        if not self.is_proxy_enabled:
+            return
+        sw = self._win.CheckBoxControl(
+            ClassName=self.PROXY_SWITCH_CLASS,
+            Name=self.PROXY_SWITCH_NAME,
+        )
+        if not sw.Exists(maxSearchSeconds=2):
+            raise RuntimeError("未找到'使用代理'开关")
+        sw.Click(ratioX=_rand_ratio(), ratioY=_rand_ratio())
+        time.sleep(0.5)
+
+    def _find_proxy_edit(self, name: str) -> auto.EditControl:
+        """
+        在代理设置页面中查找指定名称的输入框。
+
+        输入框: EditControl, ClassName="mmui::XLineEdit"
+
+        Args:
+            name: 输入框名称（"地址"、"端口"、"账户"、"密码"）
+
+        Returns:
+            EditControl 控件
+
+        Raises:
+            RuntimeError: 代理未开启或未找到输入框
+        """
+        if not self.is_proxy_enabled:
+            raise RuntimeError("代理未开启，无法操作表单字段")
+        edit = self._win.EditControl(
+            ClassName=self.PROXY_EDIT_CLASS,
+            Name=name,
+        )
+        if not edit.Exists(maxSearchSeconds=2):
+            raise RuntimeError(f"未找到'{name}'输入框")
+        return edit
+
+    def _set_proxy_field(self, name: str, value: str):
+        """设置代理表单字段的值"""
+        edit = self._find_proxy_edit(name)
+        edit.Click(ratioX=0.5, ratioY=0.5)
+        time.sleep(0.2)
+        edit.SendKeys("{Ctrl}a{Del}")
+        time.sleep(0.1)
+        vp = edit.GetValuePattern()
+        if vp:
+            vp.SetValue(value)
+        else:
+            edit.SendKeys(value)
+        time.sleep(0.2)
+
+    def _get_proxy_field(self, name: str) -> str:
+        """获取代理表单字段的值"""
+        edit = self._find_proxy_edit(name)
+        vp = edit.GetValuePattern()
+        if vp:
+            return vp.Value or ""
+        return ""
+
+    def set_proxy(self, address: str = "", port: str = "",
+                  username: str = "", password: str = ""):
+        """
+        设置代理参数。
+
+        自动打开代理设置页面，开启代理开关，填写表单字段。
+        仅填写非空参数对应的字段。
+
+        Args:
+            address:  代理地址
+            port:     代理端口
+            username: 代理账户（可选）
+            password: 代理密码（可选）
+        """
+        self._ensure_exists()
+        self._ensure_proxy_page()
+        self.enable_proxy()
+
+        if address:
+            self._set_proxy_field(self.PROXY_ADDR_NAME, address)
+        if port:
+            self._set_proxy_field(self.PROXY_PORT_NAME, port)
+        if username:
+            self._set_proxy_field(self.PROXY_USER_NAME, username)
+        if password:
+            self._set_proxy_field(self.PROXY_PASS_NAME, password)
+
+    def get_proxy(self) -> dict:
+        """
+        获取当前代理配置。
+
+        Returns:
+            dict: {
+                "enabled": bool,
+                "address": str,
+                "port": str,
+                "username": str,
+                "password": str,
+            }
+            代理未开启时 address/port/username/password 为空字符串。
+        """
+        self._ensure_exists()
+        self._ensure_proxy_page()
+
+        enabled = self.is_proxy_enabled
+        result = {
+            "enabled": enabled,
+            "address": "",
+            "port": "",
+            "username": "",
+            "password": "",
+        }
+        if enabled:
+            result["address"] = self._get_proxy_field(self.PROXY_ADDR_NAME)
+            result["port"] = self._get_proxy_field(self.PROXY_PORT_NAME)
+            result["username"] = self._get_proxy_field(self.PROXY_USER_NAME)
+            result["password"] = self._get_proxy_field(self.PROXY_PASS_NAME)
+        return result
+
+    def save_proxy(self):
+        """
+        点击"保存"按钮保存代理设置。
+
+        保存后自动返回登录页面。
+        """
+        self._ensure_exists()
+        self._ensure_proxy_page()
+        btn = self._win.ButtonControl(
+            ClassName=self.PROXY_SAVE_BTN_CLASS,
+            Name=self.PROXY_SAVE_BTN_NAME,
+        )
+        if not btn.Exists(maxSearchSeconds=2):
+            raise RuntimeError("未找到'保存'按钮")
+        btn.Click(ratioX=_rand_ratio(), ratioY=_rand_ratio())
+        time.sleep(0.5)
+
+    def close(self, use_message: bool = True, simulate_move: bool = True):
+        """
+        关闭登录窗口。
+
+        Args:
+            use_message: True — 通过 WindowPattern 关闭（默认）
+                         False — 点击标题栏"关闭"按钮
+            simulate_move: 是否模拟鼠标移动（仅 use_message=False 时有效）
+        """
+        self._ensure_exists()
+        if use_message:
+            wp = self._win.GetWindowPattern()
+            if wp:
+                wp.Close()
+            else:
+                raise RuntimeError("登录窗口不支持 WindowPattern.Close")
+        else:
+            self.activate()
+            btn = self._win.ButtonControl(
+                ClassName="mmui::XButton",
+                Name="关闭",
+            )
+            if not btn.Exists(maxSearchSeconds=1):
+                raise RuntimeError("未找到关闭按钮")
+            btn.Click(ratioX=_rand_ratio(), ratioY=_rand_ratio(),
+                      simulateMove=simulate_move)
+        time.sleep(0.3)
+
+    def __str__(self) -> str:
+        if not self._win.Exists(0, 0):
+            return "Login(closed)"
+        nick = self.nickname
+        return f"Login(user={nick!r})"
+
+
 class SessionItem:
     """会话列表中的一条会话"""
 
@@ -462,9 +1028,12 @@ class MomentItem:
         return f"[{self.type}] [{self.timestamp}] {self.sender}: {preview}"
 
 
-class Moment:
+class Moment(WeixinWindow):
     """
     朋友圈（Moments）操作类。
+
+    继承自 WeixinWindow，复用通用窗口操作（activate、pin、unpin、
+    minimize、maximize、restore、close）。
 
     微信 4.x 的朋友圈通过左侧导航栏的"朋友圈"标签页打开，
     会弹出一个独立窗口。
@@ -499,25 +1068,28 @@ class Moment:
 
     def __init__(self, wx: "Weixin"):
         self._wx = wx
+        self._win = auto.WindowControl(
+            ClassName=self.SNS_WINDOW_CLASS,
+            AutomationId=self.SNS_WINDOW_ID,
+        )
 
-    def _open_sns_window(self) -> auto.WindowControl:
+    @property
+    def exists(self) -> bool:
+        """朋友圈窗口是否存在"""
+        return self._win.Exists(maxSearchSeconds=1)
+
+    def _open_sns_window(self):
         """
-        打开朋友圈独立窗口并返回窗口控件。
+        打开朋友圈独立窗口。
 
         如果窗口已存在则直接激活，否则通过导航栏点击"朋友圈"打开。
 
         窗口: WindowControl, ClassName="mmui::SNSWindow",
               AutomationId="SNSWindow", Name="朋友圈"
         """
-        win = auto.WindowControl(
-            ClassName=self.SNS_WINDOW_CLASS,
-            AutomationId=self.SNS_WINDOW_ID,
-        )
-        if win.Exists(maxSearchSeconds=1):
-            win.SetActive()
-            win.SetFocus()
-            time.sleep(0.5)
-            return win
+        if self._win.Exists(maxSearchSeconds=1):
+            self.activate()
+            return
 
         # 窗口不存在，通过导航栏打开
         self._wx.activate()
@@ -525,22 +1097,19 @@ class Moment:
         time.sleep(1)
 
         # 等待独立窗口出现
-        if not win.Exists(maxSearchSeconds=5):
+        if not self._win.Exists(maxSearchSeconds=5):
             raise RuntimeError("朋友圈窗口未打开")
 
-        win.SetActive()
-        win.SetFocus()
-        time.sleep(0.5)
-        return win
+        self.activate()
 
-    def _find_sns_list(self, win: auto.WindowControl) -> auto.ListControl:
+    def _find_sns_list(self) -> auto.ListControl:
         """
         在朋友圈窗口中查找 feed 列表控件。
 
         列表: ListControl, ClassName="mmui::TimeLineListView",
               AutomationId="sns_list"
         """
-        lc = win.ListControl(
+        lc = self._win.ListControl(
             ClassName=self.SNS_LIST_CLASS,
             AutomationId=self.SNS_LIST_ID,
         )
@@ -688,11 +1257,11 @@ class Moment:
         Returns:
             MomentItem 列表
         """
-        win = self._open_sns_window()
+        self._open_sns_window()
 
         if position == "top":
             # 点击"刷新"按钮回到顶部
-            refresh_btn = win.ButtonControl(
+            refresh_btn = self._win.ButtonControl(
                 ClassName="mmui::XTabBarItem",
                 Name="刷新",
             )
@@ -700,7 +1269,7 @@ class Moment:
                 refresh_btn.Click(ratioX=_rand_ratio(), ratioY=_rand_ratio())
                 time.sleep(2)  # 等待刷新和回到顶部
 
-        lc = self._find_sns_list(win)
+        lc = self._find_sns_list()
 
         moments: list[MomentItem] = []
         seen_texts: set[str] = set()
@@ -764,7 +1333,7 @@ class Moment:
     TOOLBAR_CLASS = "mmui::SNSWindowToolBar"
     TOOLBAR_ID = "sns_window_tool_bar"
 
-    def _open_publish_panel(self, win: auto.WindowControl, text_only: bool = False) -> auto.Control:
+    def _open_publish_panel(self, text_only: bool = False) -> auto.Control:
         """
         打开发布面板并返回面板控件。
 
@@ -778,7 +1347,7 @@ class Moment:
         面板: GroupControl, ClassName="mmui::SnsPublishPanel",
               AutomationId="SnsPublishPanel"
         """
-        panel = win.GroupControl(
+        panel = self._win.GroupControl(
             ClassName=self.PUBLISH_PANEL_CLASS,
             AutomationId=self.PUBLISH_PANEL_ID,
         )
@@ -786,7 +1355,7 @@ class Moment:
             return panel
 
         # 查找工具栏
-        toolbar = win.ToolBarControl(
+        toolbar = self._win.ToolBarControl(
             ClassName=self.TOOLBAR_CLASS,
             AutomationId=self.TOOLBAR_ID,
         )
@@ -892,10 +1461,10 @@ class Moment:
             raise ValueError("发布内容不能为空")
 
         # 1. 打开朋友圈窗口
-        win = self._open_sns_window()
+        self._open_sns_window()
 
         # 2. 长按"发表"按钮 3 秒，进入纯文本发布模式
-        panel = self._open_publish_panel(win, text_only=True)
+        panel = self._open_publish_panel(text_only=True)
         time.sleep(0.5)
 
         # 3. 找到文本输入框并输入内容
@@ -934,8 +1503,8 @@ class Moment:
 
         如果发布面板已打开，点击"取消"按钮关闭面板。
         """
-        win = self._open_sns_window()
-        panel = win.GroupControl(
+        self._open_sns_window()
+        panel = self._win.GroupControl(
             ClassName=self.PUBLISH_PANEL_CLASS,
             AutomationId=self.PUBLISH_PANEL_ID,
         )
@@ -948,10 +1517,8 @@ class Moment:
 
     # ---- 工具栏按钮名称 ----
     REFRESH_BTN_NAME = "刷新"
-    MINIMIZE_BTN_NAME = "最小化"
-    CLOSE_BTN_NAME = "关闭"
 
-    def _find_toolbar_button(self, win: auto.WindowControl, name: str) -> auto.ButtonControl:
+    def _find_toolbar_button(self, name: str) -> auto.ButtonControl:
         """
         在朋友圈工具栏中查找指定名称的按钮。
 
@@ -960,8 +1527,7 @@ class Moment:
         按钮:   ButtonControl, ClassName="mmui::XTabBarItem"
 
         Args:
-            win:  朋友圈窗口控件
-            name: 按钮名称（如 "刷新"、"最小化"、"关闭"）
+            name: 按钮名称（如 "刷新"、"发表"）
 
         Returns:
             ButtonControl 控件
@@ -969,7 +1535,7 @@ class Moment:
         Raises:
             RuntimeError: 未找到工具栏或按钮时抛出
         """
-        toolbar = win.ToolBarControl(
+        toolbar = self._win.ToolBarControl(
             ClassName=self.TOOLBAR_CLASS,
             AutomationId=self.TOOLBAR_ID,
         )
@@ -990,204 +1556,13 @@ class Moment:
 
         点击工具栏"刷新"按钮，回到列表顶部并加载最新动态。
         """
-        win = self._open_sns_window()
-        btn = self._find_toolbar_button(win, self.REFRESH_BTN_NAME)
+        self._open_sns_window()
+        btn = self._find_toolbar_button(self.REFRESH_BTN_NAME)
         btn.Click(ratioX=_rand_ratio(), ratioY=_rand_ratio())
         time.sleep(2)
 
-    def minimize(self, by_event: bool = False):
-        """
-        最小化朋友圈窗口。
-
-        Args:
-            by_event: False — 点击工具栏"最小化"按钮（默认）
-                      True  — 通过 WindowPattern 发送最小化事件
-        """
-        win = self._open_sns_window()
-        if by_event:
-            # 通过 WindowPattern 最小化
-            pattern = win.GetWindowPattern()
-            if pattern:
-                pattern.SetWindowVisualState(auto.WindowVisualState.Minimized)
-            else:
-                raise RuntimeError("朋友圈窗口不支持 WindowPattern")
-        else:
-            btn = self._find_toolbar_button(win, self.MINIMIZE_BTN_NAME)
-            btn.Click(ratioX=_rand_ratio(), ratioY=_rand_ratio())
-        time.sleep(0.5)
-
-    def close(self, by_event: bool = False):
-        """
-        关闭朋友圈窗口。
-
-        Args:
-            by_event: False — 点击工具栏"关闭"按钮（默认）
-                      True  — 通过 WindowPattern 发送关闭事件
-        """
-        win = self._open_sns_window()
-        if by_event:
-            pattern = win.GetWindowPattern()
-            if pattern:
-                pattern.Close()
-            else:
-                raise RuntimeError("朋友圈窗口不支持 WindowPattern")
-        else:
-            btn = self._find_toolbar_button(win, self.CLOSE_BTN_NAME)
-            btn.Click(ratioX=_rand_ratio(), ratioY=_rand_ratio())
-        time.sleep(0.5)
-
-    def restore(self):
-        """
-        恢复（还原）朋友圈窗口。
-
-        当窗口处于最小化状态时，通过 WindowPattern 将其恢复为正常显示，
-        并激活到前台。
-        """
-        win = auto.WindowControl(
-            ClassName=self.SNS_WINDOW_CLASS,
-            AutomationId=self.SNS_WINDOW_ID,
-        )
-        if not win.Exists(maxSearchSeconds=3):
-            raise RuntimeError("朋友圈窗口不存在，无法恢复")
-
-        pattern = win.GetWindowPattern()
-        if pattern:
-            pattern.SetWindowVisualState(auto.WindowVisualState.Normal)
-        else:
-            raise RuntimeError("朋友圈窗口不支持 WindowPattern")
-
-        win.SetActive()
-        win.SetFocus()
-        time.sleep(0.5)
-
     def __str__(self) -> str:
         return "Moment(朋友圈)"
-
-
-def _rand_ratio() -> float:
-    """返回 0.2~0.6 之间的随机比例，用于模拟人类点击偏移"""
-    return random.uniform(0.2, 0.6)
-
-
-class WeixinWindow:
-    """
-    微信窗口基类，封装通用的窗口操作。
-
-    子类需要设置 self._win 为 uiautomation 的 WindowControl 实例。
-    提供 activate、pin、unpin、minimize、maximize、restore、close 等通用操作，
-    支持两种模式：
-    - use_message=True（默认）: 通过 Windows 消息 API 操作，不需要窗口可见
-    - use_message=False: 通过点击标题栏按钮操作，模拟用户行为
-    """
-
-    # 子类可覆盖，指定标题栏按钮的 ClassName
-    _PIN_BTN_CLASS = "mmui::PinnedButton"
-    _BTN_CLASS = "mmui::XButton"
-
-    @property
-    def _window(self) -> auto.WindowControl:
-        """获取窗口控件，子类可覆盖"""
-        return self._win
-
-    @property
-    def is_topmost(self) -> bool:
-        """窗口是否已置顶"""
-        return self._window.IsTopmost()
-
-    @property
-    def is_minimized(self) -> bool:
-        """窗口是否已最小化"""
-        return self._window.IsMinimize()
-
-    @property
-    def is_maximized(self) -> bool:
-        """窗口是否已最大化"""
-        return self._window.IsMaximize()
-
-    def activate(self):
-        """激活窗口（置前并聚焦）"""
-        self._window.SetActive()
-        self._window.SetFocus()
-        time.sleep(0.2)
-
-    def pin(self, use_message: bool = True, simulate_move: bool = True):
-        """置顶窗口"""
-        if use_message:
-            self._window.SetTopmost(True)
-        else:
-            self.activate()
-            btn = self._window.ButtonControl(
-                ClassName=self._PIN_BTN_CLASS, Name="置顶",
-            )
-            if btn.Exists(0, 0):
-                btn.Click(simulateMove=simulate_move)
-
-    def unpin(self, use_message: bool = True, simulate_move: bool = True):
-        """取消置顶窗口"""
-        if use_message:
-            self._window.SetTopmost(False)
-        else:
-            self.activate()
-            btn = self._window.ButtonControl(
-                ClassName=self._PIN_BTN_CLASS, Name="取消置顶",
-            )
-            if btn.Exists(0, 0):
-                btn.Click(simulateMove=simulate_move)
-
-    def minimize(self, use_message: bool = True, simulate_move: bool = True):
-        """最小化窗口"""
-        if use_message:
-            self._window.Minimize()
-        else:
-            self.activate()
-            btn = self._window.ButtonControl(
-                ClassName=self._BTN_CLASS, Name="最小化",
-            )
-            if not btn.Exists(maxSearchSeconds=1):
-                raise RuntimeError("未找到最小化按钮")
-            btn.Click(ratioX=_rand_ratio(), ratioY=_rand_ratio(),
-                      simulateMove=simulate_move)
-
-    def maximize(self, use_message: bool = True, simulate_move: bool = True):
-        """最大化/还原窗口"""
-        if use_message:
-            if self.is_maximized:
-                self._window.Restore()
-            else:
-                self._window.Maximize()
-        else:
-            self.activate()
-            for name in ("最大化", "还原"):
-                btn = self._window.ButtonControl(
-                    ClassName=self._BTN_CLASS, Name=name,
-                )
-                if btn.Exists(0, 0):
-                    btn.Click(ratioX=_rand_ratio(), ratioY=_rand_ratio(),
-                              simulateMove=simulate_move)
-                    return
-            raise RuntimeError("未找到最大化/还原按钮")
-
-    def restore(self):
-        """还原窗口"""
-        self._window.Restore()
-
-    def close(self, use_message: bool = True, simulate_move: bool = True):
-        """关闭窗口"""
-        if use_message:
-            wp = self._window.GetWindowPattern()
-            if wp:
-                wp.Close()
-            else:
-                raise RuntimeError("窗口不支持 WindowPattern.Close")
-        else:
-            self.activate()
-            btn = self._window.ButtonControl(
-                ClassName=self._BTN_CLASS, Name="关闭",
-            )
-            if not btn.Exists(maxSearchSeconds=1):
-                raise RuntimeError("未找到关闭按钮")
-            btn.Click(ratioX=_rand_ratio(), ratioY=_rand_ratio(),
-                      simulateMove=simulate_move)
 
 
 def _is_url(path: str) -> bool:
@@ -5001,6 +5376,253 @@ class Weixin(WeixinWindow):
         except (RuntimeError, ValueError):
             return None
 
+    # ---- 联系人资料面板操作 ----
+
+    def _open_contact_profile(self, nickname: str):
+        """
+        打开指定联系人的资料面板。
+
+        流程：
+        1. 通过搜索打开与该联系人的聊天会话
+        2. 点击"聊天信息"按钮
+        3. 点击联系人头像，打开资料面板
+
+        Args:
+            nickname: 联系人昵称
+
+        Returns:
+            Chat 对象
+        """
+        chat = self.open_session_by_search(nickname)
+        if chat.chat_type != "私聊":
+            raise RuntimeError("联系人资料操作仅支持私聊会话")
+
+        self.activate()
+
+        # 1. 点击"聊天信息"按钮
+        chat._click_chat_info_button()
+        time.sleep(0.5)
+
+        # 2. 点击联系人头像
+        chat._click_contact_avatar()
+        time.sleep(0.5)
+
+        return chat
+
+    def _click_profile_menu_item(self, chat: "Chat", menu_name: str):
+        """
+        点击资料面板"更多"菜单中的指定菜单项。
+
+        Args:
+            chat: Chat 对象
+            menu_name: 菜单项名称
+        """
+        # 1. 点击资料面板"更多"按钮
+        chat._click_profile_more_button()
+        time.sleep(0.3)
+
+        # 2. 点击指定菜单项
+        menu_item = self.window.MenuItemControl(
+            ClassName="mmui::XMenuView",
+            Name=menu_name,
+        )
+        if not menu_item.Exists(maxSearchSeconds=2):
+            self.window.SendKeys("{Esc}")
+            raise RuntimeError(f"未找到'{menu_name}'菜单项")
+        menu_item.Click(ratioX=_rand_ratio(), ratioY=_rand_ratio())
+
+    def _cleanup_profile(self):
+        """关闭可能残留的弹窗和面板"""
+        try:
+            self.window.SendKeys("{Esc}")
+            time.sleep(0.2)
+            self.window.SendKeys("{Esc}")
+            time.sleep(0.2)
+            self.window.SendKeys("{Esc}")
+        except Exception:
+            pass
+
+    def set_remark(self, nickname: str, remark: str):
+        """
+        设置联系人的备注名。
+
+        流程：
+        1. 打开联系人资料面板
+        2. 点击"更多"按钮
+        3. 点击"设置备注和标签"菜单项
+        4. 等待"设置备注和标签"弹窗出现（mmui::ProfileUniquePop）
+        5. 在弹窗中找到"修改备注名"编辑框（mmui::XLineEdit）并输入备注名
+        6. 点击"完成"按钮（mmui::XOutlineButton）
+
+        Args:
+            nickname: 联系人昵称
+            remark: 备注名
+
+        Raises:
+            ValueError: remark 为空时抛出
+            RuntimeError: 操作失败时抛出
+        """
+        if not remark:
+            raise ValueError("remark 不能为空")
+
+        self.activate()
+        try:
+            chat = self._open_contact_profile(nickname)
+            self._click_profile_menu_item(chat, "设置备注和标签")
+            time.sleep(0.5)
+
+            # 等待"设置备注和标签"弹窗出现
+            remark_pop = self.window.WindowControl(
+                ClassName="mmui::ProfileUniquePop",
+                Name="设置备注和标签",
+            )
+            if not remark_pop.Exists(maxSearchSeconds=3):
+                raise RuntimeError("未找到'设置备注和标签'弹窗")
+
+            # 在弹窗中查找"修改备注名"编辑框
+            remark_edit = remark_pop.EditControl(
+                ClassName="mmui::XLineEdit",
+                Name="修改备注名",
+            )
+            if not remark_edit.Exists(maxSearchSeconds=3):
+                raise RuntimeError("未找到'修改备注名'编辑框")
+
+            remark_edit.Click(ratioX=_rand_ratio(), ratioY=_rand_ratio())
+            time.sleep(0.2)
+            remark_edit.SendKeys("{Ctrl}a{Del}")
+            time.sleep(0.1)
+
+            # 通过剪贴板粘贴备注名（支持中文等特殊字符）
+            import win32clipboard
+            import win32con
+            win32clipboard.OpenClipboard()
+            win32clipboard.EmptyClipboard()
+            win32clipboard.SetClipboardData(win32con.CF_UNICODETEXT, remark)
+            win32clipboard.CloseClipboard()
+            remark_edit.SendKeys("{Ctrl}v")
+            time.sleep(0.3)
+
+            # 点击"完成"按钮（输入内容后按钮从 disabled 变为 enabled）
+            ok_btn = remark_pop.ButtonControl(
+                ClassName="mmui::XOutlineButton",
+                Name="完成",
+            )
+            if not ok_btn.Exists(maxSearchSeconds=2):
+                raise RuntimeError("未找到'完成'按钮")
+            ok_btn.Click(ratioX=_rand_ratio(), ratioY=_rand_ratio())
+            time.sleep(0.3)
+
+            logger.info(f"设置备注成功: {nickname} -> {remark}")
+
+        except Exception:
+            self._cleanup_profile()
+            raise
+
+    def set_star_friend(self, nickname: str):
+        """
+        将联系人设为/取消星标朋友。
+
+        Args:
+            nickname: 联系人昵称
+        """
+        self.activate()
+        try:
+            chat = self._open_contact_profile(nickname)
+            self._click_profile_menu_item(chat, "设为星标朋友")
+            time.sleep(0.3)
+            logger.info(f"设为星标朋友操作完成: {nickname}")
+        except Exception:
+            self._cleanup_profile()
+            raise
+
+    def set_friend_permissions(self, nickname: str):
+        """
+        打开联系人的朋友权限设置页面。
+
+        Args:
+            nickname: 联系人昵称
+        """
+        self.activate()
+        try:
+            chat = self._open_contact_profile(nickname)
+            self._click_profile_menu_item(chat, "设置朋友权限")
+            time.sleep(0.3)
+            logger.info(f"打开朋友权限设置: {nickname}")
+        except Exception:
+            self._cleanup_profile()
+            raise
+
+    def add_to_blacklist(self, nickname: str):
+        """
+        将联系人加入黑名单。
+
+        注意：此操作会弹出确认对话框，需要用户确认。
+
+        Args:
+            nickname: 联系人昵称
+        """
+        self.activate()
+        try:
+            chat = self._open_contact_profile(nickname)
+            self._click_profile_menu_item(chat, "加入黑名单")
+            time.sleep(0.5)
+
+            # 等待确认对话框并点击确定
+            confirm_btn = self.window.ButtonControl(Name="确定")
+            if confirm_btn.Exists(maxSearchSeconds=3):
+                confirm_btn.Click(ratioX=_rand_ratio(), ratioY=_rand_ratio())
+                time.sleep(0.3)
+                logger.info(f"加入黑名单成功: {nickname}")
+            else:
+                logger.warning(f"未找到确认按钮，加入黑名单可能未完成: {nickname}")
+
+        except Exception:
+            self._cleanup_profile()
+            raise
+
+    def delete_contact(self, nickname: str):
+        """
+        删除联系人。
+
+        注意：此操作不可逆，会弹出确认对话框，需要用户确认。
+
+        Args:
+            nickname: 联系人昵称
+        """
+        self.activate()
+        try:
+            chat = self._open_contact_profile(nickname)
+            self._click_profile_menu_item(chat, "删除联系人")
+            time.sleep(0.5)
+
+            # 等待确认对话框并点击确定
+            confirm_btn = self.window.ButtonControl(Name="确定")
+            if confirm_btn.Exists(maxSearchSeconds=3):
+                confirm_btn.Click(ratioX=_rand_ratio(), ratioY=_rand_ratio())
+                time.sleep(0.3)
+                logger.info(f"删除联系人成功: {nickname}")
+            else:
+                logger.warning(f"未找到确认按钮，删除联系人可能未完成: {nickname}")
+
+        except Exception:
+            self._cleanup_profile()
+            raise
+
+    def recommend_to_friend(self, nickname: str, receiver_nickname: str) -> bool:
+        """
+        将指定联系人推荐给另一个朋友（发送名片）。
+
+        这是 send_card 的别名方法，提供更直观的接口。
+
+        Args:
+            nickname: 要推荐的联系人昵称
+            receiver_nickname: 接收推荐的朋友昵称
+
+        Returns:
+            True 发送成功
+        """
+        return self.send_card(receiver_nickname, nickname)
+
     def lock(self):
         self.activate()
         more_btn = self.navigator._win.ButtonControl(Name="更多")
@@ -5210,4 +5832,3 @@ class Weixin(WeixinWindow):
 
 if __name__ == "__main__":
     wx = Weixin()
-    wx.send_text("文件传输助手", "测试")
