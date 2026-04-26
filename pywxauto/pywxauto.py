@@ -3839,7 +3839,7 @@ class Chat:
                 except OSError:
                     pass
 
-    def send_room_at(self, content: str, at_members: list[str]) -> MessageStatus:
+    def send_at(self, content: str, at_members: list[str]) -> MessageStatus:
         """
         在当前群聊会话中 @指定成员并发送消息，返回发送状态。
 
@@ -4526,7 +4526,7 @@ class Chat:
             time.sleep(0.3)
 
             # 4. 点击"把他推荐给朋友"
-            self._click_recommend_to_friend()
+            self._click_recommend_contact()
             time.sleep(0.5)
 
             # 5. 在弹窗中搜索、勾选接收者并点击发送
@@ -4582,7 +4582,7 @@ class Chat:
 
         raise RuntimeError("未找到资料面板'更多'按钮")
 
-    def _click_recommend_to_friend(self):
+    def _click_recommend_contact(self):
         """点击弹出菜单中的"把他推荐给朋友" """
         menu_item = self._win.MenuItemControl(
             ClassName="mmui::XMenuView",
@@ -5142,6 +5142,1626 @@ class Chat:
         # EmotionMessage, MergeMessage, NoteMessage, OtherMessage
         return msg_cls(**base, content=actual_name)
 
+    # ---- 联系人资料面板操作（仅私聊可用） ----
+
+    def _ensure_contact_chat(self):
+        """确保当前是私聊会话，否则抛出异常"""
+        if self.chat_type != "私聊":
+            raise RuntimeError("联系人资料操作仅支持私聊会话")
+
+    def _open_contact_profile(self):
+        """
+        打开当前私聊联系人的资料面板。
+
+        流程：
+        1. 点击"聊天信息"按钮
+        2. 点击联系人头像，打开资料面板
+        """
+        self._ensure_contact_chat()
+        if self._wx:
+            self._wx.activate()
+
+        self._click_chat_info_button()
+        time.sleep(0.5)
+
+        self._click_contact_avatar()
+        time.sleep(0.5)
+
+    def _click_profile_menu_item(self, menu_name: str):
+        """
+        点击资料面板"更多"菜单中的指定菜单项。
+
+        Args:
+            menu_name: 菜单项名称
+        """
+        self._click_profile_more_button()
+        time.sleep(0.3)
+
+        menu_item = self._win.MenuItemControl(
+            ClassName="mmui::XMenuView",
+            Name=menu_name,
+        )
+        if not menu_item.Exists(maxSearchSeconds=2):
+            self._win.SendKeys("{Esc}")
+            raise RuntimeError(f"未找到'{menu_name}'菜单项")
+        menu_item.Click(ratioX=_rand_ratio(), ratioY=_rand_ratio())
+
+    def _cleanup_profile(self):
+        """关闭可能残留的弹窗和面板，并收回聊天信息面板"""
+        try:
+            self._win.SendKeys("{Esc}")
+            time.sleep(0.2)
+            self._win.SendKeys("{Esc}")
+            time.sleep(0.2)
+            self._win.SendKeys("{Esc}")
+            time.sleep(0.2)
+        except Exception:
+            pass
+        self._close_chat_info_panel()
+
+    def _close_chat_info_panel(self):
+        """点击"聊天信息"按钮收回展开的面板"""
+        try:
+            btn = self._win.ButtonControl(
+                ClassName="mmui::XButton",
+                Name="聊天信息",
+            )
+            if btn.Exists(0, 0):
+                btn.Click(ratioX=_rand_ratio(), ratioY=_rand_ratio())
+                time.sleep(0.2)
+        except Exception:
+            pass
+
+    def get_contact_profile(self) -> dict:
+        """
+        获取当前私聊联系人的资料信息。
+
+        打开联系人资料面板（mmui::ContactProfileView），
+        从面板中提取各字段信息，然后关闭面板。
+
+        Returns:
+            dict: {
+                "display_name": str,
+                "nickname": str,
+                "account": str,
+                "region": str,
+                "remark": str,
+                "tags": list[str],
+                "description": str,
+                "permission": str,
+                "common_groups": str,
+                "source": str,
+                "signature": str,
+                "finder_name": str,
+            }
+        """
+        if self._wx:
+            self._wx.activate()
+        try:
+            self._open_contact_profile()
+            time.sleep(0.5)
+
+            profile = self._win.GroupControl(
+                ClassName="mmui::ContactProfileView",
+            )
+            if not profile.Exists(maxSearchSeconds=3):
+                raise RuntimeError("未找到联系人资料面板")
+
+            result = {
+                "display_name": None,
+                "nickname": None,
+                "account": None,
+                "region": None,
+                "remark": None,
+                "tags": [],
+                "description": None,
+                "permission": None,
+                "common_groups": None,
+                "source": None,
+                "signature": None,
+                "finder_name": None,
+            }
+
+            # 顶部：显示名
+            display_name = profile.TextControl(
+                AutomationId="right_v_view.nickname_button_view.display_name_text",
+            )
+            if display_name.Exists(0, 0):
+                val = (display_name.Name or "").strip()
+                if val:
+                    result["display_name"] = val
+
+            # 顶部：基本信息行（昵称、微信号、地区）
+            key_map = {
+                "昵称：": "nickname",
+                "微信号：": "account",
+                "地区：": "region",
+            }
+            info_center = profile.GroupControl(
+                AutomationId="right_v_view.user_info_center_view",
+            )
+            if info_center.Exists(0, 0):
+                for child in info_center.GetChildren():
+                    key_ctrl = child.TextControl(
+                        AutomationId="right_v_view.user_info_center_view.basic_line_view.basic_line.key_text",
+                    )
+                    if not key_ctrl.Exists(0, 0):
+                        continue
+                    key_name = key_ctrl.Name or ""
+                    field = key_map.get(key_name)
+                    if not field:
+                        continue
+                    val_ctrl = child.TextControl(
+                        ClassName="mmui::ContactProfileTextView",
+                    )
+                    if val_ctrl.Exists(0, 0):
+                        val = (val_ctrl.Name or "").strip()
+                        if val:
+                            result[field] = val
+
+            # 中间：备注、标签、描述、朋友权限
+            line_map = {
+                "remark_line": "remark",
+                "tag_line": "tags",
+                "desc_line": "description",
+                "friend_per_line": "permission",
+            }
+            for line_id, field in line_map.items():
+                full_id = f"qt_scrollarea_viewport.mid_ui_.main_part_v_view.line_v_view.{line_id}"
+                line = profile.GroupControl(AutomationId=full_id)
+                if not line.Exists(0, 0):
+                    continue
+                val_btn = line.ButtonControl(
+                    ClassName="mmui::XMouseEventView",
+                )
+                if not val_btn.Exists(0, 0):
+                    continue
+                val = (val_btn.Name or "").strip()
+                if field == "tags":
+                    result[field] = [t.strip() for t in val.split(",") if t.strip()] if val else []
+                elif val:
+                    result[field] = val
+
+            # 中间：共同群聊、来源、个性签名
+            friend_line_map = {
+                "chatroom_intersection": "common_groups",
+                "source": "source",
+                "sign": "signature",
+            }
+            for line_id, field in friend_line_map.items():
+                full_id = f"qt_scrollarea_viewport.mid_ui_.wx_friend_v_view.line_v_view.{line_id}"
+                line = profile.GroupControl(AutomationId=full_id)
+                if not line.Exists(0, 0):
+                    continue
+                val_btn = line.ButtonControl(
+                    ClassName="mmui::XMouseEventView",
+                )
+                if val_btn.Exists(0, 0) and (val_btn.Name or "").strip():
+                    result[field] = val_btn.Name.strip()
+                    continue
+                val_text = line.TextControl(
+                    ClassName="mmui::ContactProfileTextView",
+                    searchDepth=8,
+                )
+                if val_text.Exists(0, 0) and (val_text.Name or "").strip():
+                    result[field] = val_text.Name.strip()
+
+            # 视频号名称
+            finder_view = profile.GroupControl(
+                ClassName="mmui::ProfileFinderView",
+                AutomationId="qt_scrollarea_viewport.mid_ui_.wx_friend_finder_",
+            )
+            if finder_view.Exists(0, 0):
+                finder_nick = finder_view.TextControl(
+                    AutomationId="ProfileFinderUi.nick_name_",
+                )
+                if finder_nick.Exists(0, 0):
+                    val = (finder_nick.Name or "").strip()
+                    if val:
+                        result["finder_name"] = val
+
+            logger.info(f"获取联系人资料成功: {self.current_name}")
+            return result
+
+        except Exception:
+            self._cleanup_profile()
+            raise
+        finally:
+            self._close_chat_info_panel()
+
+    def set_contact_info(self, *,
+                         remark: str = None,
+                         labels: list = None,
+                         phones: list = None,
+                         description: str = None,
+                         images: list = None):
+        """
+        一次性设置当前私聊联系人的备注、标签、电话、描述、图片。
+
+        只打开一次"设置备注和标签"弹窗，按顺序完成所有操作后点击"完成"保存。
+        参数为 None 时跳过对应项，不做修改。
+
+        Args:
+            remark: 备注名，None 不修改
+            labels: 标签列表（覆盖式：先清空再添加），None 不修改，[] 清空所有标签
+            phones: 电话列表（覆盖式：先清空再添加），None 不修改，[] 清空所有电话
+            description: 描述信息（最大200字符），None 不修改
+            images: 图片路径列表（覆盖式：先清空再添加），None 不修改，[] 清空所有图片
+        """
+        if all(v is None for v in (remark, labels, phones, description, images)):
+            return
+
+        if self._wx:
+            self._wx.activate()
+        try:
+            self._open_contact_profile()
+            self._click_profile_menu_item("设置备注和标签")
+
+            remark_pop = self._win.WindowControl(
+                ClassName="mmui::ProfileUniquePop",
+                Name="设置备注和标签",
+            )
+            if not remark_pop.Exists(maxSearchSeconds=3):
+                raise RuntimeError("未找到'设置备注和标签'弹窗")
+
+            # ---- 1. 备注 ----
+            if remark is not None:
+                remark_edit = remark_pop.EditControl(
+                    ClassName="mmui::XLineEdit",
+                    Name="修改备注名",
+                )
+                if remark_edit.Exists(maxSearchSeconds=2):
+                    remark_edit.Click(ratioX=_rand_ratio(), ratioY=_rand_ratio())
+                    remark_edit.SendKeys("{Ctrl}a{Del}")
+                    if remark:
+                        paste(remark)
+
+            # 辅助函数：将弹窗滚动区域滚动到底部
+            def _scroll_to_bottom():
+                scroll_area = remark_pop.GroupControl(ClassName="QFScrollArea")
+                if not scroll_area.Exists(0, 0):
+                    return
+                rect = scroll_area.BoundingRectangle
+                cx = rect.left + rect.width() // 2
+                cy = rect.top + rect.height() // 2
+                lines = max(rect.height() // 40, 10)
+                win32api.SetCursorPos((cx, cy))
+                time.sleep(0.1)
+                win32api.mouse_event(
+                    win32con.MOUSEEVENTF_WHEEL, cx, cy, -120 * lines, 0,
+                )
+                time.sleep(0.3)
+
+            # ---- 2. 标签（覆盖式） ----
+            if labels is not None:
+                tag_btn = remark_pop.ButtonControl(
+                    Name="修改标签", AutomationId="button",
+                )
+                if tag_btn.Exists(maxSearchSeconds=2):
+                    existing_labels = set()
+                    tag_text = tag_btn.TextControl(ClassName="mmui::XTextView")
+                    if tag_text.Exists(0, 0):
+                        name = tag_text.Name
+                        if name and name != "搜索或创建标签...":
+                            existing_labels = {t.strip() for t in name.split(",") if t.strip()}
+
+                    target_set = set(labels)
+                    to_add = [l for l in labels if l not in existing_labels]
+                    to_remove = [l for l in existing_labels if l not in target_set]
+
+                    if to_add or to_remove:
+                        tag_btn.Click(ratioX=_rand_ratio(), ratioY=_rand_ratio())
+
+                        for label in to_remove:
+                            label_item = remark_pop.ListItemControl(
+                                Name=label, searchDepth=8,
+                            )
+                            if label_item.Exists(maxSearchSeconds=1):
+                                label_item.Click(ratioX=_rand_ratio(), ratioY=_rand_ratio())
+
+                        for label in to_add:
+                            tag_edit = remark_pop.EditControl(
+                                ClassName="mmui::XValidatorTextEdit", Name="搜索",
+                            )
+                            if tag_edit.Exists(maxSearchSeconds=2):
+                                tag_edit.Click(ratioX=_rand_ratio(), ratioY=_rand_ratio())
+                                tag_edit.SendKeys("{Ctrl}a{Del}")
+                                paste(label)
+                                label_item = remark_pop.ListItemControl(
+                                    Name=label, searchDepth=8,
+                                )
+                                if label_item.Exists(maxSearchSeconds=1):
+                                    label_item.Click(ratioX=_rand_ratio(), ratioY=_rand_ratio())
+                                tag_edit.SendKeys("{Ctrl}a{Del}")
+
+                        title_text = remark_pop.TextControl(
+                            ClassName="mmui::XTextView",
+                            Name="设置备注和标签",
+                        )
+                        if title_text.Exists(0, 0):
+                            title_text.Click(ratioX=0.5, ratioY=0.5)
+
+            # ---- 3. 电话（覆盖式） ----
+            if phones is not None:
+                phone_area = remark_pop.GroupControl(
+                    ClassName="mmui::ProfileFormPhoneView",
+                )
+                if phone_area.Exists(maxSearchSeconds=2):
+                    for _ in range(20):
+                        phone_field = phone_area.TextControl(
+                            ClassName="mmui::XLineField",
+                        )
+                        if not phone_field.Exists(0, 0):
+                            break
+                        name = phone_field.Name
+                        if not name or name == "填写电话":
+                            break
+                        separator_view = phone_field.GetParentControl()
+                        if separator_view:
+                            num_view = separator_view.GetParentControl()
+                            if num_view:
+                                del_btn = num_view.ButtonControl(Name="删除电话")
+                                if del_btn.Exists(0, 0):
+                                    del_btn.Click(ratioX=_rand_ratio(), ratioY=_rand_ratio())
+                                    continue
+                        break
+
+                    for phone in phones:
+                        empty_field = phone_area.TextControl(
+                            ClassName="mmui::XLineField", Name="填写电话",
+                        )
+                        if not empty_field.Exists(0, 0):
+                            add_btn = phone_area.ButtonControl(
+                                Name="添加电话", AutomationId="button",
+                            )
+                            if add_btn.Exists(maxSearchSeconds=1):
+                                add_btn.Click(ratioX=_rand_ratio(), ratioY=_rand_ratio())
+
+                        empty_field = phone_area.TextControl(
+                            ClassName="mmui::XLineField", Name="填写电话",
+                        )
+                        if empty_field.Exists(maxSearchSeconds=2):
+                            phone_edit = empty_field.EditControl(
+                                ClassName="mmui::XLineEdit",
+                            )
+                            if phone_edit.Exists(0, 0):
+                                phone_edit.Click(ratioX=_rand_ratio(), ratioY=_rand_ratio())
+                                vp = phone_edit.GetValuePattern()
+                                if vp:
+                                    vp.SetValue(phone)
+                                else:
+                                    paste(phone)
+                                phone_edit.SendKeys("{Tab}")
+
+            # ---- 4. 描述 ----
+            if description is not None:
+                desc_edit = remark_pop.EditControl(
+                    ClassName="mmui::XValidatorTextEdit", Name="修改描述",
+                )
+                if desc_edit.Exists(maxSearchSeconds=2):
+                    _scroll_to_bottom()
+                    desc_edit.Click(ratioX=_rand_ratio(), ratioY=_rand_ratio())
+                    desc_edit.SendKeys("{Ctrl}a{Del}")
+                    if description:
+                        paste(description[:200])
+
+            # ---- 5. 图片（覆盖式） ----
+            if images is not None:
+                img_list = remark_pop.GroupControl(
+                    AutomationId="desc_img_list_view_",
+                )
+                _scroll_to_bottom()
+                if img_list.Exists(0, 0):
+                    for _ in range(20):
+                        img_item = img_list.GroupControl(
+                            Name="描述图片",
+                            AutomationId="desc_img_list_view_.desc_img_button_view",
+                        )
+                        if not img_item.Exists(0, 0):
+                            break
+                        img_btn = img_item.ButtonControl(
+                            ClassName="mmui::UrlImageView",
+                        )
+                        if not img_btn.Exists(0, 0):
+                            break
+                        img_btn.RightClick(ratioX=_rand_ratio(), ratioY=_rand_ratio())
+                        menu_win = self._win.WindowControl(ClassName="mmui::XMenu")
+                        if not menu_win.Exists(maxSearchSeconds=2):
+                            break
+                        del_item = menu_win.MenuItemControl(
+                            ClassName="mmui::XMenuView", Name="删除",
+                        )
+                        if not del_item.Exists(maxSearchSeconds=1):
+                            self._win.SendKeys("{Esc}")
+                            break
+                        del_item.Click(ratioX=_rand_ratio(), ratioY=_rand_ratio())
+
+                for img_path in images:
+                    add_img_btn = remark_pop.GroupControl(
+                        Name="添加图片",
+                        AutomationId="desc_img_list_view_.add_button_view",
+                    )
+                    if not add_img_btn.Exists(maxSearchSeconds=2):
+                        break
+                    add_img_btn.Click(ratioX=_rand_ratio(), ratioY=_rand_ratio())
+                    dlg = auto.WindowControl(ClassName="#32770")
+                    if not dlg.Exists(maxSearchSeconds=5):
+                        break
+                    dlg.SendKeys("{Alt}N")
+                    edit = dlg.ComboBoxControl(AutomationId="1148").EditControl()
+                    if not edit.Exists(0, 0):
+                        edit = dlg.EditControl(AutomationId="1148")
+                    if edit.Exists(maxSearchSeconds=2):
+                        edit.GetValuePattern().SetValue(os.path.abspath(img_path))
+                        dlg.SendKeys("{Alt}O")
+                        time.sleep(0.5)
+
+            # ---- 点击"完成"保存 ----
+            ok_btn = remark_pop.ButtonControl(
+                ClassName="mmui::XOutlineButton", Name="完成",
+            )
+            if ok_btn.Exists(maxSearchSeconds=2):
+                ok_btn.Click(ratioX=_rand_ratio(), ratioY=_rand_ratio())
+
+            logger.info(f"设置联系人信息成功: {self.current_name}")
+
+        except Exception:
+            self._cleanup_profile()
+            raise
+        finally:
+            self._close_chat_info_panel()
+
+    def set_contact_remark(self, remark: str):
+        """
+        设置当前私聊联系人的备注名。
+
+        Args:
+            remark: 备注名
+
+        Raises:
+            ValueError: remark 为空时抛出
+            RuntimeError: 操作失败时抛出
+        """
+        if not remark:
+            raise ValueError("remark 不能为空")
+
+        if self._wx:
+            self._wx.activate()
+        try:
+            self._open_contact_profile()
+            self._click_profile_menu_item("设置备注和标签")
+            time.sleep(0.5)
+
+            remark_pop = self._win.WindowControl(
+                ClassName="mmui::ProfileUniquePop",
+                Name="设置备注和标签",
+            )
+            if not remark_pop.Exists(maxSearchSeconds=3):
+                raise RuntimeError("未找到'设置备注和标签'弹窗")
+
+            remark_edit = remark_pop.EditControl(
+                ClassName="mmui::XLineEdit",
+                Name="修改备注名",
+            )
+            if not remark_edit.Exists(maxSearchSeconds=3):
+                raise RuntimeError("未找到'修改备注名'编辑框")
+
+            remark_edit.Click(ratioX=_rand_ratio(), ratioY=_rand_ratio())
+            time.sleep(0.2)
+            remark_edit.SendKeys("{Ctrl}a{Del}")
+            time.sleep(0.1)
+
+            paste(remark)
+            time.sleep(0.3)
+
+            ok_btn = remark_pop.ButtonControl(
+                ClassName="mmui::XOutlineButton",
+                Name="完成",
+            )
+            if not ok_btn.Exists(maxSearchSeconds=2):
+                raise RuntimeError("未找到'完成'按钮")
+            ok_btn.Click(ratioX=_rand_ratio(), ratioY=_rand_ratio())
+            time.sleep(0.3)
+
+            logger.info(f"设置备注成功: {self.current_name} -> {remark}")
+
+        except Exception:
+            self._cleanup_profile()
+            raise
+        finally:
+            self._close_chat_info_panel()
+
+    def add_contact_label(self, labels: list):
+        """
+        为当前私聊联系人添加标签。
+
+        Args:
+            labels: 标签名列表，如 ["朋友", "同事"]
+        """
+        if not labels:
+            raise ValueError("labels 不能为空")
+
+        if self._wx:
+            self._wx.activate()
+        try:
+            self._open_contact_profile()
+            self._click_profile_menu_item("设置备注和标签")
+            time.sleep(0.5)
+
+            remark_pop = self._win.WindowControl(
+                ClassName="mmui::ProfileUniquePop",
+                Name="设置备注和标签",
+            )
+            if not remark_pop.Exists(maxSearchSeconds=3):
+                raise RuntimeError("未找到'设置备注和标签'弹窗")
+
+            existing_labels = set()
+            tag_btn = remark_pop.ButtonControl(
+                Name="修改标签",
+                AutomationId="button",
+            )
+            if not tag_btn.Exists(maxSearchSeconds=3):
+                raise RuntimeError("未找到'修改标签'按钮")
+
+            tag_text = tag_btn.TextControl(
+                ClassName="mmui::XTextView",
+            )
+            if tag_text.Exists(maxSearchSeconds=1):
+                name = tag_text.Name
+                if name and name != "搜索或创建标签...":
+                    existing_labels = {t.strip() for t in name.split(",") if t.strip()}
+
+            new_labels = [l for l in labels if l not in existing_labels]
+            if not new_labels:
+                logger.info(f"所有标签已存在，跳过: {self.current_name} -> {labels}")
+                cancel_btn = remark_pop.ButtonControl(Name="取消")
+                if cancel_btn.Exists(maxSearchSeconds=1):
+                    cancel_btn.Click(ratioX=_rand_ratio(), ratioY=_rand_ratio())
+                return
+
+            tag_btn.Click(ratioX=_rand_ratio(), ratioY=_rand_ratio())
+            time.sleep(0.3)
+
+            for label in new_labels:
+                tag_edit = remark_pop.EditControl(
+                    ClassName="mmui::XValidatorTextEdit",
+                    Name="搜索",
+                )
+                if not tag_edit.Exists(maxSearchSeconds=3):
+                    raise RuntimeError("未找到标签搜索输入框")
+
+                tag_edit.Click(ratioX=_rand_ratio(), ratioY=_rand_ratio())
+                time.sleep(0.2)
+                tag_edit.SendKeys("{Ctrl}a{Del}")
+                time.sleep(0.1)
+
+                paste(label)
+                time.sleep(0.5)
+
+                label_item = remark_pop.ListItemControl(
+                    Name=label,
+                    searchDepth=8,
+                )
+                if label_item.Exists(maxSearchSeconds=1):
+                    label_item.Click(ratioX=_rand_ratio(), ratioY=_rand_ratio())
+                    time.sleep(0.3)
+                else:
+                    logger.info(f"搜索结果中未找到标签，跳过: {label}")
+
+                tag_edit.SendKeys("{Ctrl}a{Del}")
+                time.sleep(0.2)
+
+            ok_btn = remark_pop.ButtonControl(
+                ClassName="mmui::XOutlineButton",
+                Name="完成",
+            )
+            ok_btn.Click(ratioX=_rand_ratio(), ratioY=_rand_ratio())
+            time.sleep(0.3)
+            logger.info(f"添加标签成功: {self.current_name} -> {labels}")
+
+        except Exception:
+            self._cleanup_profile()
+            raise
+        finally:
+            self._close_chat_info_panel()
+
+    def remove_contact_label(self, labels: list):
+        """
+        移除当前私聊联系人的标签。
+
+        Args:
+            labels: 要移除的标签名列表
+        """
+        if not labels:
+            raise ValueError("labels 不能为空")
+
+        if self._wx:
+            self._wx.activate()
+        try:
+            self._open_contact_profile()
+            self._click_profile_menu_item("设置备注和标签")
+            time.sleep(0.5)
+
+            remark_pop = self._win.WindowControl(
+                ClassName="mmui::ProfileUniquePop",
+                Name="设置备注和标签",
+            )
+            if not remark_pop.Exists(maxSearchSeconds=3):
+                raise RuntimeError("未找到'设置备注和标签'弹窗")
+
+            existing_labels = set()
+            tag_btn = remark_pop.ButtonControl(
+                Name="修改标签",
+                AutomationId="button",
+            )
+            if not tag_btn.Exists(maxSearchSeconds=3):
+                raise RuntimeError("未找到'修改标签'按钮")
+
+            tag_text = tag_btn.TextControl(
+                ClassName="mmui::XTextView",
+            )
+            if tag_text.Exists(maxSearchSeconds=1):
+                name = tag_text.Name
+                if name and name != "搜索或创建标签...":
+                    existing_labels = {t.strip() for t in name.split(",") if t.strip()}
+
+            to_remove = [l for l in labels if l in existing_labels]
+            if not to_remove:
+                logger.info(f"标签均不存在，跳过: {self.current_name} -> {labels}")
+                cancel_btn = remark_pop.ButtonControl(Name="取消")
+                if cancel_btn.Exists(maxSearchSeconds=1):
+                    cancel_btn.Click(ratioX=_rand_ratio(), ratioY=_rand_ratio())
+                return
+
+            tag_btn.Click(ratioX=_rand_ratio(), ratioY=_rand_ratio())
+            time.sleep(0.3)
+
+            for label in to_remove:
+                label_item = remark_pop.ListItemControl(
+                    Name=label,
+                    searchDepth=8,
+                )
+                if label_item.Exists(maxSearchSeconds=2):
+                    label_item.Click(ratioX=_rand_ratio(), ratioY=_rand_ratio())
+                    time.sleep(0.3)
+                else:
+                    logger.warning(f"列表中未找到标签项: {label}")
+
+            ok_btn = remark_pop.ButtonControl(
+                ClassName="mmui::XOutlineButton",
+                Name="完成",
+            )
+            ok_btn.Click(ratioX=_rand_ratio(), ratioY=_rand_ratio())
+            time.sleep(0.3)
+            logger.info(f"移除标签成功: {self.current_name} -> {labels}")
+
+        except Exception:
+            self._cleanup_profile()
+            raise
+        finally:
+            self._close_chat_info_panel()
+
+    def add_contact_phone(self, phones: list):
+        """
+        为当前私聊联系人添加电话号码（增量添加，不删除已有号码）。
+
+        Args:
+            phones: 电话号码列表，如 ["13800138000", "13900139000"]
+        """
+        if not phones:
+            raise ValueError("phones 不能为空")
+
+        if self._wx:
+            self._wx.activate()
+        try:
+            self._open_contact_profile()
+            self._click_profile_menu_item("设置备注和标签")
+            time.sleep(0.5)
+
+            remark_pop = self._win.WindowControl(
+                ClassName="mmui::ProfileUniquePop",
+                Name="设置备注和标签",
+            )
+            if not remark_pop.Exists(maxSearchSeconds=3):
+                raise RuntimeError("未找到'设置备注和标签'弹窗")
+
+            # 读取已有电话号码
+            existing_phones = set()
+            phone_area = remark_pop.GroupControl(
+                ClassName="mmui::ProfileFormPhoneView",
+            )
+            if phone_area.Exists(maxSearchSeconds=2):
+                idx = 0
+                while True:
+                    field = phone_area.TextControl(
+                        ClassName="mmui::XLineField",
+                        foundIndex=idx + 1,
+                    )
+                    if not field.Exists(0, 0):
+                        break
+                    name = field.Name
+                    if name and name != "填写电话":
+                        existing_phones.add(name.strip())
+                    idx += 1
+
+            # 过滤掉已存在的号码
+            new_phones = [p for p in phones if p not in existing_phones]
+            if not new_phones:
+                logger.info(f"所有电话号码已存在，跳过: {self.current_name} -> {phones}")
+                cancel_btn = remark_pop.ButtonControl(Name="取消")
+                if cancel_btn.Exists(maxSearchSeconds=1):
+                    cancel_btn.Click(ratioX=_rand_ratio(), ratioY=_rand_ratio())
+                return
+
+            for phone in new_phones:
+                empty_field = phone_area.TextControl(
+                    ClassName="mmui::XLineField",
+                    Name="填写电话",
+                )
+                if not empty_field.Exists(0, 0):
+                    add_btn = phone_area.ButtonControl(
+                        Name="添加电话",
+                        AutomationId="button",
+                    )
+                    if not add_btn.Exists(maxSearchSeconds=2):
+                        raise RuntimeError("未找到'添加电话'按钮")
+                    add_btn.Click(ratioX=_rand_ratio(), ratioY=_rand_ratio())
+                    time.sleep(0.3)
+
+                empty_field = phone_area.TextControl(
+                    ClassName="mmui::XLineField",
+                    Name="填写电话",
+                )
+                if not empty_field.Exists(maxSearchSeconds=2):
+                    raise RuntimeError("未找到空的电话号码输入框")
+
+                phone_edit = empty_field.EditControl(
+                    ClassName="mmui::XLineEdit",
+                )
+                if not phone_edit.Exists(maxSearchSeconds=2):
+                    raise RuntimeError("未找到电话号码编辑框")
+
+                phone_edit.Click(ratioX=_rand_ratio(), ratioY=_rand_ratio())
+                time.sleep(0.2)
+
+                vp = phone_edit.GetValuePattern()
+                if vp:
+                    vp.SetValue(phone)
+                else:
+                    paste(phone)
+                time.sleep(0.3)
+                phone_edit.SendKeys("{Tab}")
+                time.sleep(0.3)
+
+            ok_btn = remark_pop.ButtonControl(
+                ClassName="mmui::XOutlineButton",
+                Name="完成",
+            )
+            ok_btn.Click(ratioX=_rand_ratio(), ratioY=_rand_ratio())
+            time.sleep(0.3)
+            logger.info(f"添加电话号码成功: {self.current_name} -> {phones}")
+
+        except Exception:
+            self._cleanup_profile()
+            raise
+        finally:
+            self._close_chat_info_panel()
+
+    def add_contact_image(self, images: list):
+        """
+        为当前私聊联系人添加备注图片（增量添加，不删除已有图片）。
+
+        Args:
+            images: 图片文件路径列表，如 ["C:/a.jpg", "C:/b.png"]
+        """
+        if not images:
+            raise ValueError("images 不能为空")
+
+        if self._wx:
+            self._wx.activate()
+        try:
+            self._open_contact_profile()
+            self._click_profile_menu_item("设置备注和标签")
+            time.sleep(0.5)
+
+            remark_pop = self._win.WindowControl(
+                ClassName="mmui::ProfileUniquePop",
+                Name="设置备注和标签",
+            )
+            if not remark_pop.Exists(maxSearchSeconds=3):
+                raise RuntimeError("未找到'设置备注和标签'弹窗")
+
+            # 滚动到底部，确保"添加图片"按钮可见
+            scroll_area = remark_pop.GroupControl(ClassName="QFScrollArea")
+            if scroll_area.Exists(0, 0):
+                rect = scroll_area.BoundingRectangle
+                cx = rect.left + rect.width() // 2
+                cy = rect.top + rect.height() // 2
+                lines = max(rect.height() // 40, 10)
+                win32api.SetCursorPos((cx, cy))
+                time.sleep(0.1)
+                win32api.mouse_event(
+                    win32con.MOUSEEVENTF_WHEEL, cx, cy, -120 * lines, 0,
+                )
+                time.sleep(0.3)
+
+            for img_path in images:
+                add_img_btn = remark_pop.GroupControl(
+                    Name="添加图片",
+                    AutomationId="desc_img_list_view_.add_button_view",
+                )
+                if not add_img_btn.Exists(maxSearchSeconds=2):
+                    raise RuntimeError("未找到'添加图片'按钮")
+
+                add_img_btn.Click(ratioX=_rand_ratio(), ratioY=_rand_ratio())
+                time.sleep(1)
+
+                dlg = auto.WindowControl(ClassName="#32770")
+                if not dlg.Exists(maxSearchSeconds=5):
+                    raise RuntimeError("文件选择对话框未弹出")
+
+                dlg.SendKeys("{Alt}N")
+                time.sleep(0.3)
+                edit = dlg.ComboBoxControl(AutomationId="1148").EditControl()
+                if not edit.Exists(0, 0):
+                    edit = dlg.EditControl(AutomationId="1148")
+                if not edit.Exists(maxSearchSeconds=2):
+                    raise RuntimeError("未找到文件名输入框")
+
+                abs_path = os.path.abspath(img_path)
+                edit.GetValuePattern().SetValue(abs_path)
+                time.sleep(0.3)
+
+                dlg.SendKeys("{Alt}O")
+                time.sleep(1)
+
+            ok_btn = remark_pop.ButtonControl(
+                ClassName="mmui::XOutlineButton",
+                Name="完成",
+            )
+            if not ok_btn.Exists(maxSearchSeconds=2):
+                raise RuntimeError("未找到'完成'按钮")
+            ok_btn.Click(ratioX=_rand_ratio(), ratioY=_rand_ratio())
+            time.sleep(0.3)
+
+            logger.info(f"添加备注图片成功: {self.current_name} -> {images}")
+
+        except Exception:
+            self._cleanup_profile()
+            raise
+        finally:
+            self._close_chat_info_panel()
+
+    def remove_contact_phone(self, phones: list[str]):
+        """
+        移除当前私聊联系人的电话号码。
+
+        Args:
+            phones: 要移除的电话号码列表，如 ["13800138000"]
+        """
+        if not phones:
+            raise ValueError("phones 不能为空")
+
+        if self._wx:
+            self._wx.activate()
+        try:
+            self._open_contact_profile()
+            self._click_profile_menu_item("设置备注和标签")
+            time.sleep(0.5)
+
+            remark_pop = self._win.WindowControl(
+                ClassName="mmui::ProfileUniquePop",
+                Name="设置备注和标签",
+            )
+            if not remark_pop.Exists(maxSearchSeconds=3):
+                raise RuntimeError("未找到'设置备注和标签'弹窗")
+
+            phone_area = remark_pop.GroupControl(
+                ClassName="mmui::ProfileFormPhoneView",
+            )
+            if not phone_area.Exists(maxSearchSeconds=2):
+                raise RuntimeError("未找到电话区域")
+
+            # 读取已有电话号码
+            existing_phones = set()
+            idx = 0
+            while True:
+                field = phone_area.TextControl(
+                    ClassName="mmui::XLineField",
+                    foundIndex=idx + 1,
+                )
+                if not field.Exists(0, 0):
+                    break
+                name = field.Name
+                if name and name != "填写电话":
+                    existing_phones.add(name.strip())
+                idx += 1
+
+            to_remove = [p for p in phones if p in existing_phones]
+            if not to_remove:
+                logger.info(f"电话号码均不存在，跳过: {self.current_name} -> {phones}")
+                cancel_btn = remark_pop.ButtonControl(Name="取消")
+                if cancel_btn.Exists(maxSearchSeconds=1):
+                    cancel_btn.Click(ratioX=_rand_ratio(), ratioY=_rand_ratio())
+                return
+
+            for phone in to_remove:
+                phone_field = phone_area.TextControl(
+                    ClassName="mmui::XLineField",
+                    Name=phone,
+                )
+                if phone_field.Exists(maxSearchSeconds=1):
+                    separator_view = phone_field.GetParentControl()
+                    if separator_view:
+                        num_view = separator_view.GetParentControl()
+                        if num_view:
+                            del_btn = num_view.ButtonControl(Name="删除电话")
+                            if del_btn.Exists(maxSearchSeconds=1):
+                                del_btn.Click(ratioX=_rand_ratio(), ratioY=_rand_ratio())
+                                time.sleep(0.3)
+                            else:
+                                logger.warning(f"未找到删除按钮: {phone}")
+                else:
+                    logger.warning(f"未找到电话号码项: {phone}")
+
+            ok_btn = remark_pop.ButtonControl(
+                ClassName="mmui::XOutlineButton",
+                Name="完成",
+            )
+            ok_btn.Click(ratioX=_rand_ratio(), ratioY=_rand_ratio())
+            time.sleep(0.3)
+            logger.info(f"移除电话号码成功: {self.current_name} -> {phones}")
+
+        except Exception:
+            self._cleanup_profile()
+            raise
+        finally:
+            self._close_chat_info_panel()
+
+    def remove_contact_image(self, indexes: list[int]):
+        """
+        删除当前私聊联系人的备注图片（按序号）。
+
+        Args:
+            indexes: 要删除的图片序号列表（从 1 开始），如 [1, 3]。
+                     按从大到小的顺序删除，避免序号偏移。
+        """
+        if not indexes:
+            raise ValueError("indexes 不能为空")
+
+        if self._wx:
+            self._wx.activate()
+        try:
+            self._open_contact_profile()
+            self._click_profile_menu_item("设置备注和标签")
+            time.sleep(0.5)
+
+            remark_pop = self._win.WindowControl(
+                ClassName="mmui::ProfileUniquePop",
+                Name="设置备注和标签",
+            )
+            if not remark_pop.Exists(maxSearchSeconds=3):
+                raise RuntimeError("未找到'设置备注和标签'弹窗")
+
+            # 滚动到底部，确保图片区域可见
+            scroll_area = remark_pop.GroupControl(ClassName="QFScrollArea")
+            if scroll_area.Exists(0, 0):
+                rect = scroll_area.BoundingRectangle
+                cx = rect.left + rect.width() // 2
+                cy = rect.top + rect.height() // 2
+                lines = max(rect.height() // 40, 10)
+                win32api.SetCursorPos((cx, cy))
+                time.sleep(0.1)
+                win32api.mouse_event(
+                    win32con.MOUSEEVENTF_WHEEL, cx, cy, -120 * lines, 0,
+                )
+                time.sleep(0.3)
+
+            img_list = remark_pop.GroupControl(
+                AutomationId="desc_img_list_view_",
+            )
+            if not img_list.Exists(maxSearchSeconds=2):
+                cancel_btn = remark_pop.ButtonControl(Name="取消")
+                if cancel_btn.Exists(maxSearchSeconds=1):
+                    cancel_btn.Click(ratioX=_rand_ratio(), ratioY=_rand_ratio())
+                return
+
+            # 收集所有图片项
+            img_items = []
+            for child in img_list.GetChildren():
+                if child.Name == "描述图片":
+                    img_items.append(child)
+
+            if not img_items:
+                cancel_btn = remark_pop.ButtonControl(Name="取消")
+                if cancel_btn.Exists(maxSearchSeconds=1):
+                    cancel_btn.Click(ratioX=_rand_ratio(), ratioY=_rand_ratio())
+                return
+
+            # 按从大到小排序删除，避免删除后序号偏移
+            deleted = 0
+            for idx in sorted(indexes, reverse=True):
+                if idx < 1 or idx > len(img_items):
+                    logger.warning(f"图片序号超出范围，跳过: {idx} (共{len(img_items)}张)")
+                    continue
+
+                target = img_items[idx - 1]
+                img_btn = target.ButtonControl(
+                    ClassName="mmui::UrlImageView",
+                )
+                if not img_btn.Exists(0, 0):
+                    continue
+
+                img_btn.RightClick(ratioX=_rand_ratio(), ratioY=_rand_ratio())
+                time.sleep(0.5)
+
+                menu_win = self._win.WindowControl(ClassName="mmui::XMenu")
+                if not menu_win.Exists(maxSearchSeconds=2):
+                    continue
+
+                del_item = menu_win.MenuItemControl(
+                    ClassName="mmui::XMenuView",
+                    Name="删除",
+                )
+                if not del_item.Exists(maxSearchSeconds=1):
+                    self._win.SendKeys("{Esc}")
+                    continue
+
+                del_item.Click(ratioX=_rand_ratio(), ratioY=_rand_ratio())
+                time.sleep(0.3)
+                deleted += 1
+
+            if deleted > 0:
+                ok_btn = remark_pop.ButtonControl(
+                    ClassName="mmui::XOutlineButton",
+                    Name="完成",
+                )
+                if ok_btn.Exists(maxSearchSeconds=2):
+                    ok_btn.Click(ratioX=_rand_ratio(), ratioY=_rand_ratio())
+                    time.sleep(0.3)
+                logger.info(f"删除备注图片成功: {self.current_name} -> 删除{deleted}张")
+            else:
+                cancel_btn = remark_pop.ButtonControl(Name="取消")
+                if cancel_btn.Exists(maxSearchSeconds=1):
+                    cancel_btn.Click(ratioX=_rand_ratio(), ratioY=_rand_ratio())
+
+        except Exception:
+            self._cleanup_profile()
+            raise
+        finally:
+            self._close_chat_info_panel()
+
+    def set_contact_star(self):
+        """将当前私聊联系人设为星标朋友"""
+        if self._wx:
+            self._wx.activate()
+        try:
+            self._open_contact_profile()
+            self._click_profile_menu_item("设为星标朋友")
+            time.sleep(0.3)
+            logger.info(f"设为星标朋友操作完成: {self.current_name}")
+        except Exception:
+            self._cleanup_profile()
+            raise
+        finally:
+            self._close_chat_info_panel()
+
+    def cancel_contact_star(self):
+        """取消当前私聊联系人的星标朋友"""
+        if self._wx:
+            self._wx.activate()
+        try:
+            self._open_contact_profile()
+            self._click_profile_menu_item("不再设为星标朋友")
+            time.sleep(0.3)
+            logger.info(f"取消星标朋友操作完成: {self.current_name}")
+        except Exception:
+            self._cleanup_profile()
+            raise
+        finally:
+            self._close_chat_info_panel()
+
+    def black_contact(self):
+        """将当前私聊联系人加入黑名单"""
+        if self._wx:
+            self._wx.activate()
+        try:
+            self._open_contact_profile()
+            self._click_profile_menu_item("加入黑名单")
+            time.sleep(0.5)
+
+            confirm_btn = self._win.ButtonControl(Name="确定")
+            if confirm_btn.Exists(maxSearchSeconds=3):
+                confirm_btn.Click(ratioX=_rand_ratio(), ratioY=_rand_ratio())
+                time.sleep(0.3)
+                logger.info(f"加入黑名单成功: {self.current_name}")
+            else:
+                logger.warning(f"未找到确认按钮，加入黑名单可能未完成: {self.current_name}")
+
+        except Exception:
+            self._cleanup_profile()
+            raise
+        finally:
+            self._close_chat_info_panel()
+
+    def unblack_contact(self):
+        """将当前私聊联系人移出黑名单"""
+        if self._wx:
+            self._wx.activate()
+        try:
+            self._open_contact_profile()
+            self._click_profile_menu_item("移出黑名单")
+            time.sleep(0.3)
+            logger.info(f"移出黑名单成功: {self.current_name}")
+        except Exception:
+            self._cleanup_profile()
+            raise
+        finally:
+            self._close_chat_info_panel()
+
+    def delete_contact(self):
+        """删除当前私聊联系人（不可逆）"""
+        if self._wx:
+            self._wx.activate()
+        try:
+            self._open_contact_profile()
+            self._click_profile_menu_item("删除联系人")
+            time.sleep(0.5)
+
+            confirm_btn = self._win.ButtonControl(Name="删除")
+            if confirm_btn.Exists(maxSearchSeconds=3):
+                confirm_btn.Click(ratioX=_rand_ratio(), ratioY=_rand_ratio())
+                time.sleep(0.3)
+                logger.info(f"删除联系人成功: {self.current_name}")
+            else:
+                logger.warning(f"未找到'删除'确认按钮，删除联系人可能未完成: {self.current_name}")
+
+        except Exception:
+            self._cleanup_profile()
+            raise
+        finally:
+            self._close_chat_info_panel()
+
+    def get_friend_permission(self) -> dict:
+        """
+        获取当前私聊联系人的朋友权限设置。
+
+        Returns:
+            dict: {
+                "permission": "chatonly" | "all",
+                "hide_my_posts": bool,
+                "hide_their_posts": bool,
+            }
+        """
+        if self._wx:
+            self._wx.activate()
+        try:
+            self._open_contact_profile()
+            self._click_profile_menu_item("设置朋友权限")
+            time.sleep(0.5)
+
+            perm_pop = self._win.WindowControl(
+                ClassName="mmui::ProfileUniquePop",
+                Name="朋友权限",
+            )
+            if not perm_pop.Exists(maxSearchSeconds=3):
+                raise RuntimeError("未找到'朋友权限'弹窗")
+
+            result = {
+                "permission": "all",
+                "hide_my_posts": False,
+                "hide_their_posts": False,
+            }
+
+            chatonly_item = perm_pop.GroupControl(
+                ClassName="mmui::ProfileFormPermissionItemUi",
+                Name="仅聊天",
+            )
+            if chatonly_item.Exists(maxSearchSeconds=1):
+                text_icon = chatonly_item.GroupControl(
+                    AutomationId="text_separator_v_view.text_icon_h_view",
+                )
+                if text_icon.Exists(0, 0):
+                    children = text_icon.GetChildren()
+                    if len(children) >= 2:
+                        result["permission"] = "chatonly"
+
+            if result["permission"] == "all":
+                hide_my = perm_pop.CheckBoxControl(
+                    ClassName="mmui::XSwitchButton",
+                    Name="不让他（她）看",
+                )
+                if hide_my.Exists(maxSearchSeconds=1):
+                    toggle = hide_my.GetTogglePattern()
+                    if toggle:
+                        result["hide_my_posts"] = toggle.ToggleState == 1
+
+                hide_their = perm_pop.CheckBoxControl(
+                    ClassName="mmui::XSwitchButton",
+                    Name="不看他（她）",
+                )
+                if hide_their.Exists(maxSearchSeconds=1):
+                    toggle = hide_their.GetTogglePattern()
+                    if toggle:
+                        result["hide_their_posts"] = toggle.ToggleState == 1
+
+            cancel_btn = perm_pop.ButtonControl(Name="取消")
+            if cancel_btn.Exists(maxSearchSeconds=1):
+                cancel_btn.Click(ratioX=_rand_ratio(), ratioY=_rand_ratio())
+            time.sleep(0.3)
+
+            logger.info(f"获取朋友权限成功: {self.current_name} -> {result}")
+            return result
+
+        except Exception:
+            self._cleanup_profile()
+            raise
+        finally:
+            self._close_chat_info_panel()
+
+    def set_friend_permission(self, permission: str = "all",
+                              hide_my_posts: bool = False,
+                              hide_their_posts: bool = False):
+        """
+        设置当前私聊联系人的朋友权限。
+
+        Args:
+            permission: "all" 或 "chatonly"
+            hide_my_posts: 不让他（她）看我的朋友圈和状态
+            hide_their_posts: 不看他（她）的朋友圈和状态
+        """
+        if permission not in ("all", "chatonly"):
+            raise ValueError(f"permission 必须为 'all' 或 'chatonly'，当前: {permission}")
+
+        if self._wx:
+            self._wx.activate()
+        try:
+            self._open_contact_profile()
+            self._click_profile_menu_item("设置朋友权限")
+            time.sleep(0.5)
+
+            perm_pop = self._win.WindowControl(
+                ClassName="mmui::ProfileUniquePop",
+                Name="朋友权限",
+            )
+            if not perm_pop.Exists(maxSearchSeconds=3):
+                raise RuntimeError("未找到'朋友权限'弹窗")
+
+            changed = False
+
+            target_name = "仅聊天" if permission == "chatonly" else "聊天、朋友圈、微信运动等"
+            target_item = perm_pop.GroupControl(
+                ClassName="mmui::ProfileFormPermissionItemUi",
+                Name=target_name,
+            )
+            if not target_item.Exists(maxSearchSeconds=1):
+                raise RuntimeError(f"未找到权限选项: {target_name}")
+
+            text_icon = target_item.GroupControl(
+                AutomationId="text_separator_v_view.text_icon_h_view",
+            )
+            already_selected = False
+            if text_icon.Exists(0, 0):
+                children = text_icon.GetChildren()
+                if len(children) >= 2:
+                    already_selected = True
+
+            if not already_selected:
+                target_item.Click(ratioX=_rand_ratio(), ratioY=_rand_ratio())
+                time.sleep(0.3)
+                changed = True
+
+            if permission == "all":
+                hide_my_sw = perm_pop.CheckBoxControl(
+                    ClassName="mmui::XSwitchButton",
+                    Name="不让他（她）看",
+                )
+                if hide_my_sw.Exists(maxSearchSeconds=1):
+                    toggle = hide_my_sw.GetTogglePattern()
+                    if toggle:
+                        current = toggle.ToggleState == 1
+                        if current != hide_my_posts:
+                            hide_my_sw.Click(ratioX=0.5, ratioY=0.5)
+                            time.sleep(0.2)
+                            changed = True
+
+                hide_their_sw = perm_pop.CheckBoxControl(
+                    ClassName="mmui::XSwitchButton",
+                    Name="不看他（她）",
+                )
+                if hide_their_sw.Exists(maxSearchSeconds=1):
+                    toggle = hide_their_sw.GetTogglePattern()
+                    if toggle:
+                        current = toggle.ToggleState == 1
+                        if current != hide_their_posts:
+                            hide_their_sw.Click(ratioX=0.5, ratioY=0.5)
+                            time.sleep(0.2)
+                            changed = True
+
+            if changed:
+                ok_btn = perm_pop.ButtonControl(
+                    ClassName="mmui::XOutlineButton",
+                    Name="完成",
+                )
+                if ok_btn.Exists(maxSearchSeconds=2):
+                    ok_btn.Click(ratioX=_rand_ratio(), ratioY=_rand_ratio())
+                    time.sleep(0.3)
+            else:
+                cancel_btn = perm_pop.ButtonControl(Name="取消")
+                if cancel_btn.Exists(maxSearchSeconds=1):
+                    cancel_btn.Click(ratioX=_rand_ratio(), ratioY=_rand_ratio())
+                    time.sleep(0.2)
+
+            logger.info(f"设置朋友权限成功: {self.current_name} -> permission={permission}, "
+                        f"hide_my={hide_my_posts}, hide_their={hide_their_posts}")
+
+        except Exception:
+            self._cleanup_profile()
+            raise
+        finally:
+            self._close_chat_info_panel()
+
+    def collect_contact_image(self, indexes: list[int]) -> int:
+        """
+        收藏当前私聊联系人的指定备注图片。
+
+        在"设置备注和标签"弹窗中，对指定序号的图片右键点击"收藏"。
+
+        Args:
+            indexes: 要收藏的图片序号列表（从 1 开始），如 [1, 3]
+
+        Returns:
+            成功收藏的图片数量
+        """
+        if not indexes:
+            raise ValueError("indexes 不能为空")
+
+        if self._wx:
+            self._wx.activate()
+        try:
+            self._open_contact_profile()
+            self._click_profile_menu_item("设置备注和标签")
+            time.sleep(0.5)
+
+            remark_pop = self._win.WindowControl(
+                ClassName="mmui::ProfileUniquePop",
+                Name="设置备注和标签",
+            )
+            if not remark_pop.Exists(maxSearchSeconds=3):
+                raise RuntimeError("未找到'设置备注和标签'弹窗")
+
+            # 滚动到底部，确保图片区域可见
+            scroll_area = remark_pop.GroupControl(ClassName="QFScrollArea")
+            if scroll_area.Exists(0, 0):
+                rect = scroll_area.BoundingRectangle
+                cx = rect.left + rect.width() // 2
+                cy = rect.top + rect.height() // 2
+                lines = max(rect.height() // 40, 10)
+                win32api.SetCursorPos((cx, cy))
+                time.sleep(0.1)
+                win32api.mouse_event(
+                    win32con.MOUSEEVENTF_WHEEL, cx, cy, -120 * lines, 0,
+                )
+                time.sleep(0.3)
+
+            img_list = remark_pop.GroupControl(
+                AutomationId="desc_img_list_view_",
+            )
+            if not img_list.Exists(maxSearchSeconds=2):
+                cancel_btn = remark_pop.ButtonControl(Name="取消")
+                if cancel_btn.Exists(maxSearchSeconds=1):
+                    cancel_btn.Click(ratioX=_rand_ratio(), ratioY=_rand_ratio())
+                return 0
+
+            # 收集所有图片项
+            img_items = []
+            for child in img_list.GetChildren():
+                if child.Name == "描述图片":
+                    img_items.append(child)
+
+            if not img_items:
+                cancel_btn = remark_pop.ButtonControl(Name="取消")
+                if cancel_btn.Exists(maxSearchSeconds=1):
+                    cancel_btn.Click(ratioX=_rand_ratio(), ratioY=_rand_ratio())
+                return 0
+
+            collected = 0
+            for idx in indexes:
+                if idx < 1 or idx > len(img_items):
+                    logger.warning(f"图片序号超出范围，跳过: {idx} (共{len(img_items)}张)")
+                    continue
+
+                target = img_items[idx - 1]
+                img_btn = target.ButtonControl(
+                    ClassName="mmui::UrlImageView",
+                )
+                if not img_btn.Exists(0, 0):
+                    continue
+
+                img_btn.RightClick(ratioX=_rand_ratio(), ratioY=_rand_ratio())
+                time.sleep(0.5)
+
+                menu_win = self._win.WindowControl(ClassName="mmui::XMenu")
+                if not menu_win.Exists(maxSearchSeconds=2):
+                    continue
+
+                collect_item = menu_win.MenuItemControl(
+                    ClassName="mmui::XMenuView",
+                    Name="收藏",
+                )
+                if not collect_item.Exists(maxSearchSeconds=1):
+                    self._win.SendKeys("{Esc}")
+                    logger.warning(f"右键菜单中未找到'收藏'，跳过第{idx}张")
+                    continue
+
+                collect_item.Click(ratioX=_rand_ratio(), ratioY=_rand_ratio())
+                time.sleep(0.5)
+                collected += 1
+
+            # 收藏不修改数据，点"取消"关闭弹窗
+            cancel_btn = remark_pop.ButtonControl(Name="取消")
+            if cancel_btn.Exists(maxSearchSeconds=1):
+                cancel_btn.Click(ratioX=_rand_ratio(), ratioY=_rand_ratio())
+
+            logger.info(f"收藏备注图片成功: {self.current_name} -> 收藏{collected}张")
+            return collected
+
+        except Exception:
+            self._cleanup_profile()
+            raise
+        finally:
+            self._close_chat_info_panel()
+
+    def save_contact_image(self, indexes: list[int], save_path: str) -> int:
+        """
+        保存当前私聊联系人的指定备注图片到指定目录。
+
+        在"设置备注和标签"弹窗中，对指定序号的图片右键点击"另存为..."，
+        在弹出的系统文件保存对话框中设置保存路径，然后 Alt+S 保存。
+
+        Args:
+            indexes: 要保存的图片序号列表（从 1 开始），如 [1, 3]
+            save_path: 保存目录路径，如 "C:/download/images"
+
+        Returns:
+            保存的图片数量，无图片时返回 0
+        """
+        if not indexes:
+            raise ValueError("indexes 不能为空")
+
+        save_dir = os.path.abspath(save_path)
+        os.makedirs(save_dir, exist_ok=True)
+
+        if self._wx:
+            self._wx.activate()
+        try:
+            self._open_contact_profile()
+            self._click_profile_menu_item("设置备注和标签")
+            time.sleep(0.5)
+
+            remark_pop = self._win.WindowControl(
+                ClassName="mmui::ProfileUniquePop",
+                Name="设置备注和标签",
+            )
+            if not remark_pop.Exists(maxSearchSeconds=3):
+                raise RuntimeError("未找到'设置备注和标签'弹窗")
+
+            # 滚动到底部，确保图片区域可见
+            scroll_area = remark_pop.GroupControl(ClassName="QFScrollArea")
+            if scroll_area.Exists(0, 0):
+                rect = scroll_area.BoundingRectangle
+                cx = rect.left + rect.width() // 2
+                cy = rect.top + rect.height() // 2
+                lines = max(rect.height() // 40, 10)
+                win32api.SetCursorPos((cx, cy))
+                time.sleep(0.1)
+                win32api.mouse_event(
+                    win32con.MOUSEEVENTF_WHEEL, cx, cy, -120 * lines, 0,
+                )
+                time.sleep(0.3)
+
+            img_list = remark_pop.GroupControl(
+                AutomationId="desc_img_list_view_",
+            )
+            if not img_list.Exists(maxSearchSeconds=2):
+                cancel_btn = remark_pop.ButtonControl(Name="取消")
+                if cancel_btn.Exists(maxSearchSeconds=1):
+                    cancel_btn.Click(ratioX=_rand_ratio(), ratioY=_rand_ratio())
+                return 0
+
+            # 收集所有图片项
+            img_items = []
+            for child in img_list.GetChildren():
+                if child.Name == "描述图片":
+                    img_items.append(child)
+
+            if not img_items:
+                cancel_btn = remark_pop.ButtonControl(Name="取消")
+                if cancel_btn.Exists(maxSearchSeconds=1):
+                    cancel_btn.Click(ratioX=_rand_ratio(), ratioY=_rand_ratio())
+                return 0
+
+            saved = 0
+
+            for idx in indexes:
+                if idx < 1 or idx > len(img_items):
+                    logger.warning(f"图片序号超出范围，跳过: {idx} (共{len(img_items)}张)")
+                    continue
+
+                target = img_items[idx - 1]
+                img_btn = target.ButtonControl(
+                    ClassName="mmui::UrlImageView",
+                )
+                if not img_btn.Exists(0, 0):
+                    continue
+
+                img_btn.RightClick(ratioX=_rand_ratio(), ratioY=_rand_ratio())
+                time.sleep(0.5)
+
+                menu_win = self._win.WindowControl(ClassName="mmui::XMenu")
+                if not menu_win.Exists(maxSearchSeconds=2):
+                    continue
+
+                save_item = menu_win.MenuItemControl(
+                    ClassName="mmui::XMenuView",
+                    Name="另存为...",
+                )
+                if not save_item.Exists(maxSearchSeconds=1):
+                    self._win.SendKeys("{Esc}")
+                    continue
+
+                save_item.Click(ratioX=_rand_ratio(), ratioY=_rand_ratio())
+                time.sleep(1)
+
+                # 等待系统文件保存对话框
+                dlg = remark_pop.WindowControl(ClassName="#32770")
+                if not dlg.Exists(maxSearchSeconds=5):
+                    dlg = auto.WindowControl(ClassName="#32770")
+                    if not dlg.Exists(maxSearchSeconds=3):
+                        continue
+
+                edit = dlg.EditControl(AutomationId="1001")
+                if not edit.Exists(maxSearchSeconds=2):
+                    dlg.SendKeys("{Esc}")
+                    continue
+
+                vp = edit.GetValuePattern()
+                original_name = vp.Value if vp else ""
+                if not original_name:
+                    dlg.SendKeys("{Esc}")
+                    continue
+                full_path = os.path.join(save_dir, original_name)
+                vp.SetValue(full_path)
+                time.sleep(0.3)
+
+                dlg.SendKeys("{Alt}S")
+                time.sleep(1)
+
+                # 如果弹出覆盖确认，按 Y 确认
+                if dlg.Exists(maxSearchSeconds=0.5):
+                    dlg.SendKeys("{Alt}Y")
+                    time.sleep(0.5)
+
+                saved += 1
+
+            # 点击"取消"关闭弹窗（保存图片不需要点完成）
+            cancel_btn = remark_pop.ButtonControl(Name="取消")
+            if cancel_btn.Exists(maxSearchSeconds=1):
+                cancel_btn.Click(ratioX=_rand_ratio(), ratioY=_rand_ratio())
+
+            logger.info(f"保存备注图片成功: {self.current_name} -> {save_dir} ({saved}张)")
+            return saved
+
+        except Exception:
+            self._cleanup_profile()
+            raise
+        finally:
+            self._close_chat_info_panel()
+
+    def recommend_contact(self, receiver_nickname: str) -> bool:
+        """将当前私聊联系人推荐给另一个朋友（发送名片）"""
+        return self.send_card(receiver_nickname)
+
 
 class SeparateChat(Chat, WeixinWindow):
     """
@@ -5188,9 +6808,9 @@ class SeparateChat(Chat, WeixinWindow):
         self.activate()
         return super().send_file(file_path)
 
-    def send_room_at(self, content: str, at_members: list[str]) -> MessageStatus:
+    def send_at(self, content: str, at_members: list[str]) -> MessageStatus:
         self.activate()
-        return super().send_room_at(content, at_members)
+        return super().send_at(content, at_members)
 
     def send_collection(self, collection_keywords: str) -> bool:
         self.activate()
@@ -5371,10 +6991,10 @@ class Weixin(WeixinWindow):
         chat = self.open_session_by_search(nickname)
         return chat.send_file(file_path)
 
-    def send_room_at(self, nickname: str, content: str, at_members: list[str]) -> MessageStatus:
+    def send_at(self, nickname: str, content: str, at_members: list[str]) -> MessageStatus:
         """打开指定群聊会话并 @指定成员发送消息"""
         chat = self.open_session_by_search(nickname)
-        return chat.send_room_at(content, at_members)
+        return chat.send_at(content, at_members)
 
     def send_collection(self, nickname: str, collection_keywords: str) -> bool:
         """打开指定会话并发送收藏内容"""
@@ -5436,258 +7056,10 @@ class Weixin(WeixinWindow):
         except (RuntimeError, ValueError):
             return None
 
-    # ---- 联系人资料面板操作 ----
-
-    def _open_contact_profile(self, nickname: str):
-        """
-        打开指定联系人的资料面板。
-
-        流程：
-        1. 通过搜索打开与该联系人的聊天会话
-        2. 点击"聊天信息"按钮
-        3. 点击联系人头像，打开资料面板
-
-        Args:
-            nickname: 联系人昵称
-
-        Returns:
-            Chat 对象
-        """
-        chat = self.open_session_by_search(nickname)
-        if chat.chat_type != "私聊":
-            raise RuntimeError("联系人资料操作仅支持私聊会话")
-
-        self.activate()
-
-        # 1. 点击"聊天信息"按钮
-        chat._click_chat_info_button()
-        time.sleep(0.5)
-
-        # 2. 点击联系人头像
-        chat._click_contact_avatar()
-        time.sleep(0.5)
-
-        return chat
-
-    def _click_profile_menu_item(self, chat: "Chat", menu_name: str):
-        """
-        点击资料面板"更多"菜单中的指定菜单项。
-
-        Args:
-            chat: Chat 对象
-            menu_name: 菜单项名称
-        """
-        # 1. 点击资料面板"更多"按钮
-        chat._click_profile_more_button()
-        time.sleep(0.3)
-
-        # 2. 点击指定菜单项
-        menu_item = self.window.MenuItemControl(
-            ClassName="mmui::XMenuView",
-            Name=menu_name,
-        )
-        if not menu_item.Exists(maxSearchSeconds=2):
-            self.window.SendKeys("{Esc}")
-            raise RuntimeError(f"未找到'{menu_name}'菜单项")
-        menu_item.Click(ratioX=_rand_ratio(), ratioY=_rand_ratio())
-
-    def _cleanup_profile(self):
-        """关闭可能残留的弹窗和面板，并收回聊天信息面板"""
-        try:
-            self.window.SendKeys("{Esc}")
-            time.sleep(0.2)
-            self.window.SendKeys("{Esc}")
-            time.sleep(0.2)
-            self.window.SendKeys("{Esc}")
-            time.sleep(0.2)
-        except Exception:
-            pass
-        self._close_chat_info_panel()
-
-    def _close_chat_info_panel(self):
-        """点击"聊天信息"按钮收回展开的面板"""
-        try:
-            btn = self.window.ButtonControl(
-                ClassName="mmui::XButton",
-                Name="聊天信息",
-            )
-            if btn.Exists(0, 0):
-                btn.Click(ratioX=_rand_ratio(), ratioY=_rand_ratio())
-                time.sleep(0.2)
-        except Exception:
-            pass
-
     def get_contact_profile(self, nickname: str) -> dict:
-        """
-        获取联系人的资料信息。
-
-        打开联系人资料面板（mmui::ContactProfileView），
-        从面板中提取各字段信息，然后关闭面板。
-
-        资料面板结构：
-        - 顶部 ContactProfileTopUi:
-          - display_name_text: 显示名（备注+昵称）
-          - basic_line_view: 昵称、微信号、地区（key_text + ContactProfileTextView）
-        - 中间 ContactProfileMidUi (line_v_view):
-          - remark_line: 备注（XMouseEventView.Name）
-          - tag_line: 标签（XMouseEventView.Name，逗号分隔）
-          - desc_line: 描述（XMouseEventView.Name）
-          - friend_per_line: 朋友权限（XMouseEventView.Name）
-
-        Args:
-            nickname: 联系人昵称
-
-        Returns:
-            dict: {
-                "display_name": str,   # 显示名（如 "客户 写诗喂狗"）
-                "nickname": str,       # 昵称
-                "account": str,      # 微信号
-                "region": str,         # 地区
-                "remark": str,         # 备注
-                "tags": list[str],     # 标签列表
-                "description": str,    # 描述
-                "permission": str,     # 朋友权限文本
-            }
-        """
-        self.activate()
-        try:
-            chat = self._open_contact_profile(nickname)
-            time.sleep(0.5)
-
-            profile = self.window.GroupControl(
-                ClassName="mmui::ContactProfileView",
-            )
-            if not profile.Exists(maxSearchSeconds=3):
-                raise RuntimeError("未找到联系人资料面板")
-
-            result = {
-                "display_name": None,
-                "nickname": None,
-                "account": None,
-                "region": None,
-                "remark": None,
-                "tags": [],
-                "description": None,
-                "permission": None,
-                "common_groups": None,
-                "source": None,
-                "signature": None,
-                "finder_name": None,
-            }
-
-            # 顶部：显示名
-            display_name = profile.TextControl(
-                AutomationId="right_v_view.nickname_button_view.display_name_text",
-            )
-            if display_name.Exists(0, 0):
-                val = (display_name.Name or "").strip()
-                if val:
-                    result["display_name"] = val
-
-            # 顶部：基本信息行（昵称、微信号、地区）
-            # 每行结构：key_text("昵称：") + ContactProfileTextView(值)
-            key_map = {
-                "昵称：": "nickname",
-                "微信号：": "account",
-                "地区：": "region",
-            }
-            info_center = profile.GroupControl(
-                AutomationId="right_v_view.user_info_center_view",
-            )
-            if info_center.Exists(0, 0):
-                for child in info_center.GetChildren():
-                    key_ctrl = child.TextControl(
-                        AutomationId="right_v_view.user_info_center_view.basic_line_view.basic_line.key_text",
-                    )
-                    if not key_ctrl.Exists(0, 0):
-                        continue
-                    key_name = key_ctrl.Name or ""
-                    field = key_map.get(key_name)
-                    if not field:
-                        continue
-                    val_ctrl = child.TextControl(
-                        ClassName="mmui::ContactProfileTextView",
-                    )
-                    if val_ctrl.Exists(0, 0):
-                        val = (val_ctrl.Name or "").strip()
-                        if val:
-                            result[field] = val
-
-            # 中间：备注、标签、描述、朋友权限
-            # 每行的值在 XMouseEventView 的 Name 属性中
-            line_map = {
-                "remark_line": "remark",
-                "tag_line": "tags",
-                "desc_line": "description",
-                "friend_per_line": "permission",
-            }
-            for line_id, field in line_map.items():
-                full_id = f"qt_scrollarea_viewport.mid_ui_.main_part_v_view.line_v_view.{line_id}"
-                line = profile.GroupControl(AutomationId=full_id)
-                if not line.Exists(0, 0):
-                    continue
-                val_btn = line.ButtonControl(
-                    ClassName="mmui::XMouseEventView",
-                )
-                if not val_btn.Exists(0, 0):
-                    continue
-                val = (val_btn.Name or "").strip()
-                if field == "tags":
-                    result[field] = [t.strip() for t in val.split(",") if t.strip()] if val else []
-                elif val:
-                    result[field] = val
-
-            # 中间：共同群聊、来源、个性签名（在 wx_friend_v_view.line_v_view 下）
-            friend_line_map = {
-                "chatroom_intersection": "common_groups",
-                "source": "source",
-                "sign": "signature",
-            }
-            for line_id, field in friend_line_map.items():
-                full_id = f"qt_scrollarea_viewport.mid_ui_.wx_friend_v_view.line_v_view.{line_id}"
-                line = profile.GroupControl(AutomationId=full_id)
-                if not line.Exists(0, 0):
-                    continue
-                # 优先从 XMouseEventView.Name 取值
-                val_btn = line.ButtonControl(
-                    ClassName="mmui::XMouseEventView",
-                )
-                if val_btn.Exists(0, 0) and (val_btn.Name or "").strip():
-                    result[field] = val_btn.Name.strip()
-                    continue
-                # XMouseEventView.Name 为空时，从 ContactProfileTextView 取值
-                val_text = line.TextControl(
-                    ClassName="mmui::ContactProfileTextView",
-                    searchDepth=8,
-                )
-                if val_text.Exists(0, 0) and (val_text.Name or "").strip():
-                    result[field] = val_text.Name.strip()
-
-            # 视频号名称
-            # 父容器: mmui::ProfileFinderView,
-            #   AutomationId="qt_scrollarea_viewport.mid_ui_.wx_friend_finder_"
-            # 名称: mmui::XTextView, AutomationId="ProfileFinderUi.nick_name_"
-            finder_view = profile.GroupControl(
-                ClassName="mmui::ProfileFinderView",
-                AutomationId="qt_scrollarea_viewport.mid_ui_.wx_friend_finder_",
-            )
-            if finder_view.Exists(0, 0):
-                finder_nick = finder_view.TextControl(
-                    AutomationId="ProfileFinderUi.nick_name_",
-                )
-                if finder_nick.Exists(0, 0):
-                    val = (finder_nick.Name or "").strip()
-                    if val:
-                        result["finder_name"] = val
-
-            logger.info(f"获取联系人资料成功: {nickname}")
-            return result
-
-        except Exception:
-            self._cleanup_profile()
-            raise
-        finally:
-            self._close_chat_info_panel()
+        """获取联系人的资料信息，委托给 Chat.get_contact_profile"""
+        chat = self.open_session_by_search(nickname)
+        return chat.get_contact_profile()
 
     def set_contact_info(self, nickname: str, *,
                          remark: str = None,
@@ -5695,1697 +7067,117 @@ class Weixin(WeixinWindow):
                          phones: list = None,
                          description: str = None,
                          images: list = None):
-        """
-        一次性设置联系人的备注、标签、电话、描述、图片。
-
-        只打开一次"设置备注和标签"弹窗，按顺序完成所有操作后点击"完成"保存。
-        参数为 None 时跳过对应项，不做修改。
-
-        Args:
-            nickname: 联系人昵称
-            remark: 备注名，None 不修改
-            labels: 标签列表（覆盖式：先清空再添加），None 不修改，[] 清空所有标签
-            phones: 电话列表（覆盖式：先清空再添加），None 不修改，[] 清空所有电话
-            description: 描述信息（最大200字符），None 不修改
-            images: 图片路径列表（覆盖式：先清空再添加），None 不修改，[] 清空所有图片
-        """
-        if all(v is None for v in (remark, labels, phones, description, images)):
-            return
-
-        self.activate()
-        try:
-            chat = self._open_contact_profile(nickname)
-            self._click_profile_menu_item(chat, "设置备注和标签")
-
-            remark_pop = self.window.WindowControl(
-                ClassName="mmui::ProfileUniquePop",
-                Name="设置备注和标签",
-            )
-            if not remark_pop.Exists(maxSearchSeconds=3):
-                raise RuntimeError("未找到'设置备注和标签'弹窗")
-
-            # ---- 1. 备注 ----
-            if remark is not None:
-                remark_edit = remark_pop.EditControl(
-                    ClassName="mmui::XLineEdit",
-                    Name="修改备注名",
-                )
-                if remark_edit.Exists(maxSearchSeconds=2):
-                    remark_edit.Click(ratioX=_rand_ratio(), ratioY=_rand_ratio())
-                    remark_edit.SendKeys("{Ctrl}a{Del}")
-                    if remark:
-                        paste(remark)
-
-            # 辅助函数：将弹窗滚动区域滚动到底部
-            def _scroll_to_bottom():
-                scroll_area = remark_pop.GroupControl(ClassName="QFScrollArea")
-                if not scroll_area.Exists(0, 0):
-                    return
-                rect = scroll_area.BoundingRectangle
-                cx = rect.left + rect.width() // 2
-                cy = rect.top + rect.height() // 2
-                lines = max(rect.height() // 40, 10)
-                win32api.SetCursorPos((cx, cy))
-                time.sleep(0.1)
-                win32api.mouse_event(
-                    win32con.MOUSEEVENTF_WHEEL, cx, cy, -120 * lines, 0,
-                )
-                time.sleep(0.3)
-
-            # ---- 2. 标签（覆盖式） ----
-            if labels is not None:
-                tag_btn = remark_pop.ButtonControl(
-                    Name="修改标签", AutomationId="button",
-                )
-                if tag_btn.Exists(maxSearchSeconds=2):
-                    existing_labels = set()
-                    tag_text = tag_btn.TextControl(ClassName="mmui::XTextView")
-                    if tag_text.Exists(0, 0):
-                        name = tag_text.Name
-                        if name and name != "搜索或创建标签...":
-                            existing_labels = {t.strip() for t in name.split(",") if t.strip()}
-
-                    target_set = set(labels)
-                    to_add = [l for l in labels if l not in existing_labels]
-                    to_remove = [l for l in existing_labels if l not in target_set]
-
-                    if to_add or to_remove:
-                        tag_btn.Click(ratioX=_rand_ratio(), ratioY=_rand_ratio())
-
-                        for label in to_remove:
-                            label_item = remark_pop.ListItemControl(
-                                Name=label, searchDepth=8,
-                            )
-                            if label_item.Exists(maxSearchSeconds=1):
-                                label_item.Click(ratioX=_rand_ratio(), ratioY=_rand_ratio())
-
-                        for label in to_add:
-                            tag_edit = remark_pop.EditControl(
-                                ClassName="mmui::XValidatorTextEdit", Name="搜索",
-                            )
-                            if tag_edit.Exists(maxSearchSeconds=2):
-                                tag_edit.Click(ratioX=_rand_ratio(), ratioY=_rand_ratio())
-                                tag_edit.SendKeys("{Ctrl}a{Del}")
-                                paste(label)
-                                label_item = remark_pop.ListItemControl(
-                                    Name=label, searchDepth=8,
-                                )
-                                if label_item.Exists(maxSearchSeconds=1):
-                                    label_item.Click(ratioX=_rand_ratio(), ratioY=_rand_ratio())
-                                tag_edit.SendKeys("{Ctrl}a{Del}")
-
-                        title_text = remark_pop.TextControl(
-                            ClassName="mmui::XTextView",
-                            Name="设置备注和标签",
-                        )
-                        if title_text.Exists(0, 0):
-                            title_text.Click(ratioX=0.5, ratioY=0.5)
-
-            # ---- 3. 电话（覆盖式） ----
-            if phones is not None:
-                phone_area = remark_pop.GroupControl(
-                    ClassName="mmui::ProfileFormPhoneView",
-                )
-                if phone_area.Exists(maxSearchSeconds=2):
-                    for _ in range(20):
-                        phone_field = phone_area.TextControl(
-                            ClassName="mmui::XLineField",
-                        )
-                        if not phone_field.Exists(0, 0):
-                            break
-                        name = phone_field.Name
-                        if not name or name == "填写电话":
-                            break
-                        separator_view = phone_field.GetParentControl()
-                        if separator_view:
-                            num_view = separator_view.GetParentControl()
-                            if num_view:
-                                del_btn = num_view.ButtonControl(Name="删除电话")
-                                if del_btn.Exists(0, 0):
-                                    del_btn.Click(ratioX=_rand_ratio(), ratioY=_rand_ratio())
-                                    continue
-                        break
-
-                    for phone in phones:
-                        empty_field = phone_area.TextControl(
-                            ClassName="mmui::XLineField", Name="填写电话",
-                        )
-                        if not empty_field.Exists(0, 0):
-                            add_btn = phone_area.ButtonControl(
-                                Name="添加电话", AutomationId="button",
-                            )
-                            if add_btn.Exists(maxSearchSeconds=1):
-                                add_btn.Click(ratioX=_rand_ratio(), ratioY=_rand_ratio())
-
-                        empty_field = phone_area.TextControl(
-                            ClassName="mmui::XLineField", Name="填写电话",
-                        )
-                        if empty_field.Exists(maxSearchSeconds=2):
-                            phone_edit = empty_field.EditControl(
-                                ClassName="mmui::XLineEdit",
-                            )
-                            if phone_edit.Exists(0, 0):
-                                phone_edit.Click(ratioX=_rand_ratio(), ratioY=_rand_ratio())
-                                vp = phone_edit.GetValuePattern()
-                                if vp:
-                                    vp.SetValue(phone)
-                                else:
-                                    paste(phone)
-                                phone_edit.SendKeys("{Tab}")
-
-            # ---- 4. 描述 ----
-            if description is not None:
-                desc_edit = remark_pop.EditControl(
-                    ClassName="mmui::XValidatorTextEdit", Name="修改描述",
-                )
-                if desc_edit.Exists(maxSearchSeconds=2):
-                    _scroll_to_bottom()
-                    desc_edit.Click(ratioX=_rand_ratio(), ratioY=_rand_ratio())
-                    desc_edit.SendKeys("{Ctrl}a{Del}")
-                    if description:
-                        paste(description[:200])
-
-            # ---- 5. 图片（覆盖式） ----
-            if images is not None:
-                img_list = remark_pop.GroupControl(
-                    AutomationId="desc_img_list_view_",
-                )
-                _scroll_to_bottom()
-                if img_list.Exists(0, 0):
-                    for _ in range(20):
-                        img_item = img_list.GroupControl(
-                            Name="描述图片",
-                            AutomationId="desc_img_list_view_.desc_img_button_view",
-                        )
-                        if not img_item.Exists(0, 0):
-                            break
-                        img_btn = img_item.ButtonControl(
-                            ClassName="mmui::UrlImageView",
-                        )
-                        if not img_btn.Exists(0, 0):
-                            break
-                        img_btn.RightClick(ratioX=_rand_ratio(), ratioY=_rand_ratio())
-                        menu_win = self.window.WindowControl(ClassName="mmui::XMenu")
-                        if not menu_win.Exists(maxSearchSeconds=2):
-                            break
-                        del_item = menu_win.MenuItemControl(
-                            ClassName="mmui::XMenuView", Name="删除",
-                        )
-                        if not del_item.Exists(maxSearchSeconds=1):
-                            self.window.SendKeys("{Esc}")
-                            break
-                        del_item.Click(ratioX=_rand_ratio(), ratioY=_rand_ratio())
-
-                for img_path in images:
-                    add_img_btn = remark_pop.GroupControl(
-                        Name="添加图片",
-                        AutomationId="desc_img_list_view_.add_button_view",
-                    )
-                    if not add_img_btn.Exists(maxSearchSeconds=2):
-                        break
-                    add_img_btn.Click(ratioX=_rand_ratio(), ratioY=_rand_ratio())
-                    dlg = auto.WindowControl(ClassName="#32770")
-                    if not dlg.Exists(maxSearchSeconds=5):
-                        break
-                    dlg.SendKeys("{Alt}N")
-                    edit = dlg.ComboBoxControl(AutomationId="1148").EditControl()
-                    if not edit.Exists(0, 0):
-                        edit = dlg.EditControl(AutomationId="1148")
-                    if edit.Exists(maxSearchSeconds=2):
-                        edit.GetValuePattern().SetValue(os.path.abspath(img_path))
-                        dlg.SendKeys("{Alt}O")
-                        time.sleep(0.5)
-
-            # ---- 点击"完成"保存 ----
-            ok_btn = remark_pop.ButtonControl(
-                ClassName="mmui::XOutlineButton", Name="完成",
-            )
-            if ok_btn.Exists(maxSearchSeconds=2):
-                ok_btn.Click(ratioX=_rand_ratio(), ratioY=_rand_ratio())
-
-            logger.info(f"设置联系人信息成功: {nickname}")
-
-        except Exception:
-            self._cleanup_profile()
-            raise
-        finally:
-            self._close_chat_info_panel()
-
-    def set_remark(self, nickname: str, remark: str):
-        """
-        设置联系人的备注名。
-
-        流程：
-        1. 打开联系人资料面板
-        2. 点击"更多"按钮
-        3. 点击"设置备注和标签"菜单项
-        4. 等待"设置备注和标签"弹窗出现（mmui::ProfileUniquePop）
-        5. 在弹窗中找到"修改备注名"编辑框（mmui::XLineEdit）并输入备注名
-        6. 点击"完成"按钮（mmui::XOutlineButton）
-
-        Args:
-            nickname: 联系人昵称
-            remark: 备注名
-
-        Raises:
-            ValueError: remark 为空时抛出
-            RuntimeError: 操作失败时抛出
-        """
-        if not remark:
-            raise ValueError("remark 不能为空")
-
-        self.activate()
-        try:
-            chat = self._open_contact_profile(nickname)
-            self._click_profile_menu_item(chat, "设置备注和标签")
-            time.sleep(0.5)
-
-            # 等待"设置备注和标签"弹窗出现
-            remark_pop = self.window.WindowControl(
-                ClassName="mmui::ProfileUniquePop",
-                Name="设置备注和标签",
-            )
-            if not remark_pop.Exists(maxSearchSeconds=3):
-                raise RuntimeError("未找到'设置备注和标签'弹窗")
-
-            # 在弹窗中查找"修改备注名"编辑框
-            remark_edit = remark_pop.EditControl(
-                ClassName="mmui::XLineEdit",
-                Name="修改备注名",
-            )
-            if not remark_edit.Exists(maxSearchSeconds=3):
-                raise RuntimeError("未找到'修改备注名'编辑框")
-
-            remark_edit.Click(ratioX=_rand_ratio(), ratioY=_rand_ratio())
-            time.sleep(0.2)
-            remark_edit.SendKeys("{Ctrl}a{Del}")
-            time.sleep(0.1)
-
-            paste(remark)
-            time.sleep(0.3)
-
-            # 点击"完成"按钮（输入内容后按钮从 disabled 变为 enabled）
-            ok_btn = remark_pop.ButtonControl(
-                ClassName="mmui::XOutlineButton",
-                Name="完成",
-            )
-            if not ok_btn.Exists(maxSearchSeconds=2):
-                raise RuntimeError("未找到'完成'按钮")
-            ok_btn.Click(ratioX=_rand_ratio(), ratioY=_rand_ratio())
-            time.sleep(0.3)
-
-            logger.info(f"设置备注成功: {nickname} -> {remark}")
-
-        except Exception:
-            self._cleanup_profile()
-            raise
-        finally:
-            self._close_chat_info_panel()
-
-    def add_label_to_contact(self, nickname: str, labels: list):
-        """
-        为联系人添加标签。
-
-        在"设置备注和标签"弹窗（mmui::ProfileUniquePop）中操作标签区域
-        （mmui::ProfileFormTagView），点击"修改标签"按钮后，
-        在搜索框中输入标签名，按 Down 键选中搜索结果，按 Enter 键确认。
-        所有标签添加完成后点击"完成"按钮保存。
-
-        Args:
-            nickname: 联系人昵称
-            labels: 标签名列表，如 ["朋友", "同事"]
-
-        Raises:
-            ValueError: labels 为空时抛出
-            RuntimeError: 操作失败时抛出
-        """
-        if not labels:
-            raise ValueError("labels 不能为空")
-
-        self.activate()
-        try:
-            chat = self._open_contact_profile(nickname)
-            self._click_profile_menu_item(chat, "设置备注和标签")
-            time.sleep(0.5)
-
-            # 等待"设置备注和标签"弹窗出现
-            remark_pop = self.window.WindowControl(
-                ClassName="mmui::ProfileUniquePop",
-                Name="设置备注和标签",
-            )
-            if not remark_pop.Exists(maxSearchSeconds=3):
-                raise RuntimeError("未找到'设置备注和标签'弹窗")
-
-            # 读取已有标签
-            # "修改标签"按钮(mmui::XView)内部有 mmui::XTextView 子控件，
-            # 无标签时 Name="搜索或创建标签..."，有标签时 Name 为逗号分隔的列表
-            existing_labels = set()
-            tag_btn = remark_pop.ButtonControl(
-                Name="修改标签",
-                AutomationId="button",
-            )
-            if not tag_btn.Exists(maxSearchSeconds=3):
-                raise RuntimeError("未找到'修改标签'按钮")
-
-            tag_text = tag_btn.TextControl(
-                ClassName="mmui::XTextView",
-            )
-            if tag_text.Exists(maxSearchSeconds=1):
-                name = tag_text.Name
-                if name and name != "搜索或创建标签...":
-                    existing_labels = {t.strip() for t in name.split(",") if t.strip()}
-
-            # 过滤掉已存在的标签
-            new_labels = [l for l in labels if l not in existing_labels]
-            if not new_labels:
-                logger.info(f"所有标签已存在，跳过: {nickname} -> {labels}")
-                cancel_btn = remark_pop.ButtonControl(Name="取消")
-                if cancel_btn.Exists(maxSearchSeconds=1):
-                    cancel_btn.Click(ratioX=_rand_ratio(), ratioY=_rand_ratio())
-                return
-
-            tag_btn.Click(ratioX=_rand_ratio(), ratioY=_rand_ratio())
-            time.sleep(0.3)
-
-            # 逐个添加标签（仅添加新标签）
-            for label in new_labels:
-                # 搜索框在弹窗内但不在 ProfileFormTagView 子树中，
-                # 需要在弹窗范围内通过 Name="搜索" 精确定位
-                tag_edit = remark_pop.EditControl(
-                    ClassName="mmui::XValidatorTextEdit",
-                    Name="搜索",
-                )
-                if not tag_edit.Exists(maxSearchSeconds=3):
-                    raise RuntimeError("未找到标签搜索输入框")
-
-                tag_edit.Click(ratioX=_rand_ratio(), ratioY=_rand_ratio())
-                time.sleep(0.2)
-                tag_edit.SendKeys("{Ctrl}a{Del}")
-                time.sleep(0.1)
-
-                paste(label)
-                time.sleep(0.5)
-
-                # 检查搜索结果中是否出现匹配的标签项
-                label_item = remark_pop.ListItemControl(
-                    Name=label,
-                    searchDepth=8,
-                )
-                if label_item.Exists(maxSearchSeconds=1):
-                    label_item.Click(ratioX=_rand_ratio(), ratioY=_rand_ratio())
-                    time.sleep(0.3)
-                else:
-                    logger.info(f"搜索结果中未找到标签，跳过: {label}")
-
-                # 清空搜索框，准备下一个
-                tag_edit.SendKeys("{Ctrl}a{Del}")
-                time.sleep(0.2)
-
-            # 点击"完成"按钮保存；若按钮为 disabled 状态则点击"取消"
-            ok_btn = remark_pop.ButtonControl(
-                ClassName="mmui::XOutlineButton",
-                Name="完成",
-            )
-            ok_btn.Click(ratioX=_rand_ratio(), ratioY=_rand_ratio())
-            time.sleep(0.3)
-            logger.info(f"添加标签成功: {nickname} -> {labels}")
-
-        except Exception:
-            self._cleanup_profile()
-            raise
-        finally:
-            self._close_chat_info_panel()
-
-    def remove_label_from_contact(self, nickname: str, labels: list):
-        """
-        移除联系人的标签。
-
-        在"设置备注和标签"弹窗中，先读取已有标签，
-        仅对确实存在的标签执行移除操作：点击"修改标签"按钮后，
-        直接在标签列表中找到对应标签项点击取消勾选。
-        所有操作完成后点击"完成"按钮保存。
-
-        Args:
-            nickname: 联系人昵称
-            labels: 要移除的标签名列表，如 ["朋友", "同事"]
-
-        Raises:
-            ValueError: labels 为空时抛出
-            RuntimeError: 操作失败时抛出
-        """
-        if not labels:
-            raise ValueError("labels 不能为空")
-
-        self.activate()
-        try:
-            chat = self._open_contact_profile(nickname)
-            self._click_profile_menu_item(chat, "设置备注和标签")
-            time.sleep(0.5)
-
-            # 等待"设置备注和标签"弹窗出现
-            remark_pop = self.window.WindowControl(
-                ClassName="mmui::ProfileUniquePop",
-                Name="设置备注和标签",
-            )
-            if not remark_pop.Exists(maxSearchSeconds=3):
-                raise RuntimeError("未找到'设置备注和标签'弹窗")
-
-            # 读取已有标签
-            existing_labels = set()
-            tag_btn = remark_pop.ButtonControl(
-                Name="修改标签",
-                AutomationId="button",
-            )
-            if not tag_btn.Exists(maxSearchSeconds=3):
-                raise RuntimeError("未找到'修改标签'按钮")
-
-            tag_text = tag_btn.TextControl(
-                ClassName="mmui::XTextView",
-            )
-            if tag_text.Exists(maxSearchSeconds=1):
-                name = tag_text.Name
-                if name and name != "搜索或创建标签...":
-                    existing_labels = {t.strip() for t in name.split(",") if t.strip()}
-
-            # 只移除确实存在的标签
-            to_remove = [l for l in labels if l in existing_labels]
-            if not to_remove:
-                logger.info(f"标签均不存在，跳过: {nickname} -> {labels}")
-                cancel_btn = remark_pop.ButtonControl(Name="取消")
-                if cancel_btn.Exists(maxSearchSeconds=1):
-                    cancel_btn.Click(ratioX=_rand_ratio(), ratioY=_rand_ratio())
-                return
-
-            tag_btn.Click(ratioX=_rand_ratio(), ratioY=_rand_ratio())
-            time.sleep(0.3)
-
-            # 直接在列表中找到对应标签项点击取消勾选
-            for label in to_remove:
-                label_item = remark_pop.ListItemControl(
-                    Name=label,
-                    searchDepth=8,
-                )
-                if label_item.Exists(maxSearchSeconds=2):
-                    label_item.Click(ratioX=_rand_ratio(), ratioY=_rand_ratio())
-                    time.sleep(0.3)
-                else:
-                    logger.warning(f"列表中未找到标签项: {label}")
-
-            # 点击"完成"按钮保存
-            ok_btn = remark_pop.ButtonControl(
-                ClassName="mmui::XOutlineButton",
-                Name="完成",
-            )
-            ok_btn.Click(ratioX=_rand_ratio(), ratioY=_rand_ratio())
-            time.sleep(0.3)
-            logger.info(f"移除标签成功: {nickname} -> {labels}")
-
-        except Exception:
-            self._cleanup_profile()
-            raise
-        finally:
-            self._close_chat_info_panel()
-
-    def add_phone_to_contact(self, nickname: str, phones: list):
-        """
-        为联系人添加电话号码。
-
-        在"设置备注和标签"弹窗（mmui::ProfileUniquePop）中操作电话区域
-        （mmui::ProfileFormPhoneView）。
-
-        电话区域结构：
-        - "添加电话"按钮（Name="添加电话", AutomationId="button"）：点击后新增一行输入框
-        - 已有号码项（AutomationId="num_view.self"）：每项包含
-          - "删除电话"按钮（Name="删除电话"）
-          - 输入框（mmui::XLineField -> mmui::XLineEdit, Name="填写电话"）
-
-        添加前先读取已有号码，跳过已存在的。
-
-        Args:
-            nickname: 联系人昵称
-            phones: 电话号码列表，如 ["13800138000", "13900139000"]
-
-        Raises:
-            ValueError: phones 为空时抛出
-            RuntimeError: 操作失败时抛出
-        """
-        if not phones:
-            raise ValueError("phones 不能为空")
-
-        self.activate()
-        try:
-            chat = self._open_contact_profile(nickname)
-            self._click_profile_menu_item(chat, "设置备注和标签")
-            time.sleep(0.5)
-
-            remark_pop = self.window.WindowControl(
-                ClassName="mmui::ProfileUniquePop",
-                Name="设置备注和标签",
-            )
-            if not remark_pop.Exists(maxSearchSeconds=3):
-                raise RuntimeError("未找到'设置备注和标签'弹窗")
-
-            # 读取已有电话号码
-            # 电话区域在 mmui::ProfileFormPhoneView 中
-            # 已有号码以 mmui::XLineField 形式展示，Name 为号码值或"填写电话"（空）
-            existing_phones = set()
-            phone_area = remark_pop.GroupControl(
-                ClassName="mmui::ProfileFormPhoneView",
-            )
-            if phone_area.Exists(maxSearchSeconds=2):
-                # 遍历所有 XLineField 获取已有号码
-                idx = 0
-                while True:
-                    field = phone_area.TextControl(
-                        ClassName="mmui::XLineField",
-                        foundIndex=idx + 1,
-                    )
-                    if not field.Exists(0, 0):
-                        break
-                    name = field.Name
-                    if name and name != "填写电话":
-                        existing_phones.add(name.strip())
-                    idx += 1
-
-            # 过滤掉已存在的电话号码
-            new_phones = [p for p in phones if p not in existing_phones]
-            if not new_phones:
-                logger.info(f"所有电话号码已存在，跳过: {nickname} -> {phones}")
-                cancel_btn = remark_pop.ButtonControl(Name="取消")
-                if cancel_btn.Exists(maxSearchSeconds=1):
-                    cancel_btn.Click(ratioX=_rand_ratio(), ratioY=_rand_ratio())
-                return
-
-            for phone in new_phones:
-                # 先查找是否有空的"填写电话"输入框可用
-                empty_field = phone_area.TextControl(
-                    ClassName="mmui::XLineField",
-                    Name="填写电话",
-                )
-                if not empty_field.Exists(0, 0):
-                    # 没有空输入框，点击"添加电话"按钮新增一行
-                    add_btn = phone_area.ButtonControl(
-                        Name="添加电话",
-                        AutomationId="button",
-                    )
-                    if not add_btn.Exists(maxSearchSeconds=2):
-                        raise RuntimeError("未找到'添加电话'按钮")
-                    add_btn.Click(ratioX=_rand_ratio(), ratioY=_rand_ratio())
-                    time.sleep(0.3)
-
-                # 找到空的输入框中的 XLineEdit
-                empty_field = phone_area.TextControl(
-                    ClassName="mmui::XLineField",
-                    Name="填写电话",
-                )
-                if not empty_field.Exists(maxSearchSeconds=2):
-                    raise RuntimeError("未找到空的电话号码输入框")
-
-                phone_edit = empty_field.EditControl(
-                    ClassName="mmui::XLineEdit",
-                )
-                if not phone_edit.Exists(maxSearchSeconds=2):
-                    raise RuntimeError("未找到电话号码编辑框")
-
-                phone_edit.Click(ratioX=_rand_ratio(), ratioY=_rand_ratio())
-                time.sleep(0.2)
-
-                vp = phone_edit.GetValuePattern()
-                if vp:
-                    vp.SetValue(phone)
-                else:
-                    paste(phone)
-                time.sleep(0.3)
-                phone_edit.SendKeys("{Tab}")
-                time.sleep(0.3)
-
-            # 点击"完成"按钮保存
-            ok_btn = remark_pop.ButtonControl(
-                ClassName="mmui::XOutlineButton",
-                Name="完成",
-            )
-            ok_btn.Click(ratioX=_rand_ratio(), ratioY=_rand_ratio())
-            time.sleep(0.3)
-            logger.info(f"添加电话号码成功: {nickname} -> {phones}")
-
-        except Exception:
-            self._cleanup_profile()
-            raise
-        finally:
-            self._close_chat_info_panel()
-
-    def remove_phone_from_contact(self, nickname: str, phones: list):
-        """
-        移除联系人的电话号码。
-
-        在"设置备注和标签"弹窗中操作电话区域（mmui::ProfileFormPhoneView）。
-        先读取已有号码，仅对确实存在的号码执行移除操作：
-        找到对应号码的 num_view.self 容器，点击其中的"删除电话"按钮。
-        所有操作完成后点击"完成"按钮保存。
-
-        Args:
-            nickname: 联系人昵称
-            phones: 要移除的电话号码列表，如 ["13800138000"]
-
-        Raises:
-            ValueError: phones 为空时抛出
-            RuntimeError: 操作失败时抛出
-        """
-        if not phones:
-            raise ValueError("phones 不能为空")
-
-        self.activate()
-        try:
-            chat = self._open_contact_profile(nickname)
-            self._click_profile_menu_item(chat, "设置备注和标签")
-            time.sleep(0.5)
-
-            remark_pop = self.window.WindowControl(
-                ClassName="mmui::ProfileUniquePop",
-                Name="设置备注和标签",
-            )
-            if not remark_pop.Exists(maxSearchSeconds=3):
-                raise RuntimeError("未找到'设置备注和标签'弹窗")
-
-            # 读取已有电话号码
-            existing_phones = set()
-            phone_area = remark_pop.GroupControl(
-                ClassName="mmui::ProfileFormPhoneView",
-            )
-            if not phone_area.Exists(maxSearchSeconds=2):
-                raise RuntimeError("未找到电话区域")
-
-            idx = 0
-            while True:
-                field = phone_area.TextControl(
-                    ClassName="mmui::XLineField",
-                    foundIndex=idx + 1,
-                )
-                if not field.Exists(0, 0):
-                    break
-                name = field.Name
-                if name and name != "填写电话":
-                    existing_phones.add(name.strip())
-                idx += 1
-
-            # 只移除确实存在的电话号码
-            to_remove = [p for p in phones if p in existing_phones]
-            if not to_remove:
-                logger.info(f"电话号码均不存在，跳过: {nickname} -> {phones}")
-                cancel_btn = remark_pop.ButtonControl(Name="取消")
-                if cancel_btn.Exists(maxSearchSeconds=1):
-                    cancel_btn.Click(ratioX=_rand_ratio(), ratioY=_rand_ratio())
-                return
-
-            # 找到对应号码项，点击"删除电话"按钮
-            # 每个号码项的结构：
-            #   GroupControl(AutomationId="num_view.self")
-            #     ButtonControl(Name="删除电话", AutomationId="num_view.self.button")
-            #     GroupControl(AutomationId="num_view.self.phone_num_separator_view")
-            #       XLineField(Name=号码值)
-            for phone in to_remove:
-                # 通过号码值找到对应的 XLineField
-                phone_field = phone_area.TextControl(
-                    ClassName="mmui::XLineField",
-                    Name=phone,
-                )
-                if phone_field.Exists(maxSearchSeconds=1):
-                    # XLineField -> phone_num_separator_view -> num_view.self
-                    separator_view = phone_field.GetParentControl()
-                    if separator_view:
-                        num_view = separator_view.GetParentControl()
-                        if num_view:
-                            del_btn = num_view.ButtonControl(
-                                Name="删除电话",
-                            )
-                            if del_btn.Exists(maxSearchSeconds=1):
-                                del_btn.Click(ratioX=_rand_ratio(), ratioY=_rand_ratio())
-                                time.sleep(0.3)
-                            else:
-                                logger.warning(f"未找到删除按钮: {phone}")
-                else:
-                    logger.warning(f"未找到电话号码项: {phone}")
-
-            # 点击"完成"按钮保存
-            ok_btn = remark_pop.ButtonControl(
-                ClassName="mmui::XOutlineButton",
-                Name="完成",
-            )
-            ok_btn.Click(ratioX=_rand_ratio(), ratioY=_rand_ratio())
-            time.sleep(0.3)
-            logger.info(f"移除电话号码成功: {nickname} -> {phones}")
-
-        except Exception:
-            self._cleanup_profile()
-            raise
-        finally:
-            self._close_chat_info_panel()
+        """一次性设置联系人的备注、标签、电话、描述、图片，委托给 Chat.set_contact_info"""
+        chat = self.open_session_by_search(nickname)
+        chat.set_contact_info(remark=remark, labels=labels, phones=phones,
+                              description=description, images=images)
+
+    def set_contact_remark(self, nickname: str, remark: str):
+        """设置联系人的备注名，委托给 Chat.set_contact_remark"""
+        chat = self.open_session_by_search(nickname)
+        chat.set_contact_remark(remark)
+
+    def set_contact_label(self, nickname: str, labels: list[str]):
+        """为联系人设置标签，委托给 Chat.set_contact_info"""
+        chat = self.open_session_by_search(nickname)
+        chat.set_contact_info(labels=phones)
+
+    def set_contact_phone(self, nickname: str, phones: list[str]):
+        """为联系人设置电话号码，委托给 Chat.set_contact_info"""
+        chat = self.open_session_by_search(nickname)
+        chat.set_contact_info(phones=phones)
 
     def set_contact_description(self, nickname: str, description: str):
-        """
-        设置联系人的描述信息。
-
-        在"设置备注和标签"弹窗（mmui::ProfileUniquePop）中操作描述区域
-        （mmui::ProfileFormDescView），找到"修改描述"编辑框并输入内容。
-
-        描述输入框: EditControl, ClassName="mmui::XValidatorTextEdit", Name="修改描述"
-
-        Args:
-            nickname: 联系人昵称
-            description: 描述内容
-
-        Raises:
-            RuntimeError: 操作失败时抛出
-        """
-        self.activate()
-        try:
-            chat = self._open_contact_profile(nickname)
-            self._click_profile_menu_item(chat, "设置备注和标签")
-            time.sleep(0.5)
-
-            remark_pop = self.window.WindowControl(
-                ClassName="mmui::ProfileUniquePop",
-                Name="设置备注和标签",
-            )
-            if not remark_pop.Exists(maxSearchSeconds=3):
-                raise RuntimeError("未找到'设置备注和标签'弹窗")
-
-            desc_edit = remark_pop.EditControl(
-                ClassName="mmui::XValidatorTextEdit",
-                Name="修改描述",
-            )
-            if not desc_edit.Exists(maxSearchSeconds=3):
-                raise RuntimeError("未找到'修改描述'编辑框")
-
-            desc_edit.Click(ratioX=_rand_ratio(), ratioY=_rand_ratio())
-            time.sleep(0.2)
-            desc_edit.SendKeys("{Ctrl}a{Del}")
-            time.sleep(0.1)
-
-            paste(description[:200])
-            time.sleep(0.3)
-
-            ok_btn = remark_pop.ButtonControl(
-                ClassName="mmui::XOutlineButton",
-                Name="完成",
-            )
-            if not ok_btn.Exists(maxSearchSeconds=2):
-                raise RuntimeError("未找到'完成'按钮")
-            ok_btn.Click(ratioX=_rand_ratio(), ratioY=_rand_ratio())
-            time.sleep(0.3)
-
-            logger.info(f"设置描述成功: {nickname} -> {description}")
-
-        except Exception:
-            self._cleanup_profile()
-            raise
-        finally:
-            self._close_chat_info_panel()
-
-    def add_contact_image(self, nickname: str, images: list):
-        """
-        为联系人添加备注图片。
-
-        在"设置备注和标签"弹窗（mmui::ProfileUniquePop）中操作描述区域
-        下方的图片列表（AutomationId="desc_img_list_view_"）。
-        逐张点击"添加图片"按钮，在弹出的系统文件选择对话框中粘贴路径并打开。
-        所有图片添加完成后点击"完成"按钮保存。
-
-        Args:
-            nickname: 联系人昵称
-            images: 图片文件路径列表，如 ["C:/a.jpg", "C:/b.png"]
-
-        Raises:
-            ValueError: images 为空时抛出
-            RuntimeError: 操作失败时抛出
-        """
-        if not images:
-            raise ValueError("images 不能为空")
-
-        self.activate()
-        try:
-            chat = self._open_contact_profile(nickname)
-            self._click_profile_menu_item(chat, "设置备注和标签")
-            time.sleep(0.5)
-
-            remark_pop = self.window.WindowControl(
-                ClassName="mmui::ProfileUniquePop",
-                Name="设置备注和标签",
-            )
-            if not remark_pop.Exists(maxSearchSeconds=3):
-                raise RuntimeError("未找到'设置备注和标签'弹窗")
-
-            for img_path in images:
-                # 点击"添加图片"按钮
-                add_img_btn = remark_pop.GroupControl(
-                    Name="添加图片",
-                    AutomationId="desc_img_list_view_.add_button_view",
-                )
-                if not add_img_btn.Exists(maxSearchSeconds=2):
-                    raise RuntimeError("未找到'添加图片'按钮")
-
-                add_img_btn.Click(ratioX=_rand_ratio(), ratioY=_rand_ratio())
-                time.sleep(1)
-
-                # 等待系统文件选择对话框
-                dlg = auto.WindowControl(ClassName="#32770")
-                if not dlg.Exists(maxSearchSeconds=5):
-                    raise RuntimeError("文件选择对话框未弹出")
-
-                # 定位文件名输入框并粘贴路径
-                dlg.SendKeys("{Alt}N")
-                time.sleep(0.3)
-                edit = dlg.ComboBoxControl(AutomationId="1148").EditControl()
-                if not edit.Exists(0, 0):
-                    edit = dlg.EditControl(AutomationId="1148")
-                if not edit.Exists(maxSearchSeconds=2):
-                    raise RuntimeError("未找到文件名输入框")
-
-                abs_path = os.path.abspath(img_path)
-                edit.GetValuePattern().SetValue(abs_path)
-                time.sleep(0.3)
-
-                # 点击"打开"
-                dlg.SendKeys("{Alt}O")
-                time.sleep(1)
-
-            # 点击"完成"按钮保存
-            ok_btn = remark_pop.ButtonControl(
-                ClassName="mmui::XOutlineButton",
-                Name="完成",
-            )
-            if not ok_btn.Exists(maxSearchSeconds=2):
-                raise RuntimeError("未找到'完成'按钮")
-            ok_btn.Click(ratioX=_rand_ratio(), ratioY=_rand_ratio())
-            time.sleep(0.3)
-
-            logger.info(f"添加备注图片成功: {nickname} -> {images}")
-
-        except Exception:
-            self._cleanup_profile()
-            raise
-        finally:
-            self._close_chat_info_panel()
-
-    def set_contact_image(self, nickname: str, images: list):
-        """
-        设置联系人的备注图片（先清空已有图片，再添加新图片）。
-
-        在"设置备注和标签"弹窗中，先循环右键删除所有已有图片，
-        再逐张点击"添加图片"按钮添加新图片，最后点击"完成"保存。
-
-        Args:
-            nickname: 联系人昵称
-            images: 图片文件路径列表，如 ["C:/a.jpg", "C:/b.png"]
-
-        Raises:
-            ValueError: images 为空时抛出
-            RuntimeError: 操作失败时抛出
-        """
-        if not images:
-            raise ValueError("images 不能为空")
-
-        self.activate()
-        try:
-            chat = self._open_contact_profile(nickname)
-            self._click_profile_menu_item(chat, "设置备注和标签")
-            time.sleep(0.5)
-
-            remark_pop = self.window.WindowControl(
-                ClassName="mmui::ProfileUniquePop",
-                Name="设置备注和标签",
-            )
-            if not remark_pop.Exists(maxSearchSeconds=3):
-                raise RuntimeError("未找到'设置备注和标签'弹窗")
-
-            img_list = remark_pop.GroupControl(
-                AutomationId="desc_img_list_view_",
-            )
-
-            # 先清空已有图片：每次删第一张，循环到没有为止
-            if img_list.Exists(maxSearchSeconds=2):
-                for _ in range(20):
-                    img_item = img_list.GroupControl(
-                        Name="描述图片",
-                        AutomationId="desc_img_list_view_.desc_img_button_view",
-                    )
-                    if not img_item.Exists(0, 0):
-                        break
-                    img_btn = img_item.ButtonControl(
-                        ClassName="mmui::UrlImageView",
-                    )
-                    if not img_btn.Exists(0, 0):
-                        break
-                    img_btn.RightClick(ratioX=_rand_ratio(), ratioY=_rand_ratio())
-                    time.sleep(0.5)
-                    menu_win = self.window.WindowControl(ClassName="mmui::XMenu")
-                    if not menu_win.Exists(maxSearchSeconds=2):
-                        break
-                    del_item = menu_win.MenuItemControl(
-                        ClassName="mmui::XMenuView", Name="删除",
-                    )
-                    if not del_item.Exists(maxSearchSeconds=1):
-                        self.window.SendKeys("{Esc}")
-                        break
-                    del_item.Click(ratioX=_rand_ratio(), ratioY=_rand_ratio())
-                    time.sleep(0.3)
-
-            # 添加新图片
-            for img_path in images:
-                add_img_btn = remark_pop.GroupControl(
-                    Name="添加图片",
-                    AutomationId="desc_img_list_view_.add_button_view",
-                )
-                if not add_img_btn.Exists(maxSearchSeconds=2):
-                    raise RuntimeError("未找到'添加图片'按钮")
-
-                add_img_btn.Click(ratioX=_rand_ratio(), ratioY=_rand_ratio())
-                time.sleep(1)
-
-                dlg = auto.WindowControl(ClassName="#32770")
-                if not dlg.Exists(maxSearchSeconds=5):
-                    raise RuntimeError("文件选择对话框未弹出")
-
-                dlg.SendKeys("{Alt}N")
-                time.sleep(0.3)
-                edit = dlg.ComboBoxControl(AutomationId="1148").EditControl()
-                if not edit.Exists(0, 0):
-                    edit = dlg.EditControl(AutomationId="1148")
-                if not edit.Exists(maxSearchSeconds=2):
-                    raise RuntimeError("未找到文件名输入框")
-
-                abs_path = os.path.abspath(img_path)
-                edit.GetValuePattern().SetValue(abs_path)
-                time.sleep(0.3)
-
-                dlg.SendKeys("{Alt}O")
-                time.sleep(1)
-
-            # 点击"完成"按钮保存
-            ok_btn = remark_pop.ButtonControl(
-                ClassName="mmui::XOutlineButton",
-                Name="完成",
-            )
-            if not ok_btn.Exists(maxSearchSeconds=2):
-                raise RuntimeError("未找到'完成'按钮")
-            ok_btn.Click(ratioX=_rand_ratio(), ratioY=_rand_ratio())
-            time.sleep(0.3)
-
-            logger.info(f"设置备注图片成功: {nickname} -> {images}")
-
-        except Exception:
-            self._cleanup_profile()
-            raise
-        finally:
-            self._close_chat_info_panel()
-
-    def delete_contact_image(self, nickname: str, index: int = 1) -> bool:
-        """
-        删除联系人的备注图片。
-
-        在"设置备注和标签"弹窗中，找到图片列表区域
-        （AutomationId="desc_img_list_view_"），
-        右键点击第 index 张图片，在弹出菜单中点击"删除"。
-        操作完成后点击"完成"按钮保存。
-
-        图片项: GroupControl(Name="描述图片",
-                AutomationId="desc_img_list_view_.desc_img_button_view")
-        图片按钮: ButtonControl(ClassName="mmui::UrlImageView")
-        右键菜单: mmui::XMenu -> MenuItemControl(Name="删除")
-
-        Args:
-            nickname: 联系人昵称
-            index: 要删除的图片序号，从 1 开始，默认 1
-
-        Returns:
-            True 删除成功，False 索引图片不存在
-        """
-        if index < 1:
-            return False
-
-        self.activate()
-        try:
-            chat = self._open_contact_profile(nickname)
-            self._click_profile_menu_item(chat, "设置备注和标签")
-            time.sleep(0.5)
-
-            remark_pop = self.window.WindowControl(
-                ClassName="mmui::ProfileUniquePop",
-                Name="设置备注和标签",
-            )
-            if not remark_pop.Exists(maxSearchSeconds=3):
-                raise RuntimeError("未找到'设置备注和标签'弹窗")
-
-            # 在图片列表区域中收集所有图片项
-            img_list = remark_pop.GroupControl(
-                AutomationId="desc_img_list_view_",
-            )
-            if not img_list.Exists(maxSearchSeconds=2):
-                # 没有图片区域，点取消返回
-                cancel_btn = remark_pop.ButtonControl(Name="取消")
-                if cancel_btn.Exists(maxSearchSeconds=1):
-                    cancel_btn.Click(ratioX=_rand_ratio(), ratioY=_rand_ratio())
-                return False
-
-            # 收集所有 Name="描述图片" 的图片项
-            img_items = []
-            for child in img_list.GetChildren():
-                if child.Name == "描述图片":
-                    img_items.append(child)
-
-            if index > len(img_items):
-                # 索引超出，点取消返回
-                cancel_btn = remark_pop.ButtonControl(Name="取消")
-                if cancel_btn.Exists(maxSearchSeconds=1):
-                    cancel_btn.Click(ratioX=_rand_ratio(), ratioY=_rand_ratio())
-                return False
-
-            # 右键点击目标图片
-            target = img_items[index - 1]
-            img_btn = target.ButtonControl(
-                ClassName="mmui::UrlImageView",
-            )
-            if not img_btn.Exists(maxSearchSeconds=1):
-                cancel_btn = remark_pop.ButtonControl(Name="取消")
-                if cancel_btn.Exists(maxSearchSeconds=1):
-                    cancel_btn.Click(ratioX=_rand_ratio(), ratioY=_rand_ratio())
-                return False
-
-            img_btn.RightClick(ratioX=_rand_ratio(), ratioY=_rand_ratio())
-            time.sleep(0.5)
-
-            # 在右键菜单中点击"删除"
-            menu_win = self.window.WindowControl(ClassName="mmui::XMenu")
-            if not menu_win.Exists(maxSearchSeconds=2):
-                raise RuntimeError("右键菜单未弹出")
-
-            del_item = menu_win.MenuItemControl(
-                ClassName="mmui::XMenuView",
-                Name="删除",
-            )
-            if not del_item.Exists(maxSearchSeconds=1):
-                self.window.SendKeys("{Esc}")
-                raise RuntimeError("右键菜单中未找到'删除'")
-
-            del_item.Click(ratioX=_rand_ratio(), ratioY=_rand_ratio())
-            time.sleep(0.3)
-
-            # 点击"完成"按钮保存
-            ok_btn = remark_pop.ButtonControl(
-                ClassName="mmui::XOutlineButton",
-                Name="完成",
-            )
-            if not ok_btn.Exists(maxSearchSeconds=2):
-                raise RuntimeError("未找到'完成'按钮")
-            ok_btn.Click(ratioX=_rand_ratio(), ratioY=_rand_ratio())
-            time.sleep(0.3)
-
-            logger.info(f"删除备注图片成功: {nickname} -> index={index}")
-            return True
-
-        except Exception:
-            self._cleanup_profile()
-            raise
-        finally:
-            self._close_chat_info_panel()
-
-    def clear_contact_image(self, nickname: str) -> int:
-        """
-        删除联系人的所有备注图片。
-
-        在"设置备注和标签"弹窗中，循环右键每张图片并点击"删除"，
-        直到没有图片为止。操作完成后点击"完成"按钮保存。
-
-        Args:
-            nickname: 联系人昵称
-
-        Returns:
-            删除的图片数量，无图片时返回 0
-        """
-        self.activate()
-        try:
-            chat = self._open_contact_profile(nickname)
-            self._click_profile_menu_item(chat, "设置备注和标签")
-            time.sleep(0.5)
-
-            remark_pop = self.window.WindowControl(
-                ClassName="mmui::ProfileUniquePop",
-                Name="设置备注和标签",
-            )
-            if not remark_pop.Exists(maxSearchSeconds=3):
-                raise RuntimeError("未找到'设置备注和标签'弹窗")
-
-            img_list = remark_pop.GroupControl(
-                AutomationId="desc_img_list_view_",
-            )
-            if not img_list.Exists(maxSearchSeconds=2):
-                cancel_btn = remark_pop.ButtonControl(Name="取消")
-                if cancel_btn.Exists(maxSearchSeconds=1):
-                    cancel_btn.Click(ratioX=_rand_ratio(), ratioY=_rand_ratio())
-                return 0
-
-            deleted = 0
-            # 每次删除第一张，循环直到没有图片
-            for _ in range(20):  # 安全上限
-                # 找第一张图片
-                img_item = img_list.GroupControl(
-                    Name="描述图片",
-                    AutomationId="desc_img_list_view_.desc_img_button_view",
-                )
-                if not img_item.Exists(0, 0):
-                    break
-
-                img_btn = img_item.ButtonControl(
-                    ClassName="mmui::UrlImageView",
-                )
-                if not img_btn.Exists(0, 0):
-                    break
-
-                img_btn.RightClick(ratioX=_rand_ratio(), ratioY=_rand_ratio())
-                time.sleep(0.5)
-
-                menu_win = self.window.WindowControl(ClassName="mmui::XMenu")
-                if not menu_win.Exists(maxSearchSeconds=2):
-                    break
-
-                del_item = menu_win.MenuItemControl(
-                    ClassName="mmui::XMenuView",
-                    Name="删除",
-                )
-                if not del_item.Exists(maxSearchSeconds=1):
-                    self.window.SendKeys("{Esc}")
-                    break
-
-                del_item.Click(ratioX=_rand_ratio(), ratioY=_rand_ratio())
-                time.sleep(0.3)
-                deleted += 1
-
-            if deleted > 0:
-                ok_btn = remark_pop.ButtonControl(
-                    ClassName="mmui::XOutlineButton",
-                    Name="完成",
-                )
-                if ok_btn.Exists(maxSearchSeconds=2):
-                    ok_btn.Click(ratioX=_rand_ratio(), ratioY=_rand_ratio())
-                    time.sleep(0.3)
-                logger.info(f"清除备注图片成功: {nickname} -> 删除{deleted}张")
-            else:
-                cancel_btn = remark_pop.ButtonControl(Name="取消")
-                if cancel_btn.Exists(maxSearchSeconds=1):
-                    cancel_btn.Click(ratioX=_rand_ratio(), ratioY=_rand_ratio())
-
-            return deleted
-
-        except Exception:
-            self._cleanup_profile()
-            raise
-        finally:
-            self._close_chat_info_panel()
-
-    def save_contact_image(self, nickname: str, save_path: str) -> int:
-        """
-        保存联系人的所有备注图片到指定目录。
-
-        在"设置备注和标签"弹窗中，对每张图片右键点击"另存为..."，
-        在弹出的系统文件保存对话框中，通过 Home 键定位到文件名开头，
-        在原始文件名前插入目标目录路径，然后 Alt+S 保存。
-
-        Args:
-            nickname: 联系人昵称
-            save_path: 保存目录路径，如 "C:/download/images"
-
-        Returns:
-            保存的图片数量，无图片时返回 0
-        """
-        save_dir = os.path.abspath(save_path)
-        os.makedirs(save_dir, exist_ok=True)
-
-        self.activate()
-        try:
-            chat = self._open_contact_profile(nickname)
-            self._click_profile_menu_item(chat, "设置备注和标签")
-            time.sleep(0.5)
-
-            remark_pop = self.window.WindowControl(
-                ClassName="mmui::ProfileUniquePop",
-                Name="设置备注和标签",
-            )
-            if not remark_pop.Exists(maxSearchSeconds=3):
-                raise RuntimeError("未找到'设置备注和标签'弹窗")
-
-            img_list = remark_pop.GroupControl(
-                AutomationId="desc_img_list_view_",
-            )
-            if not img_list.Exists(maxSearchSeconds=2):
-                cancel_btn = remark_pop.ButtonControl(Name="取消")
-                if cancel_btn.Exists(maxSearchSeconds=1):
-                    cancel_btn.Click(ratioX=_rand_ratio(), ratioY=_rand_ratio())
-                return 0
-
-            # 收集所有图片项
-            img_items = []
-            for child in img_list.GetChildren():
-                if child.Name == "描述图片":
-                    img_items.append(child)
-
-            if not img_items:
-                cancel_btn = remark_pop.ButtonControl(Name="取消")
-                if cancel_btn.Exists(maxSearchSeconds=1):
-                    cancel_btn.Click(ratioX=_rand_ratio(), ratioY=_rand_ratio())
-                return 0
-
-            saved = 0
-            path_prefix = save_dir.replace("/", "\\")
-            if not path_prefix.endswith("\\"):
-                path_prefix += "\\"
-
-            for img_item in img_items:
-                img_btn = img_item.ButtonControl(
-                    ClassName="mmui::UrlImageView",
-                )
-                if not img_btn.Exists(0, 0):
-                    continue
-
-                # 右键点击图片
-                img_btn.RightClick(ratioX=_rand_ratio(), ratioY=_rand_ratio())
-                time.sleep(0.5)
-
-                # 点击"另存为..."
-                menu_win = self.window.WindowControl(ClassName="mmui::XMenu")
-                if not menu_win.Exists(maxSearchSeconds=2):
-                    continue
-
-                save_item = menu_win.MenuItemControl(
-                    ClassName="mmui::XMenuView",
-                    Name="另存为...",
-                )
-                if not save_item.Exists(maxSearchSeconds=1):
-                    self.window.SendKeys("{Esc}")
-                    continue
-
-                save_item.Click(ratioX=_rand_ratio(), ratioY=_rand_ratio())
-                time.sleep(1)
-
-                # 等待系统文件保存对话框
-                dlg = remark_pop.WindowControl(ClassName="#32770")
-                if not dlg.Exists(maxSearchSeconds=5):
-                    # 尝试从桌面查找
-                    dlg = auto.WindowControl(ClassName="#32770")
-                    if not dlg.Exists(maxSearchSeconds=3):
-                        continue
-
-                # 定位文件名输入框（AutomationId="1001"）
-                edit = dlg.EditControl(AutomationId="1001")
-                if not edit.Exists(maxSearchSeconds=2):
-                    dlg.SendKeys("{Esc}")
-                    continue
-
-                # 读取原始文件名，拼接完整保存路径后写入
-                vp = edit.GetValuePattern()
-                original_name = vp.Value if vp else ""
-                if not original_name:
-                    dlg.SendKeys("{Esc}")
-                    continue
-                full_path = os.path.join(save_dir, original_name)
-                vp.SetValue(full_path)
-                time.sleep(0.3)
-
-                # Alt+S 保存
-                dlg.SendKeys("{Alt}S")
-                time.sleep(1)
-
-                # 如果弹出覆盖确认，按 Y 确认
-                if dlg.Exists(maxSearchSeconds=0.5):
-                    dlg.SendKeys("{Alt}Y")
-                    time.sleep(0.5)
-
-                saved += 1
-
-            # 点击"取消"关闭弹窗（保存图片不需要点完成）
-            cancel_btn = remark_pop.ButtonControl(Name="取消")
-            if cancel_btn.Exists(maxSearchSeconds=1):
-                cancel_btn.Click(ratioX=_rand_ratio(), ratioY=_rand_ratio())
-
-            logger.info(f"保存备注图片成功: {nickname} -> {save_dir} ({saved}张)")
-            return saved
-
-        except Exception:
-            self._cleanup_profile()
-            raise
-        finally:
-            self._close_chat_info_panel()
-
-    def set_star_friend(self, nickname: str):
-        """
-        将联系人设为/取消星标朋友。
-
-        Args:
-            nickname: 联系人昵称
-        """
-        self.activate()
-        try:
-            chat = self._open_contact_profile(nickname)
-            self._click_profile_menu_item(chat, "设为星标朋友")
-            time.sleep(0.3)
-            logger.info(f"设为星标朋友操作完成: {nickname}")
-        except Exception:
-            self._cleanup_profile()
-            raise
-        finally:
-            self._close_chat_info_panel()
-
-    def cancel_star_friend(self, nickname: str):
-        """
-        取消联系人的星标朋友。
-
-        Args:
-            nickname: 联系人昵称
-        """
-        self.activate()
-        try:
-            chat = self._open_contact_profile(nickname)
-            self._click_profile_menu_item(chat, "不再设为星标朋友")
-            time.sleep(0.3)
-            logger.info(f"取消星标朋友操作完成: {nickname}")
-        except Exception:
-            self._cleanup_profile()
-            raise
-        finally:
-            self._close_chat_info_panel()
+        """设置联系人的描述信息，委托给 Chat.set_contact_info"""
+        chat = self.open_session_by_search(nickname)
+        chat.set_contact_info(description=description)
+
+    def set_contact_image(self, nickname: str, images: list[str]):
+        """设置联系人的备注图片（覆盖式），委托给 Chat.set_contact_info"""
+        chat = self.open_session_by_search(nickname)
+        chat.set_contact_info(images=images)
+
+    def add_contact_label(self, nickname: str, labels: list[str]):
+        """为联系人添加标签，委托给 Chat.add_contact_label"""
+        chat = self.open_session_by_search(nickname)
+        chat.add_contact_label(labels)
+
+    def add_contact_phone(self, nickname: str, phones: list[str]):
+        """为联系人添加电话号码，委托给 Chat.add_contact_phone"""
+        chat = self.open_session_by_search(nickname)
+        chat.add_contact_phone(phones)
+
+    def add_contact_image(self, nickname: str, images: list[str]):
+        """为联系人添加备注图片，委托给 Chat.add_contact_image"""
+        chat = self.open_session_by_search(nickname)
+        chat.add_contact_image(images)
+
+    def remove_contact_label(self, nickname: str, labels: list[str]):
+        """移除联系人的标签，委托给 Chat.remove_contact_label"""
+        chat = self.open_session_by_search(nickname)
+        chat.remove_contact_label(labels)
+
+    def remove_contact_phone(self, nickname: str, phones: list[str]):
+        """移除联系人的电话号码，委托给 Chat.remove_contact_phone"""
+        chat = self.open_session_by_search(nickname)
+        chat.remove_contact_phone(phones)
+
+    def remove_contact_image(self, nickname: str, images: list[int]):
+        """删除联系人的备注图片（按序号），委托给 Chat.remove_contact_image"""
+        chat = self.open_session_by_search(nickname)
+        chat.remove_contact_image(images)
+
+    def collect_contact_image(self, nickname: str, images: list[int]) -> int:
+        """收藏联系人的指定备注图片，委托给 Chat.collect_contact_image"""
+        chat = self.open_session_by_search(nickname)
+        return chat.collect_contact_image(images)
+
+    def save_contact_image(self, nickname: str, images: list[int], save_path: str) -> int:
+        """保存联系人的指定备注图片到指定目录，委托给 Chat.save_contact_image"""
+        chat = self.open_session_by_search(nickname)
+        return chat.save_contact_image(images, save_path)
+
+    def set_contact_star(self, nickname: str):
+        """将联系人设为星标朋友，委托给 Chat.set_contact_star"""
+        chat = self.open_session_by_search(nickname)
+        chat.set_contact_star()
+
+    def cancel_contact_star(self, nickname: str):
+        """取消联系人的星标朋友，委托给 Chat.cancel_contact_star"""
+        chat = self.open_session_by_search(nickname)
+        chat.cancel_contact_star()
 
     def get_friend_permission(self, nickname: str) -> dict:
-        """
-        获取联系人的朋友权限设置。
-
-        打开"设置朋友权限"弹窗（mmui::ProfileUniquePop, Name="朋友权限"），
-        解析弹窗中的权限选项和开关状态，然后点击"取消"关闭弹窗。
-
-        弹窗结构（mmui::ProfileFormPermissionView）：
-        - 朋友权限（单选）：mmui::ProfileFormPermissionItemUi
-          - Name="聊天、朋友圈、微信运动等"（选中时 text_icon_h_view 有2个子元素含勾选图标）
-          - Name="仅聊天"
-        - 朋友圈和状态（开关，仅"聊天、朋友圈、微信运动等"模式下显示）：
-          - CheckBoxControl(Name="不让他（她）看", ClassName="mmui::XSwitchButton")
-            ToggleState: 0=关, 1=开
-          - CheckBoxControl(Name="不看他（她）", ClassName="mmui::XSwitchButton")
-            ToggleState: 0=关, 1=开
-
-        Args:
-            nickname: 联系人昵称
-
-        Returns:
-            dict: {
-                "permission": "chatonly" | "all",
-                    # "all" = 聊天、朋友圈、微信运动等
-                    # "chatonly" = 仅聊天
-                "hide_my_posts": bool,
-                    # 不让他（她）看我的朋友圈和状态
-                "hide_their_posts": bool,
-                    # 不看他（她）的朋友圈和状态
-            }
-        """
-        self.activate()
-        try:
-            chat = self._open_contact_profile(nickname)
-            self._click_profile_menu_item(chat, "设置朋友权限")
-            time.sleep(0.5)
-
-            perm_pop = self.window.WindowControl(
-                ClassName="mmui::ProfileUniquePop",
-                Name="朋友权限",
-            )
-            if not perm_pop.Exists(maxSearchSeconds=3):
-                raise RuntimeError("未找到'朋友权限'弹窗")
-
-            result = {
-                "permission": "all",
-                "hide_my_posts": False,
-                "hide_their_posts": False,
-            }
-
-            # 判断朋友权限选项：哪个 ProfileFormPermissionItemUi 被选中
-            # 选中项的 text_icon_h_view 有2个子元素（文本+勾选图标），
-            # 未选中的只有1个子元素（文本）
-            chatonly_item = perm_pop.GroupControl(
-                ClassName="mmui::ProfileFormPermissionItemUi",
-                Name="仅聊天",
-            )
-            if chatonly_item.Exists(maxSearchSeconds=1):
-                # 检查"仅聊天"是否被选中
-                text_icon = chatonly_item.GroupControl(
-                    AutomationId="text_separator_v_view.text_icon_h_view",
-                )
-                if text_icon.Exists(0, 0):
-                    children = text_icon.GetChildren()
-                    if len(children) >= 2:
-                        result["permission"] = "chatonly"
-
-            # 读取朋友圈开关状态（仅 permission="all" 时存在）
-            if result["permission"] == "all":
-                hide_my = perm_pop.CheckBoxControl(
-                    ClassName="mmui::XSwitchButton",
-                    Name="不让他（她）看",
-                )
-                if hide_my.Exists(maxSearchSeconds=1):
-                    toggle = hide_my.GetTogglePattern()
-                    if toggle:
-                        result["hide_my_posts"] = toggle.ToggleState == 1
-
-                hide_their = perm_pop.CheckBoxControl(
-                    ClassName="mmui::XSwitchButton",
-                    Name="不看他（她）",
-                )
-                if hide_their.Exists(maxSearchSeconds=1):
-                    toggle = hide_their.GetTogglePattern()
-                    if toggle:
-                        result["hide_their_posts"] = toggle.ToggleState == 1
-
-            # 点击"取消"关闭弹窗（只读取不修改）
-            cancel_btn = perm_pop.ButtonControl(Name="取消")
-            if cancel_btn.Exists(maxSearchSeconds=1):
-                cancel_btn.Click(ratioX=_rand_ratio(), ratioY=_rand_ratio())
-            time.sleep(0.3)
-
-            logger.info(f"获取朋友权限成功: {nickname} -> {result}")
-            return result
-
-        except Exception:
-            self._cleanup_profile()
-            raise
-        finally:
-            self._close_chat_info_panel()
+        """获取联系人的朋友权限设置，委托给 Chat.get_friend_permission"""
+        chat = self.open_session_by_search(nickname)
+        return chat.get_friend_permission()
 
     def set_friend_permission(self, nickname: str, permission: str = "all",
                               hide_my_posts: bool = False,
                               hide_their_posts: bool = False):
-        """
-        设置联系人的朋友权限。
+        """设置联系人的朋友权限，委托给 Chat.set_friend_permission"""
+        chat = self.open_session_by_search(nickname)
+        chat.set_friend_permission(permission, hide_my_posts, hide_their_posts)
 
-        打开"设置朋友权限"弹窗，根据参数设置权限选项和开关，
-        然后点击"完成"保存。
+    def black_contact(self, nickname: str):
+        """将联系人加入黑名单，委托给 Chat.black_contact"""
+        chat = self.open_session_by_search(nickname)
+        chat.black_contact()
 
-        先读取当前状态，仅在需要变更时才操作，避免无意义的点击。
-
-        Args:
-            nickname: 联系人昵称
-            permission: 朋友权限，可选值:
-                - "all": 聊天、朋友圈、微信运动等（默认）
-                - "chatonly": 仅聊天
-            hide_my_posts: 不让他（她）看我的朋友圈和状态
-            hide_their_posts: 不看他（她）的朋友圈和状态
-
-        Raises:
-            ValueError: permission 值无效时抛出
-            RuntimeError: 操作失败时抛出
-        """
-        if permission not in ("all", "chatonly"):
-            raise ValueError(f"permission 必须为 'all' 或 'chatonly'，当前: {permission}")
-
-        self.activate()
-        try:
-            chat = self._open_contact_profile(nickname)
-            self._click_profile_menu_item(chat, "设置朋友权限")
-            time.sleep(0.5)
-
-            perm_pop = self.window.WindowControl(
-                ClassName="mmui::ProfileUniquePop",
-                Name="朋友权限",
-            )
-            if not perm_pop.Exists(maxSearchSeconds=3):
-                raise RuntimeError("未找到'朋友权限'弹窗")
-
-            changed = False
-
-            # 判断当前选中的权限
-            target_name = "仅聊天" if permission == "chatonly" else "聊天、朋友圈、微信运动等"
-            target_item = perm_pop.GroupControl(
-                ClassName="mmui::ProfileFormPermissionItemUi",
-                Name=target_name,
-            )
-            if not target_item.Exists(maxSearchSeconds=1):
-                raise RuntimeError(f"未找到权限选项: {target_name}")
-
-            # 检查目标选项是否已选中
-            text_icon = target_item.GroupControl(
-                AutomationId="text_separator_v_view.text_icon_h_view",
-            )
-            already_selected = False
-            if text_icon.Exists(0, 0):
-                children = text_icon.GetChildren()
-                if len(children) >= 2:
-                    already_selected = True
-
-            if not already_selected:
-                target_item.Click(ratioX=_rand_ratio(), ratioY=_rand_ratio())
-                time.sleep(0.3)
-                changed = True
-
-            # 设置朋友圈开关（仅 permission="all" 时有效）
-            if permission == "all":
-                # 不让他（她）看
-                hide_my_sw = perm_pop.CheckBoxControl(
-                    ClassName="mmui::XSwitchButton",
-                    Name="不让他（她）看",
-                )
-                if hide_my_sw.Exists(maxSearchSeconds=1):
-                    toggle = hide_my_sw.GetTogglePattern()
-                    if toggle:
-                        current = toggle.ToggleState == 1
-                        if current != hide_my_posts:
-                            hide_my_sw.Click(ratioX=0.5, ratioY=0.5)
-                            time.sleep(0.2)
-                            changed = True
-
-                # 不看他（她）
-                hide_their_sw = perm_pop.CheckBoxControl(
-                    ClassName="mmui::XSwitchButton",
-                    Name="不看他（她）",
-                )
-                if hide_their_sw.Exists(maxSearchSeconds=1):
-                    toggle = hide_their_sw.GetTogglePattern()
-                    if toggle:
-                        current = toggle.ToggleState == 1
-                        if current != hide_their_posts:
-                            hide_their_sw.Click(ratioX=0.5, ratioY=0.5)
-                            time.sleep(0.2)
-                            changed = True
-
-            if changed:
-                ok_btn = perm_pop.ButtonControl(
-                    ClassName="mmui::XOutlineButton",
-                    Name="完成",
-                )
-                if ok_btn.Exists(maxSearchSeconds=2):
-                    ok_btn.Click(ratioX=_rand_ratio(), ratioY=_rand_ratio())
-                    time.sleep(0.3)
-            else:
-                cancel_btn = perm_pop.ButtonControl(Name="取消")
-                if cancel_btn.Exists(maxSearchSeconds=1):
-                    cancel_btn.Click(ratioX=_rand_ratio(), ratioY=_rand_ratio())
-                    time.sleep(0.2)
-
-            logger.info(f"设置朋友权限成功: {nickname} -> permission={permission}, "
-                        f"hide_my={hide_my_posts}, hide_their={hide_their_posts}")
-
-        except Exception:
-            self._cleanup_profile()
-            raise
-        finally:
-            self._close_chat_info_panel()
-
-    def add_to_blacklist(self, nickname: str):
-        """
-        将联系人加入黑名单。
-
-        注意：此操作会弹出确认对话框，需要用户确认。
-
-        Args:
-            nickname: 联系人昵称
-        """
-        self.activate()
-        try:
-            chat = self._open_contact_profile(nickname)
-            self._click_profile_menu_item(chat, "加入黑名单")
-            time.sleep(0.5)
-
-            # 等待确认对话框并点击确定
-            confirm_btn = self.window.ButtonControl(Name="确定")
-            if confirm_btn.Exists(maxSearchSeconds=3):
-                confirm_btn.Click(ratioX=_rand_ratio(), ratioY=_rand_ratio())
-                time.sleep(0.3)
-                logger.info(f"加入黑名单成功: {nickname}")
-            else:
-                logger.warning(f"未找到确认按钮，加入黑名单可能未完成: {nickname}")
-
-        except Exception:
-            self._cleanup_profile()
-            raise
-        finally:
-            self._close_chat_info_panel()
-
-    def remove_from_blacklist(self, nickname: str):
-        """
-        将联系人移出黑名单。
-
-        Args:
-            nickname: 联系人昵称
-        """
-        self.activate()
-        try:
-            chat = self._open_contact_profile(nickname)
-            self._click_profile_menu_item(chat, "移出黑名单")
-            time.sleep(0.3)
-            logger.info(f"移出黑名单成功: {nickname}")
-        except Exception:
-            self._cleanup_profile()
-            raise
-        finally:
-            self._close_chat_info_panel()
+    def unblack_contact(self, nickname: str):
+        """将联系人移出黑名单，委托给 Chat.unblack_contact"""
+        chat = self.open_session_by_search(nickname)
+        chat.unblack_contact()
 
     def delete_contact(self, nickname: str):
-        """
-        删除联系人。
+        """删除联系人，委托给 Chat.delete_contact"""
+        chat = self.open_session_by_search(nickname)
+        chat.delete_contact()
 
-        注意：此操作不可逆，会弹出确认对话框，需要用户确认。
-
-        Args:
-            nickname: 联系人昵称
-        """
-        self.activate()
-        try:
-            chat = self._open_contact_profile(nickname)
-            self._click_profile_menu_item(chat, "删除联系人")
-            time.sleep(0.5)
-
-            # 等待确认对话框并点击"删除"按钮
-            confirm_btn = self.window.ButtonControl(Name="删除")
-            if confirm_btn.Exists(maxSearchSeconds=3):
-                confirm_btn.Click(ratioX=_rand_ratio(), ratioY=_rand_ratio())
-                time.sleep(0.3)
-                logger.info(f"删除联系人成功: {nickname}")
-            else:
-                logger.warning(f"未找到'删除'确认按钮，删除联系人可能未完成: {nickname}")
-
-        except Exception:
-            self._cleanup_profile()
-            raise
-        finally:
-            self._close_chat_info_panel()
-
-    def recommend_to_friend(self, nickname: str, receiver_nickname: str) -> bool:
-        """
-        将指定联系人推荐给另一个朋友（发送名片）。
-
-        这是 send_card 的别名方法，提供更直观的接口。
-
-        Args:
-            nickname: 要推荐的联系人昵称
-            receiver_nickname: 接收推荐的朋友昵称
-
-        Returns:
-            True 发送成功
-        """
-        return self.send_card(receiver_nickname, nickname)
+    def recommend_contact(self, nickname: str, receiver_nickname: str) -> bool:
+        """将指定联系人推荐给另一个朋友（发送名片），委托给 Chat.recommend_contact"""
+        chat = self.open_session_by_search(nickname)
+        return chat.recommend_contact(receiver_nickname)
 
     def lock(self):
         self.activate()
@@ -7596,10 +7388,6 @@ class Weixin(WeixinWindow):
 
 if __name__ == "__main__":
     wx = Weixin()
-    wx.set_contact_info("写诗喂狗",
-        remark="",
-        labels=[],      # 覆盖式：先清不需要的，再加新的
-        phones=[],       # 覆盖式：先删全部，再加新的
-        description="",
-        images=[],     # 覆盖式：先删全部，再加新的
-    )
+    # wx.remove_contact_label("写诗喂狗", ["测试2", "测试3", "测试4"])
+    # wx.remove_contact_phone("写诗喂狗", ["1", "2", "3", "4", "5"])
+    wx.save_contact_image ("写诗喂狗", [1,3], r"C:\Users\690126048\Desktop\github\pywxauto")
