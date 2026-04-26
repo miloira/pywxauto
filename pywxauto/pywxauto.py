@@ -5517,6 +5517,178 @@ class Weixin(WeixinWindow):
         except Exception:
             pass
 
+    def get_contact_profile(self, nickname: str) -> dict:
+        """
+        获取联系人的资料信息。
+
+        打开联系人资料面板（mmui::ContactProfileView），
+        从面板中提取各字段信息，然后关闭面板。
+
+        资料面板结构：
+        - 顶部 ContactProfileTopUi:
+          - display_name_text: 显示名（备注+昵称）
+          - basic_line_view: 昵称、微信号、地区（key_text + ContactProfileTextView）
+        - 中间 ContactProfileMidUi (line_v_view):
+          - remark_line: 备注（XMouseEventView.Name）
+          - tag_line: 标签（XMouseEventView.Name，逗号分隔）
+          - desc_line: 描述（XMouseEventView.Name）
+          - friend_per_line: 朋友权限（XMouseEventView.Name）
+
+        Args:
+            nickname: 联系人昵称
+
+        Returns:
+            dict: {
+                "display_name": str,   # 显示名（如 "客户 写诗喂狗"）
+                "nickname": str,       # 昵称
+                "account": str,      # 微信号
+                "region": str,         # 地区
+                "remark": str,         # 备注
+                "tags": list[str],     # 标签列表
+                "description": str,    # 描述
+                "permission": str,     # 朋友权限文本
+            }
+        """
+        self.activate()
+        try:
+            chat = self._open_contact_profile(nickname)
+            time.sleep(0.5)
+
+            profile = self.window.GroupControl(
+                ClassName="mmui::ContactProfileView",
+            )
+            if not profile.Exists(maxSearchSeconds=3):
+                raise RuntimeError("未找到联系人资料面板")
+
+            result = {
+                "display_name": None,
+                "nickname": None,
+                "account": None,
+                "region": None,
+                "remark": None,
+                "tags": [],
+                "description": None,
+                "permission": None,
+                "common_groups": None,
+                "source": None,
+                "signature": None,
+                "finder_name": None,
+            }
+
+            # 顶部：显示名
+            display_name = profile.TextControl(
+                AutomationId="right_v_view.nickname_button_view.display_name_text",
+            )
+            if display_name.Exists(0, 0):
+                val = (display_name.Name or "").strip()
+                if val:
+                    result["display_name"] = val
+
+            # 顶部：基本信息行（昵称、微信号、地区）
+            # 每行结构：key_text("昵称：") + ContactProfileTextView(值)
+            key_map = {
+                "昵称：": "nickname",
+                "微信号：": "account",
+                "地区：": "region",
+            }
+            info_center = profile.GroupControl(
+                AutomationId="right_v_view.user_info_center_view",
+            )
+            if info_center.Exists(0, 0):
+                for child in info_center.GetChildren():
+                    key_ctrl = child.TextControl(
+                        AutomationId="right_v_view.user_info_center_view.basic_line_view.basic_line.key_text",
+                    )
+                    if not key_ctrl.Exists(0, 0):
+                        continue
+                    key_name = key_ctrl.Name or ""
+                    field = key_map.get(key_name)
+                    if not field:
+                        continue
+                    val_ctrl = child.TextControl(
+                        ClassName="mmui::ContactProfileTextView",
+                    )
+                    if val_ctrl.Exists(0, 0):
+                        val = (val_ctrl.Name or "").strip()
+                        if val:
+                            result[field] = val
+
+            # 中间：备注、标签、描述、朋友权限
+            # 每行的值在 XMouseEventView 的 Name 属性中
+            line_map = {
+                "remark_line": "remark",
+                "tag_line": "tags",
+                "desc_line": "description",
+                "friend_per_line": "permission",
+            }
+            for line_id, field in line_map.items():
+                full_id = f"qt_scrollarea_viewport.mid_ui_.main_part_v_view.line_v_view.{line_id}"
+                line = profile.GroupControl(AutomationId=full_id)
+                if not line.Exists(0, 0):
+                    continue
+                val_btn = line.ButtonControl(
+                    ClassName="mmui::XMouseEventView",
+                )
+                if not val_btn.Exists(0, 0):
+                    continue
+                val = (val_btn.Name or "").strip()
+                if field == "tags":
+                    result[field] = [t.strip() for t in val.split(",") if t.strip()] if val else []
+                elif val:
+                    result[field] = val
+
+            # 中间：共同群聊、来源、个性签名（在 wx_friend_v_view.line_v_view 下）
+            friend_line_map = {
+                "chatroom_intersection": "common_groups",
+                "source": "source",
+                "sign": "signature",
+            }
+            for line_id, field in friend_line_map.items():
+                full_id = f"qt_scrollarea_viewport.mid_ui_.wx_friend_v_view.line_v_view.{line_id}"
+                line = profile.GroupControl(AutomationId=full_id)
+                if not line.Exists(0, 0):
+                    continue
+                # 优先从 XMouseEventView.Name 取值
+                val_btn = line.ButtonControl(
+                    ClassName="mmui::XMouseEventView",
+                )
+                if val_btn.Exists(0, 0) and (val_btn.Name or "").strip():
+                    result[field] = val_btn.Name.strip()
+                    continue
+                # XMouseEventView.Name 为空时，从 ContactProfileTextView 取值
+                val_text = line.TextControl(
+                    ClassName="mmui::ContactProfileTextView",
+                    searchDepth=8,
+                )
+                if val_text.Exists(0, 0) and (val_text.Name or "").strip():
+                    result[field] = val_text.Name.strip()
+
+            # 视频号名称
+            # 父容器: mmui::ProfileFinderView,
+            #   AutomationId="qt_scrollarea_viewport.mid_ui_.wx_friend_finder_"
+            # 名称: mmui::XTextView, AutomationId="ProfileFinderUi.nick_name_"
+            finder_view = profile.GroupControl(
+                ClassName="mmui::ProfileFinderView",
+                AutomationId="qt_scrollarea_viewport.mid_ui_.wx_friend_finder_",
+            )
+            if finder_view.Exists(0, 0):
+                finder_nick = finder_view.TextControl(
+                    AutomationId="ProfileFinderUi.nick_name_",
+                )
+                if finder_nick.Exists(0, 0):
+                    val = (finder_nick.Name or "").strip()
+                    if val:
+                        result["finder_name"] = val
+
+            logger.info(f"获取联系人资料成功: {nickname}")
+            return result
+
+        except Exception:
+            self._cleanup_profile()
+            raise
+        finally:
+            self._close_chat_info_panel()
+
     def set_remark(self, nickname: str, remark: str):
         """
         设置联系人的备注名。
@@ -7176,3 +7348,4 @@ class Weixin(WeixinWindow):
 
 if __name__ == "__main__":
     wx = Weixin()
+    data = wx.get_contact_profile("江南")
