@@ -18,6 +18,7 @@ import logging
 import os
 import random
 import re
+import struct
 import subprocess
 import tempfile
 import threading
@@ -41,11 +42,6 @@ import uiautomation as auto
 logging.basicConfig(level=logging.INFO, format="%(asctime)s [%(levelname)s] %(message)s")
 logger = logging.getLogger(__name__)
 
-import struct
-import time
-import win32api
-import win32clipboard
-import win32con
 
 # DROPFILES struct: pFiles(uint), x(long), y(long), fNC(int), fWide(bool)
 _DROPFILES_FORMAT = "Illii"
