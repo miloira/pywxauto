@@ -112,6 +112,23 @@ _DROPFILES_FORMAT = "Illii"
 _DROPFILES_SIZE = struct.calcsize(_DROPFILES_FORMAT)
 
 
+def get_image_text(image_bytes):
+    from rapidocr import RapidOCR
+    ocr = RapidOCR()
+    result = ocr(image_bytes)
+    data = {}
+    for box, txt in zip(result.boxes, result.txts):
+        point = box.tolist()
+        data[txt] = {
+            "center": (point[0][0] + (point[2][0] - point[0][0]) / 2, point[0][1] + (point[2][1] - point[0][1]) / 2),
+            "left_top": (point[0][0], point[0][1]),
+            "right_bottom": (point[2][0], point[2][1]),
+            "width": point[2][0] - point[0][0],
+            "height": point[2][1] - point[0][1]
+        }
+    return data
+
+
 def select_all():
     win32api.keybd_event(win32con.VK_CONTROL, 0, 0, 0)
     win32api.keybd_event(ord("A"), 0, 0, 0)
@@ -5487,43 +5504,39 @@ class Chat:
             self._wx.activate()
 
         self._click_chat_info_button()
-        time.sleep(0.5)
 
         try:
-            # 点击"群聊名称"按钮
-            self._click_room_info_item("群聊名称")
+            # 使用图片识别定位"群聊名称"
+            hwnd = self._win.NativeWindowHandle
+            if not hwnd:
+                raise RuntimeError("无法获取微信窗口句柄")
 
-            # 查找编辑弹窗中的输入框
-            edit = self._win.EditControl(
-                ClassName="mmui::XValidatorTextEdit",
-            )
-            if not edit.Exists(maxSearchSeconds=3):
-                # 尝试查找 mmui::XLineEdit
-                edit = self._win.EditControl(
-                    ClassName="mmui::XLineEdit",
-                )
-            if not edit.Exists(maxSearchSeconds=3):
-                raise RuntimeError("未找到群聊名称编辑框")
+            png_bytes = capture_window(hwnd)
+            ocr_data = get_image_text(png_bytes)
 
-            edit.Click(ratioX=0.5, ratioY=0.5)
+            if "群聊名称" not in ocr_data:
+                raise RuntimeError("OCR 未识别到'群聊名称'文本，请确认聊天信息面板已展开")
+
+            info = ocr_data["群聊名称"]
+            # 窗口左上角屏幕坐标
+            win_left, win_top, _, _ = win32gui.GetWindowRect(hwnd)
+            # 点击"群聊名称"文本中心 X，Y 偏移一个文本高度（即名称值所在行）
+            click_x = int(win_left + info["center"][0])
+            click_y = int(win_top + info["center"][1] + info["height"])
+
+            auto.Click(click_x, click_y)
+
             time.sleep(0.2)
-            edit.SendKeys("{Ctrl}a{Del}")
+            self._win.SendKeys("{Ctrl}a{Del}")
             time.sleep(0.1)
 
-            # 通过剪贴板粘贴文本
+            # 通过剪贴板粘贴名称
             paste(name)
-            time.sleep(0.3)
+            self._win.SendKeys("{Enter}")
 
-            # 点击"完成"按钮
-            ok_btn = self._win.ButtonControl(
-                ClassName="mmui::XOutlineButton",
-                Name="完成",
-            )
-            if not ok_btn.Exists(maxSearchSeconds=2):
-                raise RuntimeError("未找到'完成'按钮")
-            ok_btn.Click(ratioX=_rand_ratio(), ratioY=_rand_ratio())
-            time.sleep(0.3)
-
+            # 点击搜索框 完成保存
+            update_bth = self._win.ButtonControl(Name="修改")
+            update_bth.Click(ratioX=_rand_ratio(), ratioY=_rand_ratio())
             logger.debug(f"设置群聊名称成功: {name}")
 
         finally:
@@ -5537,7 +5550,7 @@ class Chat:
 
         流程：
         1. 点击"聊天信息"按钮，展开聊天信息面板
-        2. 在面板中找到"群公告"按钮并点击
+        2. 使用图片识别定位"群公告"文本坐标并点击其下方区域
         3. 在弹出的编辑弹窗中修改群公告内容
         4. 点击"发布"按钮保存
         5. 收回聊天信息面板
@@ -5557,46 +5570,29 @@ class Chat:
             self._wx.activate()
 
         self._click_chat_info_button()
-        time.sleep(0.5)
 
         try:
-            # 点击"群公告"按钮
-            self._click_room_info_item("群公告")
+            # 使用图片识别定位"群公告"
+            hwnd = self._win.NativeWindowHandle
+            if not hwnd:
+                raise RuntimeError("无法获取微信窗口句柄")
 
-            # 查找编辑弹窗中的输入框
-            edit = self._win.EditControl(
-                ClassName="mmui::XValidatorTextEdit",
-            )
-            if not edit.Exists(maxSearchSeconds=3):
-                raise RuntimeError("未找到群公告编辑框")
+            png_bytes = capture_window(hwnd)
+            ocr_data = get_image_text(png_bytes)
 
-            edit.Click(ratioX=0.5, ratioY=0.5)
-            time.sleep(0.2)
-            edit.SendKeys("{Ctrl}a{Del}")
-            time.sleep(0.1)
+            if "群公告" not in ocr_data:
+                raise RuntimeError("OCR 未识别到'群公告'文本，请确认聊天信息面板已展开")
 
-            # 通过剪贴板粘贴文本
-            paste(content)
-            time.sleep(0.3)
+            info = ocr_data["群公告"]
+            win_left, win_top, _, _ = win32gui.GetWindowRect(hwnd)
+            click_x = int(win_left + info["center"][0])
+            click_y = int(win_top + info["center"][1] + info["height"])
 
-            # 点击"发布"按钮
-            ok_btn = self._win.ButtonControl(
-                ClassName="mmui::XOutlineButton",
-                Name="发布",
-            )
-            if not ok_btn.Exists(maxSearchSeconds=2):
-                # 尝试查找"完成"按钮
-                ok_btn = self._win.ButtonControl(
-                    ClassName="mmui::XOutlineButton",
-                    Name="完成",
-                )
-            if not ok_btn.Exists(maxSearchSeconds=2):
-                raise RuntimeError("未找到'发布'或'完成'按钮")
-            ok_btn.Click(ratioX=_rand_ratio(), ratioY=_rand_ratio())
-            time.sleep(0.3)
+            auto.Click(click_x, click_y)
+
+            announcement_pane = auto.PaneContol(RegexName="“xxx”的群公告")
 
             logger.debug(f"设置群公告成功: {self.current_name}")
-
         finally:
             self._close_chat_info_panel()
 
@@ -5608,7 +5604,7 @@ class Chat:
 
         流程：
         1. 点击"聊天信息"按钮，展开聊天信息面板
-        2. 在面板中找到"备注"按钮并点击
+        2. 使用图片识别定位"备注"文本坐标并点击其下方区域
         3. 在弹出的编辑弹窗中修改备注
         4. 点击"完成"按钮保存
         5. 收回聊天信息面板
@@ -5628,41 +5624,33 @@ class Chat:
             self._wx.activate()
 
         self._click_chat_info_button()
-        time.sleep(0.5)
 
         try:
-            # 点击"备注"按钮
-            self._click_room_info_item("备注")
+            # 使用图片识别定位"备注"
+            hwnd = self._win.NativeWindowHandle
+            if not hwnd:
+                raise RuntimeError("无法获取微信窗口句柄")
 
-            # 查找编辑弹窗中的输入框
-            edit = self._win.EditControl(
-                ClassName="mmui::XLineEdit",
-            )
-            if not edit.Exists(maxSearchSeconds=3):
-                edit = self._win.EditControl(
-                    ClassName="mmui::XValidatorTextEdit",
-                )
-            if not edit.Exists(maxSearchSeconds=3):
-                raise RuntimeError("未找到备注编辑框")
+            png_bytes = capture_window(hwnd)
+            ocr_data = get_image_text(png_bytes)
 
-            edit.Click(ratioX=0.5, ratioY=0.5)
+            if "备注" not in ocr_data:
+                raise RuntimeError("OCR 未识别到'备注'文本，请确认聊天信息面板已展开")
+
+            info = ocr_data["备注"]
+            win_left, win_top, _, _ = win32gui.GetWindowRect(hwnd)
+            click_x = int(win_left + info["center"][0])
+            click_y = int(win_top + info["center"][1] + info["height"])
+
+            auto.Click(click_x, click_y)
+
             time.sleep(0.2)
-            edit.SendKeys("{Ctrl}a{Del}")
+            self._win.SendKeys("{Ctrl}a{Del}")
             time.sleep(0.1)
 
             # 通过剪贴板粘贴文本
             paste(remark)
-            time.sleep(0.3)
-
-            # 点击"完成"按钮
-            ok_btn = self._win.ButtonControl(
-                ClassName="mmui::XOutlineButton",
-                Name="完成",
-            )
-            if not ok_btn.Exists(maxSearchSeconds=2):
-                raise RuntimeError("未找到'完成'按钮")
-            ok_btn.Click(ratioX=_rand_ratio(), ratioY=_rand_ratio())
-            time.sleep(0.3)
+            self._win.SendKeys("{Enter}")
 
             logger.debug(f"设置群聊备注成功: {self.current_name} -> {remark}")
 
@@ -5677,7 +5665,7 @@ class Chat:
 
         流程：
         1. 点击"聊天信息"按钮，展开聊天信息面板
-        2. 在面板中找到"我在本群的昵称"按钮并点击
+        2. 使用图片识别定位"我在本群的昵称"文本坐标并点击其下方区域
         3. 在弹出的编辑弹窗中修改昵称
         4. 点击"完成"按钮保存
         5. 收回聊天信息面板
@@ -5697,41 +5685,49 @@ class Chat:
             self._wx.activate()
 
         self._click_chat_info_button()
-        time.sleep(0.5)
 
         try:
-            # 点击"我在本群的昵称"按钮
-            self._click_room_info_item("我在本群的昵称")
+            # 使用图片识别定位"我在本群的昵称"
+            hwnd = self._win.NativeWindowHandle
+            if not hwnd:
+                raise RuntimeError("无法获取微信窗口句柄")
 
-            # 查找编辑弹窗中的输入框
-            edit = self._win.EditControl(
-                ClassName="mmui::XLineEdit",
-            )
-            if not edit.Exists(maxSearchSeconds=3):
-                edit = self._win.EditControl(
-                    ClassName="mmui::XValidatorTextEdit",
-                )
-            if not edit.Exists(maxSearchSeconds=3):
-                raise RuntimeError("未找到昵称编辑框")
+            png_bytes = capture_window(hwnd)
+            ocr_data = get_image_text(png_bytes)
 
-            edit.Click(ratioX=0.5, ratioY=0.5)
+            # OCR 可能识别为完整文本或拆分文本，按优先级匹配
+            ocr_key = None
+            for candidate in ("我在本群的昵称", "我在本群的呢称"):
+                if candidate in ocr_data:
+                    ocr_key = candidate
+                    break
+            if not ocr_key:
+                # 模糊匹配：查找包含"本群"和"昵称"的 key
+                for key in ocr_data:
+                    if "本群" in key and ("昵称" in key or "呢称" in key):
+                        ocr_key = key
+                        break
+            if not ocr_key:
+                raise RuntimeError("OCR 未识别到'我在本群的昵称'文本，请确认聊天信息面板已展开")
+
+            info = ocr_data[ocr_key]
+            win_left, win_top, _, _ = win32gui.GetWindowRect(hwnd)
+            click_x = int(win_left + info["center"][0])
+            click_y = int(win_top + info["center"][1] + info["height"])
+
+            auto.Click(click_x, click_y)
+
             time.sleep(0.2)
-            edit.SendKeys("{Ctrl}a{Del}")
+            self._win.SendKeys("{Ctrl}a{Del}")
             time.sleep(0.1)
 
             # 通过剪贴板粘贴文本
             paste(nickname)
-            time.sleep(0.3)
+            self._win.SendKeys("{Enter}")
 
-            # 点击"完成"按钮
-            ok_btn = self._win.ButtonControl(
-                ClassName="mmui::XOutlineButton",
-                Name="完成",
-            )
-            if not ok_btn.Exists(maxSearchSeconds=2):
-                raise RuntimeError("未找到'完成'按钮")
-            ok_btn.Click(ratioX=_rand_ratio(), ratioY=_rand_ratio())
-            time.sleep(0.3)
+            # 点击"修改"按钮完成保存
+            update_btn = self._win.ButtonControl(Name="修改")
+            update_btn.Click(ratioX=_rand_ratio(), ratioY=_rand_ratio())
 
             logger.debug(f"设置群内昵称成功: {self.current_name} -> {nickname}")
 
@@ -8118,4 +8114,4 @@ class Weixin(WeixinWindow):
 
 if __name__ == "__main__":
     wx = Weixin()
-    wx.send_text("文件传输助手", "测试")
+    wx.set_room_announcement("agi2", "这是群公告")
