@@ -1777,35 +1777,6 @@ def _download_to_temp(url: str, timeout: int = 60) -> str:
     return tmp_path
 
 
-def _set_clipboard_file(file_paths: list[str]):
-    """
-    将文件路径列表写入剪贴板（CF_HDROP 格式），
-    用于通过 Ctrl+V 粘贴发送文件。
-    """
-
-    class DROPFILES(Structure):
-        _fields_ = [
-            ("pFiles", c_uint),
-            ("x", c_long),
-            ("y", c_long),
-            ("fNC", c_int),
-            ("fWide", c_bool),
-        ]
-
-    df = DROPFILES()
-    df.pFiles = sizeof(DROPFILES)
-    df.fWide = True
-    metadata = bytes(df)
-
-    files = ("\0".join(file_paths)).replace("/", "\\")
-    data = files.encode("U16")[2:] + b"\0\0"
-
-    win32clipboard.OpenClipboard()
-    win32clipboard.EmptyClipboard()
-    win32clipboard.SetClipboardData(win32clipboard.CF_HDROP, metadata + data)
-    win32clipboard.CloseClipboard()
-
-
 def _parse_session_name(raw: str, session: "Session | None" = None) -> SessionItem:
     """
     解析会话 ListItem 的 Name 属性。
