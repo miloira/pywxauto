@@ -92,10 +92,15 @@ from typing import Optional
 import win32api
 import win32clipboard
 import win32con
+import win32gui
+import win32ui
 import winreg
+
+import numpy as np
+import uiautomation as auto
+
 from PIL import Image
 
-import uiautomation as auto
 
 logging.basicConfig(level=logging.INFO, format="%(asctime)s [%(levelname)s] %(message)s")
 logger = logging.getLogger(__name__)
@@ -170,6 +175,48 @@ def paste(content, interval=0):
 
     time.sleep(interval)
     simulate_paste()
+
+
+def recognize_qrcode(image_bytes):
+    image_matrix = np.frombuffer(image_bytes, np.uint8)
+    image = cv2.imdecode(image_matrix, cv2.IMREAD_COLOR)
+    detector = cv2.QRCodeDetector()
+    content, box, _ = detector.detectAndDecode(image)
+    return content
+
+
+def capture_window(hwnd):
+    """获取窗口截图"""
+    # 获取窗口的屏幕坐标
+    window_rect = win32gui.GetWindowRect(hwnd)
+    win_left, win_top, win_right, win_bottom = window_rect
+    win_width = win_right - win_left
+    win_height = win_bottom - win_top
+
+    # 获取窗口的设备上下文
+    hwndDC = win32gui.GetWindowDC(hwnd)
+    mfcDC = win32ui.CreateDCFromHandle(hwndDC)
+    saveDC = mfcDC.CreateCompatibleDC()
+
+    # 创建位图对象保存整个窗口截图
+    saveBitMap = win32ui.CreateBitmap()
+    saveBitMap.CreateCompatibleBitmap(mfcDC, win_width, win_height)
+    saveDC.SelectObject(saveBitMap)
+
+    # 使用PrintWindow捕获整个窗口（包括被遮挡或最小化的窗口）
+    ctypes.windll.user32.PrintWindow(hwnd, saveDC.GetSafeHdc(), 3)
+
+    # 转换为PIL图像
+    bmp_info = saveBitMap.GetInfo()
+    bmp_str = saveBitMap.GetBitmapBits(True)
+    im = Image.frombuffer("RGB", (bmp_info["bmWidth"], bmp_info["bmHeight"]), bmp_str, "raw", "BGRX", 0, 1)
+
+    # 释放资源
+    win32gui.DeleteObject(saveBitMap.GetHandle())
+    saveDC.DeleteDC()
+    mfcDC.DeleteDC()
+    win32gui.ReleaseDC(hwnd, hwndDC)
+    return im
 
 
 class RegistryError(Exception):
