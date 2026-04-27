@@ -72,6 +72,7 @@ from __future__ import annotations
 import ctypes
 from ctypes import Structure, c_uint, c_long, c_int, c_bool, sizeof
 import hashlib
+import io
 import logging
 import os
 import random
@@ -185,38 +186,59 @@ def recognize_qrcode(image_bytes):
     return content
 
 
-def capture_window(hwnd):
-    """获取窗口截图"""
-    # 获取窗口的屏幕坐标
-    window_rect = win32gui.GetWindowRect(hwnd)
-    win_left, win_top, win_right, win_bottom = window_rect
-    win_width = win_right - win_left
-    win_height = win_bottom - win_top
+def capture_window(hwnd, offset_left=0, offset_top=0, offset_right=0, offset_bottom=0):
+    """
+    获取窗口截图，支持四边偏移裁剪。
 
-    # 获取窗口的设备上下文
+    Args:
+        hwnd: 窗口句柄
+        offset_left:   左边裁剪像素
+        offset_top:    上边裁剪像素
+        offset_right:  右边裁剪像素
+        offset_bottom: 下边裁剪像素
+
+    Returns:
+        PNG 格式的 bytes 数据
+    """
+    # 获取窗口矩形并应用偏移
+    left, top, right, bottom = win32gui.GetWindowRect(hwnd)
+    left += offset_left
+    top += offset_top
+    right -= offset_right
+    bottom -= offset_bottom
+    width = right - left
+    height = bottom - top
+
+    if width <= 0 or height <= 0:
+        raise Exception(f"偏移后截图区域无效: 宽度={width}, 高度={height}")
+
     hwndDC = win32gui.GetWindowDC(hwnd)
     mfcDC = win32ui.CreateDCFromHandle(hwndDC)
     saveDC = mfcDC.CreateCompatibleDC()
 
-    # 创建位图对象保存整个窗口截图
-    saveBitMap = win32ui.CreateBitmap()
-    saveBitMap.CreateCompatibleBitmap(mfcDC, win_width, win_height)
-    saveDC.SelectObject(saveBitMap)
+    saveBitmap = win32ui.CreateBitmap()
+    saveBitmap.CreateCompatibleBitmap(mfcDC, width, height)
+    saveDC.SelectObject(saveBitmap)
 
-    # 使用PrintWindow捕获整个窗口（包括被遮挡或最小化的窗口）
-    ctypes.windll.user32.PrintWindow(hwnd, saveDC.GetSafeHdc(), 3)
+    saveDC.BitBlt((0, 0), (width, height), mfcDC,
+                  (offset_left, offset_top), win32con.SRCCOPY)
 
-    # 转换为PIL图像
-    bmp_info = saveBitMap.GetInfo()
-    bmp_str = saveBitMap.GetBitmapBits(True)
-    im = Image.frombuffer("RGB", (bmp_info["bmWidth"], bmp_info["bmHeight"]), bmp_str, "raw", "BGRX", 0, 1)
+    bmp_info = saveBitmap.GetInfo()
+    bmp_str = saveBitmap.GetBitmapBits(True)
+    img = Image.frombuffer(
+        "RGB",
+        (bmp_info["bmWidth"], bmp_info["bmHeight"]),
+        bmp_str, "raw", "BGRX", 0, 1,
+    )
 
-    # 释放资源
-    win32gui.DeleteObject(saveBitMap.GetHandle())
+    win32gui.DeleteObject(saveBitmap.GetHandle())
     saveDC.DeleteDC()
     mfcDC.DeleteDC()
     win32gui.ReleaseDC(hwnd, hwndDC)
-    return im
+
+    buffer = io.BytesIO()
+    img.save(buffer, format="PNG")
+    return buffer.getvalue()
 
 
 class RegistryError(Exception):
@@ -7456,6 +7478,16 @@ class Weixin(WeixinWindow):
         self.moment = Moment(self)
 
     @staticmethod
+    def wakeup_window():
+        """按下ctrl+alt+w唤醒微信窗口"""
+        win32api.keybd_event(win32con.VK_CONTROL, 0, 0, 0)
+        win32api.keybd_event(win32con.VK_MENU, 0, 0, 0)
+        win32api.keybd_event(ord('W'), 0, 0, 0)
+        win32api.keybd_event(ord('W'), 0, win32con.KEYEVENTF_KEYUP, 0)
+        win32api.keybd_event(win32con.VK_MENU, 0, win32con.KEYEVENTF_KEYUP, 0)
+        win32api.keybd_event(win32con.VK_CONTROL, 0, win32con.KEYEVENTF_KEYUP, 0)
+
+    @staticmethod
     def _is_process_running(name: str) -> bool:
         output = subprocess.check_output(
             ["tasklist", "/FI", f"IMAGENAME eq {name}", "/NH"],
@@ -7808,6 +7840,40 @@ class Weixin(WeixinWindow):
         chat = self.open_session_by_search(nickname)
         chat.set_room_nickname(my_nickname)
 
+    def get_screenshot(self) -> bytes:
+        """
+        对微信主窗口截图，返回 PNG 格式的字节数据。
+
+        使用 BitBlt API 捕获窗口内容，返回 PNG bytes。
+        """
+        hwnd = self.window.NativeWindowHandle
+        if not hwnd:
+            raise RuntimeError("无法获取微信窗口句柄")
+        return capture_window(hwnd)
+
+    def screenshot(self, save_path: str):
+        """
+        对微信主窗口截图并保存到指定路径。
+
+        截图前会自动恢复最小化窗口并激活，确保截图内容完整。
+
+        Args:
+            save_path: 保存路径（含文件名），如 "C:\\screenshots\\wx.png"
+        """
+        hwnd = self.window.NativeWindowHandle
+        if not hwnd:
+            raise RuntimeError("无法获取微信窗口句柄")
+        if self.is_minimized:
+            self.restore()
+            time.sleep(0.3)
+        self.activate()
+        dir_path = os.path.dirname(save_path)
+        if dir_path:
+            os.makedirs(dir_path, exist_ok=True)
+        png_bytes = capture_window(hwnd)
+        with open(save_path, "wb") as f:
+            f.write(png_bytes)
+
     def lock(self):
         self.activate()
         more_btn = self.navigator._win.ButtonControl(Name="更多")
@@ -8017,4 +8083,4 @@ class Weixin(WeixinWindow):
 
 if __name__ == "__main__":
     wx = Weixin()
-    wx.set_room_name("test", "test2")
+    wx.screenshot(save_path="1.png")
