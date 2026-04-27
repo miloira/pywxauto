@@ -4123,29 +4123,29 @@ class Chat:
             return ctrl
         return None
 
-    def send_collection(self, collection_keywords: str) -> bool:
+    def send_collection(self, keyword: str) -> bool:
         """
         在当前会话中发送收藏内容。
 
         流程:
         1. 点击工具栏"发送收藏"按钮，打开收藏选择面板
-        2. 在收藏面板的搜索框中输入 collection_keywords
+        2. 在收藏面板的搜索框中输入 keyword
         3. 等待搜索结果出现在右侧详情列表中
         4. 选中第一个搜索结果
         5. 点击"发送"按钮发送
 
         Args:
-            collection_keywords: 搜索关键词，输入到收藏面板的搜索框中。
+            keyword: 搜索关键词，输入到收藏面板的搜索框中。
 
         Returns:
             True 发送成功
 
         Raises:
-            ValueError: collection_keywords 为空时抛出
+            ValueError: keyword 为空时抛出
             RuntimeError: 未找到匹配的收藏项或发送失败时抛出
         """
-        if not collection_keywords:
-            raise ValueError("collection_keywords 不能为空")
+        if not keyword:
+            raise ValueError("keyword 不能为空")
 
         if self._wx:
             self._wx.activate()
@@ -4158,7 +4158,7 @@ class Chat:
         search_edit = self._find_fav_search_edit()
         search_edit.Click(ratioX=_rand_ratio(), ratioY=_rand_ratio())
         time.sleep(0.3)
-        search_edit.GetValuePattern().SetValue(collection_keywords)
+        search_edit.GetValuePattern().SetValue(keyword)
         time.sleep(1)  # 等待搜索结果加载
 
         # 3. 获取搜索后的详情列表
@@ -4171,11 +4171,11 @@ class Chat:
             raise RuntimeError("搜索后未找到收藏详情列表")
 
         # 4. 选中第一个搜索结果
-        matched_item = self._find_collection_item(detail_list, collection_keywords)
+        matched_item = self._find_collection_item(detail_list, keyword)
 
         if not matched_item:
             self._close_collection_panel()
-            raise RuntimeError(f"未找到匹配的收藏项: {collection_keywords}")
+            raise RuntimeError(f"未找到匹配的收藏项: {keyword}")
 
         matched_item.Click(ratioX=_rand_ratio(), ratioY=_rand_ratio())
         time.sleep(0.3)
@@ -4246,15 +4246,15 @@ class Chat:
     EMOJI_CUSTOM_GRID_CLASS = "mmui::EmoticonGridView"
     EMOJI_CUSTOM_ITEM_CLASS = "mmui::FavEmoticonItemView"
 
-    def send_emotion(self, emotion_keywords: str = None, index: int = 1) -> bool:
+    def send_emotion(self, keyword: str = None, index: int = 1) -> bool:
         """
         在当前会话中发送表情。
 
-        当 emotion_keywords 不为 None 时，通过搜索关键词发送表情；
-        当 emotion_keywords 为 None 时，发送自定义表情列表中第 index 个表情。
+        当 keyword 不为 None 时，通过搜索关键词发送表情；
+        当 keyword 为 None 时，发送自定义表情列表中第 index 个表情。
 
         Args:
-            emotion_keywords: 表情搜索关键词，如 "哈喽"、"开心" 等。
+            keyword: 表情搜索关键词，如 "哈喽"、"开心" 等。
                 为 None 时发送自定义表情。
             index: 选择第几个表情，从 1 开始，默认为 1。
 
@@ -4278,7 +4278,7 @@ class Chat:
 
             popover = self._get_emoji_popover()
 
-            if emotion_keywords is not None:
+            if keyword is not None:
                 # 搜索表情模式
                 # 2. 点击"搜索表情"标签
                 self._click_emoji_search_tab(popover)
@@ -4290,7 +4290,7 @@ class Chat:
                 time.sleep(0.2)
                 # 清空已有内容后键盘输入，确保触发搜索
                 search_edit.SendKeys("{Ctrl}a", waitTime=0.1)
-                search_edit.SendKeys(emotion_keywords, waitTime=0.1)
+                search_edit.SendKeys(keyword, waitTime=0.1)
                 time.sleep(1.5)  # 等待搜索结果加载（Chromium 渲染）
 
                 # 4. 在搜索结果中点击第 index 个表情
@@ -4315,7 +4315,7 @@ class Chat:
             )
             if emoji_popover.Exists(maxSearchSeconds=1):
                 self._close_emoji_panel()
-                label = "自定义表情" if emotion_keywords is None else "表情"
+                label = "自定义表情" if keyword is None else "表情"
                 raise RuntimeError(f"发送{label}失败，表情面板未关闭")
 
             logger.debug("表情发送成功")
@@ -7415,17 +7415,17 @@ class SeparateChat(Chat, WeixinWindow):
         self.activate()
         return super().send_at(content, at_members)
 
-    def send_collection(self, collection_keywords: str) -> bool:
+    def send_collection(self, keyword: str) -> bool:
         self.activate()
-        return super().send_collection(collection_keywords)
+        return super().send_collection(keyword)
 
-    def send_emotion(self, emotion_keywords: str = None, index: int = 1) -> bool:
+    def send_emotion(self, keyword: str = None, index: int = 1) -> bool:
         self.activate()
-        return super().send_emotion(emotion_keywords, index)
+        return super().send_emotion(keyword, index)
 
-    def send_card(self, receiver_nickname: str) -> bool:
+    def send_card(self, nickname: str) -> bool:
         self.activate()
-        return super().send_card(receiver_nickname)
+        return super().send_card(nickname)
 
     def voice_call(self) -> "VoipCallWindow":
         self.activate()
@@ -7599,15 +7599,15 @@ class Weixin(WeixinWindow):
         chat = self.open_session_by_search(nickname)
         return chat.send_at(content, at_members)
 
-    def send_collection(self, nickname: str, collection_keywords: str) -> bool:
+    def send_collection(self, nickname: str, keyword: str) -> bool:
         """打开指定会话并发送收藏内容"""
         chat = self.open_session_by_search(nickname)
-        return chat.send_collection(collection_keywords)
+        return chat.send_collection(keyword)
 
-    def send_emotion(self, nickname: str, emotion_keywords: str = None, index: int = 1) -> bool:
-        """打开指定会话并发送表情，emotion_keywords 为 None 时发送自定义表情"""
+    def send_emotion(self, nickname: str, keyword: str = None, index: int = 1) -> bool:
+        """打开指定会话并发送表情，keyword 为 None 时发送自定义表情"""
         chat = self.open_session_by_search(nickname)
-        return chat.send_emotion(emotion_keywords, index)
+        return chat.send_emotion(keyword, index)
 
     def send_card(self, nickname: str, share: str) -> bool:
         """
