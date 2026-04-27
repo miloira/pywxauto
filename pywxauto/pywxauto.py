@@ -7609,18 +7609,18 @@ class Weixin(WeixinWindow):
         chat = self.open_session_by_search(nickname)
         return chat.send_emotion(emotion_keywords, index)
 
-    def send_card(self, nickname: str, share_nickname: str) -> bool:
+    def send_card(self, nickname: str, share: str) -> bool:
         """
         将指定联系人的名片发送给接收者。
 
         Args:
-            share_contact_nickname: 要分享名片的联系人昵称
-            receiver_nickname: 接收名片的联系人昵称
+            nickname: 接收名片的联系人昵称
+            share: 要分享名片的联系人昵称
 
         Returns:
             True 发送成功
         """
-        chat = self.open_session_by_search(share_nickname)
+        chat = self.open_session_by_search(share)
         return chat.send_card(nickname)
 
     def create_note(self, content: str):
