@@ -568,8 +568,8 @@ class WeixinWindow:
     子类需要设置 self._win 为 uiautomation 的 WindowControl 实例。
     提供 activate、pin、unpin、minimize、maximize、restore、close 等通用操作，
     支持两种模式：
-    - use_message=True（默认）: 通过 Windows 消息 API 操作，不需要窗口可见
-    - use_message=False: 通过点击标题栏按钮操作，模拟用户行为
+    - event=True（默认）: 通过 Windows 消息 API 操作，不需要窗口可见
+    - event=False: 通过点击标题栏按钮操作，模拟用户行为
     """
 
     # 子类可覆盖，指定标题栏按钮的 ClassName
@@ -602,9 +602,9 @@ class WeixinWindow:
         self._window.SetFocus()
         time.sleep(0.2)
 
-    def pin(self, use_message: bool = True, simulate_move: bool = True):
+    def pin(self, event: bool = True, simulate_move: bool = True):
         """置顶窗口"""
-        if use_message:
+        if event:
             self._window.SetTopmost(True)
         else:
             self.activate()
@@ -614,9 +614,9 @@ class WeixinWindow:
             if btn.Exists(0, 0):
                 btn.Click(simulateMove=simulate_move)
 
-    def unpin(self, use_message: bool = True, simulate_move: bool = True):
+    def unpin(self, event: bool = True, simulate_move: bool = True):
         """取消置顶窗口"""
-        if use_message:
+        if event:
             self._window.SetTopmost(False)
         else:
             self.activate()
@@ -626,9 +626,9 @@ class WeixinWindow:
             if btn.Exists(0, 0):
                 btn.Click(simulateMove=simulate_move)
 
-    def minimize(self, use_message: bool = True, simulate_move: bool = True):
+    def minimize(self, event: bool = True, simulate_move: bool = True):
         """最小化窗口"""
-        if use_message:
+        if event:
             self._window.Minimize()
         else:
             self.activate()
@@ -640,9 +640,9 @@ class WeixinWindow:
             btn.Click(ratioX=_rand_ratio(), ratioY=_rand_ratio(),
                       simulateMove=simulate_move)
 
-    def maximize(self, use_message: bool = True, simulate_move: bool = True):
+    def maximize(self, event: bool = True, simulate_move: bool = True):
         """最大化/还原窗口"""
-        if use_message:
+        if event:
             if self.is_maximized:
                 self._window.Restore()
             else:
@@ -663,9 +663,9 @@ class WeixinWindow:
         """还原窗口"""
         self._window.Restore()
 
-    def close(self, use_message: bool = True, simulate_move: bool = True):
+    def close(self, event: bool = True, simulate_move: bool = True):
         """关闭窗口"""
-        if use_message:
+        if event:
             wp = self._window.GetWindowPattern()
             if wp:
                 wp.Close()
@@ -1086,17 +1086,17 @@ class Login(WeixinWindow):
         btn.Click(ratioX=_rand_ratio(), ratioY=_rand_ratio())
         time.sleep(0.5)
 
-    def close(self, use_message: bool = True, simulate_move: bool = True):
+    def close(self, event: bool = True, simulate_move: bool = True):
         """
         关闭登录窗口。
 
         Args:
-            use_message: True — 通过 WindowPattern 关闭（默认）
+            event: True — 通过 WindowPattern 关闭（默认）
                          False — 点击标题栏"关闭"按钮
-            simulate_move: 是否模拟鼠标移动（仅 use_message=False 时有效）
+            simulate_move: 是否模拟鼠标移动（仅 event=False 时有效）
         """
         self._ensure_exists()
-        if use_message:
+        if event:
             wp = self._win.GetWindowPattern()
             if wp:
                 wp.Close()
@@ -7478,6 +7478,20 @@ class Weixin(WeixinWindow):
         self.moment = Moment(self)
 
     @staticmethod
+    def find_wechat_window() -> list[int]:
+        result = []
+
+        def callback(hwnd, _):
+            if win32gui.IsWindowVisible(hwnd):
+                title = win32gui.GetWindowText(hwnd)
+                # 关键：微信窗口标题通常包含“微信”
+                if title.lower() in ["微信", "wechat", "weixin"]:
+                    result.append(hwnd)
+
+        win32gui.EnumWindows(callback, None)
+        return result
+
+    @staticmethod
     def wakeup_window():
         """按下ctrl+alt+w唤醒微信窗口"""
         win32api.keybd_event(win32con.VK_CONTROL, 0, 0, 0)
@@ -7496,23 +7510,44 @@ class Weixin(WeixinWindow):
         return name.lower() in output.lower()
 
     @staticmethod
+    def is_exists_window(timeout: float = 30, interval: float = 0.1) -> bool:
+        # 检测微信窗口是否存在
+        deadline = time.monotonic() + timeout
+        while time.monotonic() < deadline:
+            if Weixin.find_wechat_window():
+                return True
+            time.sleep(interval)
+        return False
+
+    @staticmethod
     def _ensure_running():
-        wnd = auto.WindowControl(ClassName="mmui::MainWindow", RegexName="微信|Weixin", Depth=1)
-        if wnd.Exists(maxSearchSeconds=3):
+        # 用 find_wechat_window 判断窗口是否存在
+        if Weixin.find_wechat_window():
             return
-        if Weixin._is_process_running("Weixin.exe"):
-            try:
-                key = winreg.OpenKey(
-                    winreg.HKEY_CURRENT_USER,
-                    r"Software\Tencent\Weixin",
-                )
-                install_path, _ = winreg.QueryValueEx(key, "InstallPath")
-                winreg.CloseKey(key)
-            except FileNotFoundError:
-                raise RuntimeError("未找到微信安装路径，请确认微信已安装")
-            subprocess.Popen([f"{install_path}\\Weixin.exe"])
-            if not wnd.Exists(maxSearchSeconds=15):
-                raise RuntimeError("微信启动超时，请手动登录后重试")
+
+        # 窗口不存在，尝试用快捷键唤醒
+        Weixin.wakeup_window()
+
+        # 检测微信窗口是否存在
+        if Weixin.is_exists_window(timeout=3, interval=0.1):
+            return 
+
+        # 唤醒失败，尝试启动微信
+        try:
+            key = winreg.OpenKey(
+                winreg.HKEY_CURRENT_USER,
+                r"Software\Tencent\Weixin",
+            )
+            install_path, _ = winreg.QueryValueEx(key, "InstallPath")
+            winreg.CloseKey(key)
+        except FileNotFoundError:
+            raise RuntimeError("未找到微信安装路径，请确认微信已安装")
+        subprocess.Popen([f"{install_path}\\Weixin.exe"])
+
+        # 检测微信窗口是否存在
+        if Weixin.is_exists_window(timeout=3, interval=0.1):
+            return 
+        raise RuntimeError("微信启动超时，请手动登录后重试")
 
     @property
     def is_locked(self) -> bool:
@@ -8083,4 +8118,4 @@ class Weixin(WeixinWindow):
 
 if __name__ == "__main__":
     wx = Weixin()
-    wx.screenshot(save_path="1.png")
+    wx.send_text("文件传输助手", "测试")
