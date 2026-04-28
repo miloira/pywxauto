@@ -73,6 +73,7 @@ import ctypes
 from ctypes import Structure, c_uint, c_long, c_int, c_bool, sizeof
 import fnmatch
 import hashlib
+import json
 import io
 import logging
 import os
@@ -106,6 +107,16 @@ from PIL import Image
 
 logging.basicConfig(level=logging.INFO, format="%(asctime)s [%(levelname)s] %(message)s")
 logger = logging.getLogger(__name__)
+
+# 让拥有 to_dict() 方法的对象支持 json.dumps 直接序列化
+_original_json_default = json.JSONEncoder().default
+
+def _custom_json_default(self, obj):
+    if hasattr(obj, "to_dict"):
+        return obj.to_dict()
+    return _original_json_default(obj)
+
+json.JSONEncoder.default = _custom_json_default
 
 
 # DROPFILES struct: pFiles(uint), x(long), y(long), fNC(int), fWide(bool)
@@ -1304,6 +1315,17 @@ class MomentItem:
     def __str__(self):
         preview = self.content[:60] + "..." if len(self.content) > 60 else self.content
         return f"[{self.type}] [{self.timestamp}] {self.sender}: {preview}"
+
+    def to_dict(self) -> dict:
+        """转换为字典"""
+        return {
+            "type": self.type,
+            "sender": self.sender,
+            "content": self.content,
+            "raw_text": self.raw_text,
+            "timestamp": self.timestamp,
+            "image_count": self.image_count,
+        }
 
 
 class Moment(WeixinWindow):
@@ -9362,5 +9384,5 @@ if __name__ == "__main__":
     #     display_member_nickname=True
     # )
 
-    data = wx.moment.get(10)
-    print(data)
+    moments = wx.moment.get(5)
+    print(json.dumps(moments, ensure_ascii=False))
