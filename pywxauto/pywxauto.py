@@ -71,6 +71,7 @@ from __future__ import annotations
 
 import ctypes
 from ctypes import Structure, c_uint, c_long, c_int, c_bool, sizeof
+import fnmatch
 import hashlib
 import io
 import logging
@@ -112,11 +113,27 @@ _DROPFILES_FORMAT = "Illii"
 _DROPFILES_SIZE = struct.calcsize(_DROPFILES_FORMAT)
 
 
+def find_window_by_name(name_pattern) -> list[int]:
+    result = []
+
+    def callback(hwnd, _):
+        if win32gui.IsWindowVisible(hwnd):
+            title = win32gui.GetWindowText(hwnd)
+            # 忽略大小写匹配
+            if fnmatch.fnmatch(title, name_pattern):
+                result.append(hwnd)
+
+    win32gui.EnumWindows(callback, None)
+    return result
+
+
 def get_image_text(image_bytes):
     from rapidocr import RapidOCR
     ocr = RapidOCR()
     result = ocr(image_bytes)
     data = {}
+    if result.boxes is None or result.txts is None:
+        return data
     for box, txt in zip(result.boxes, result.txts):
         point = box.tolist()
         data[txt] = {
@@ -249,6 +266,49 @@ def capture_window(hwnd, offset_left=0, offset_top=0, offset_right=0, offset_bot
     )
 
     win32gui.DeleteObject(saveBitmap.GetHandle())
+    saveDC.DeleteDC()
+    mfcDC.DeleteDC()
+    win32gui.ReleaseDC(hwnd, hwndDC)
+
+    buffer = io.BytesIO()
+    img.save(buffer, format="PNG")
+    return buffer.getvalue()
+
+
+def capture_window2(hwnd):
+    """
+    获取窗口截图（使用 PrintWindow，支持被遮挡/最小化的窗口）。
+
+    Returns:
+        PNG 格式的 bytes 数据
+    """
+    window_rect = win32gui.GetWindowRect(hwnd)
+    win_left, win_top, win_right, win_bottom = window_rect
+    win_width = win_right - win_left
+    win_height = win_bottom - win_top
+
+    if win_width <= 0 or win_height <= 0:
+        raise Exception(f"窗口区域无效: 宽度={win_width}, 高度={win_height}")
+
+    hwndDC = win32gui.GetWindowDC(hwnd)
+    mfcDC = win32ui.CreateDCFromHandle(hwndDC)
+    saveDC = mfcDC.CreateCompatibleDC()
+
+    saveBitMap = win32ui.CreateBitmap()
+    saveBitMap.CreateCompatibleBitmap(mfcDC, win_width, win_height)
+    saveDC.SelectObject(saveBitMap)
+
+    ctypes.windll.user32.PrintWindow(hwnd, saveDC.GetSafeHdc(), 3)
+
+    bmp_info = saveBitMap.GetInfo()
+    bmp_str = saveBitMap.GetBitmapBits(True)
+    img = Image.frombuffer(
+        "RGB",
+        (bmp_info["bmWidth"], bmp_info["bmHeight"]),
+        bmp_str, "raw", "BGRX", 0, 1,
+    )
+
+    win32gui.DeleteObject(saveBitMap.GetHandle())
     saveDC.DeleteDC()
     mfcDC.DeleteDC()
     win32gui.ReleaseDC(hwnd, hwndDC)
@@ -5511,7 +5571,7 @@ class Chat:
             if not hwnd:
                 raise RuntimeError("无法获取微信窗口句柄")
 
-            png_bytes = capture_window(hwnd)
+            png_bytes = capture_window2(hwnd)
             ocr_data = get_image_text(png_bytes)
 
             if "群聊名称" not in ocr_data:
@@ -5576,23 +5636,78 @@ class Chat:
             hwnd = self._win.NativeWindowHandle
             if not hwnd:
                 raise RuntimeError("无法获取微信窗口句柄")
-
             png_bytes = capture_window(hwnd)
             ocr_data = get_image_text(png_bytes)
 
+            # 点击"群公告"文本下方区域
             if "群公告" not in ocr_data:
                 raise RuntimeError("OCR 未识别到'群公告'文本，请确认聊天信息面板已展开")
-
             info = ocr_data["群公告"]
             win_left, win_top, _, _ = win32gui.GetWindowRect(hwnd)
             click_x = int(win_left + info["center"][0])
             click_y = int(win_top + info["center"][1] + info["height"])
-
             auto.Click(click_x, click_y)
 
-            announcement_pane = auto.PaneContol(RegexName="“xxx”的群公告")
+            # 判断群公告窗口是否出现
+            pane_title = f"“{self.current_name}”的群公告"
+            announcement_pane = auto.PaneControl(Name=pane_title)
+            if not announcement_pane.Exists(maxSearchSeconds=3):
+                raise RuntimeError("未找到群公告编辑窗口")
 
-            logger.debug(f"设置群公告成功: {self.current_name}")
+            # 识别群公告编辑窗口
+            pane_hwnd = announcement_pane.NativeWindowHandle
+            if not pane_hwnd:
+                raise RuntimeError("无法获取群公告窗口句柄")
+            png_bytes = capture_window2(pane_hwnd)
+            ocr_data = get_image_text(png_bytes)
+            if not ocr_data:
+                raise RuntimeError("群公告窗口 OCR 未识别到任何文本")
+
+            # 如果之前发布过群公告，需要先点击"编辑群公告"
+            if "编辑群公告" in ocr_data:
+                info = ocr_data["编辑群公告"]
+                pane_left, pane_top, _, _ = win32gui.GetWindowRect(pane_hwnd)
+                click_x = int(pane_left + info["center"][0])
+                click_y = int(pane_top + info["center"][1])
+                auto.Click(click_x, click_y)
+                time.sleep(0.5)
+
+                # 再次识别窗口更新识别信息
+                png_bytes = capture_window2(pane_hwnd)
+                ocr_data = get_image_text(png_bytes)
+                if not ocr_data:
+                    raise RuntimeError("群公告窗口 OCR 未识别到任何文本")
+
+            # 清空输入框并粘贴内容
+            announcement_pane.SendKeys("{Ctrl}a{Del}")
+            paste(content)
+            time.sleep(0.5)
+
+            # 点击"完成"按钮（OCR 定位）
+            if "完成" not in ocr_data:
+                raise RuntimeError(f"OCR 未识别到'完成'按钮，识别到的文本: {list(ocr_data.keys())}")
+            info = ocr_data["完成"]
+            pane_left, pane_top, _, _ = win32gui.GetWindowRect(pane_hwnd)
+            click_x = int(pane_left + info["center"][0])
+            click_y = int(pane_top + info["center"][1])
+            auto.Click(click_x, click_y)
+            time.sleep(0.5)
+
+            # 点击"发布"按钮（WebView 内的按钮，支持 InvokePattern）
+            publish_btn = announcement_pane.ButtonControl(Name="发布")
+            if not publish_btn.Exists(maxSearchSeconds=3):
+                raise RuntimeError("未找到'发布'按钮")
+            publish_btn.GetInvokePattern().Invoke()
+
+            time.sleep(1)
+
+            for i in range(10):
+                if not find_window_by_name(pane_title):
+                    logger.debug(f"设置群公告成功: {self.current_name}")
+                    return
+                time.sleep(3)
+
+            logger.debug(f"设置群公告失败: {self.current_name}")
         finally:
             self._close_chat_info_panel()
 
@@ -8114,4 +8229,7 @@ class Weixin(WeixinWindow):
 
 if __name__ == "__main__":
     wx = Weixin()
-    wx.set_room_announcement("agi2", "这是群公告")
+    # wx.set_room_name("AI测试2", "AI测试")
+    # wx.set_room_remark("AI测试", "agi")
+    # wx.set_room_nickname("AI测试", "milo2 2号")
+    wx.set_room_announcement("AI测试", "这是群公告2")
