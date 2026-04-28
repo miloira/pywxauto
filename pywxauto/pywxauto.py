@@ -5973,11 +5973,11 @@ class Chat:
         """关闭当前群聊的消息免打扰（通过 OCR 识别开关）"""
         self._set_room_ocr_switch("消息免打扰", False)
 
-    def add_room_addressbook(self):
+    def add_room_address_book(self):
         """将当前群聊保存到通讯录（通过 OCR 识别开关）"""
         self._set_room_ocr_switch("保存到通讯录", True)
 
-    def remove_room_addressbook(self):
+    def remove_room_address_book(self):
         """将当前群聊从通讯录移除（通过 OCR 识别开关）"""
         self._set_room_ocr_switch("保存到通讯录", False)
 
@@ -6117,7 +6117,7 @@ class Chat:
     def set_room_info(self, name: str = None, announcement: str = None,
                       remark: str = None, my_nickname: str = None,
                       mute: bool = None, pin: bool = None,
-                      save_addressbook: bool = None,
+                      save_address_book: bool = None,
                       display_member_nickname: bool = None,
                       fold: bool = None):
         """
@@ -6136,7 +6136,7 @@ class Chat:
             my_nickname:             我在本群的昵称
             mute:                    消息免打扰（True 开启 / False 关闭）
             pin:                     置顶聊天（True 开启 / False 关闭）
-            save_addressbook:        保存到通讯录（True 开启 / False 关闭）
+            save_address_book:        保存到通讯录（True 开启 / False 关闭）
             display_member_nickname: 显示群成员昵称（True 开启 / False 关闭）
             fold:                    折叠该聊天（True 开启 / False 关闭），
                                      开启时会自动先开启消息免打扰
@@ -6146,7 +6146,7 @@ class Chat:
         """
         # 全部为 None 则不操作
         if all(v is None for v in (name, announcement, remark, my_nickname,
-                                   mute, pin, save_addressbook,
+                                   mute, pin, save_address_book,
                                    display_member_nickname, fold)):
             return
 
@@ -6302,7 +6302,7 @@ class Chat:
 
             # ---- 第二组：开关（滚动到底部，每个开关独立截图 OCR） ----
             has_switches = any(v is not None for v in
-                              (mute, pin, save_addressbook,
+                              (mute, pin, save_address_book,
                                display_member_nickname, fold))
 
             if has_switches:
@@ -6328,7 +6328,7 @@ class Chat:
                     ("消息免打扰", mute),
                     ("折叠该聊天", fold),
                     ("置顶聊天", pin),
-                    ("保存到通讯录", save_addressbook),
+                    ("保存到通讯录", save_address_book),
                     ("显示群成员昵称", display_member_nickname),
                 ]:
                     if switch_val is None:
@@ -6447,14 +6447,14 @@ class Chat:
         """关闭当前私聊的消息免打扰（通过 UI Automation 开关）"""
         self._set_chat_info_switch("消息免打扰", False)
 
-    def mute(self):
+    def mute_chat(self):
         """开启消息免打扰（自动区分私聊/群聊）"""
         if self.chat_type == "群聊":
             self.mute_room_chat()
         else:
             self.mute_contact_chat()
 
-    def unmute(self):
+    def unmute_chat(self):
         """关闭消息免打扰（自动区分私聊/群聊）"""
         if self.chat_type == "群聊":
             self.unmute_room_chat()
@@ -9004,15 +9004,15 @@ class Weixin(WeixinWindow):
         chat = self.open_session_by_search(nickname)
         chat.unmute_room_chat()
 
-    def add_room_addressbook(self, nickname: str):
-        """将指定群聊保存到通讯录，委托给 Chat.add_room_addressbook"""
+    def add_room_address_book(self, nickname: str):
+        """将指定群聊保存到通讯录，委托给 Chat.add_room_address_book"""
         chat = self.open_session_by_search(nickname)
-        chat.add_room_addressbook()
+        chat.add_room_address_book()
 
-    def remove_room_addressbook(self, nickname: str):
-        """将指定群聊从通讯录移除，委托给 Chat.remove_room_addressbook"""
+    def remove_room_address_book(self, nickname: str):
+        """将指定群聊从通讯录移除，委托给 Chat.remove_room_address_book"""
         chat = self.open_session_by_search(nickname)
-        chat.remove_room_addressbook()
+        chat.remove_room_address_book()
 
     def display_room_member_nickname(self, nickname: str):
         """显示指定群聊的群成员昵称，委托给 Chat.display_room_member_nickname"""
@@ -9027,7 +9027,7 @@ class Weixin(WeixinWindow):
     def set_room_info(self, nickname: str, name: str = None,
                       announcement: str = None, remark: str = None,
                       my_nickname: str = None, mute: bool = None,
-                      pin: bool = None, save_addressbook: bool = None,
+                      pin: bool = None, save_address_book: bool = None,
                       display_member_nickname: bool = None,
                       fold: bool = None):
         """一次性设置指定群聊的多项信息，委托给 Chat.set_room_info"""
@@ -9035,7 +9035,7 @@ class Weixin(WeixinWindow):
         chat.set_room_info(
             name=name, announcement=announcement, remark=remark,
             my_nickname=my_nickname, mute=mute, pin=pin,
-            save_addressbook=save_addressbook,
+            save_address_book=save_address_book,
             display_member_nickname=display_member_nickname,
             fold=fold,
         )
@@ -9063,12 +9063,12 @@ class Weixin(WeixinWindow):
     def mute_chat(self, nickname: str):
         """开启指定会话的消息免打扰，委托给 Chat.mute"""
         chat = self.open_session_by_search(nickname)
-        chat.mute()
+        chat.mute_chat()
 
     def unmute_chat(self, nickname: str):
         """关闭指定会话的消息免打扰，委托给 Chat.unmute"""
         chat = self.open_session_by_search(nickname)
-        chat.unmute()
+        chat.unmute_chat()
 
     def fold_chat(self, nickname: str):
         """折叠指定会话，委托给 Chat.fold_chat"""
@@ -9358,8 +9358,9 @@ if __name__ == "__main__":
     #     pin=True,
     #     mute=False,
     #     fold=True,
-    #     save_addressbook=True,
+    #     save_address_book=True,
     #     display_member_nickname=True
     # )
 
-    wx.add_room_members("AI测试", ["七夏", "Joseph"])
+    data = wx.moment.get(10)
+    print(data)
