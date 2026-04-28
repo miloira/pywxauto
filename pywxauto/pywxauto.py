@@ -124,6 +124,13 @@ _DROPFILES_FORMAT = "Illii"
 _DROPFILES_SIZE = struct.calcsize(_DROPFILES_FORMAT)
 
 
+def wechat_ocr(wechat_ocr_dir, wechat_dir, img_path):
+    import wcocr
+    wcocr.init(wechat_ocr_dir, wechat_dir)
+    result = wcocr.ocr(img_path)
+    return result
+
+
 def find_window_by_name(name_pattern) -> list[int]:
     result = []
 
