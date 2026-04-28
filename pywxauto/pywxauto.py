@@ -5664,6 +5664,79 @@ class Chat:
         """隐藏群成员昵称（通过 OCR 识别开关）"""
         self._set_room_ocr_switch("显示群成员昵称", False)
 
+    def fold_room_chat(self):
+        """
+        折叠当前群聊会话（通过 OCR 识别开关）。
+
+        "折叠该聊天"是"消息免打扰"的子选项，
+        只有在消息免打扰开启时才会出现。
+        如果消息免打扰未开启，会先自动开启。
+        """
+        self._ensure_room_chat()
+        if self._wx:
+            self._wx.activate()
+
+        self._click_chat_info_button()
+        time.sleep(0.5)
+
+        try:
+            self._scroll_room_info_to_bottom()
+
+            hwnd = self._win.NativeWindowHandle
+            if not hwnd:
+                raise RuntimeError("无法获取微信窗口句柄")
+
+            # 先确保消息免打扰已开启
+            png_bytes = capture_window2(hwnd)
+            ocr_data = get_image_text(png_bytes)
+            img = Image.open(io.BytesIO(png_bytes))
+            self._toggle_ocr_switch(img, ocr_data, hwnd, "消息免打扰", True)
+
+            # 开启消息免打扰后，"折叠该聊天"选项才会出现，重新截图
+            png_bytes = capture_window2(hwnd)
+            ocr_data = get_image_text(png_bytes)
+            img = Image.open(io.BytesIO(png_bytes))
+            self._toggle_ocr_switch(img, ocr_data, hwnd, "折叠该聊天", True)
+
+            logger.debug(f"折叠群聊成功: {self.current_name}")
+
+        finally:
+            self._close_chat_info_panel()
+
+    def unfold_room_chat(self):
+        """
+        取消折叠当前群聊会话（通过 OCR 识别开关）。
+
+        "折叠该聊天"是"消息免打扰"的子选项，
+        只有在消息免打扰开启时才会出现。
+        """
+        self._ensure_room_chat()
+        if self._wx:
+            self._wx.activate()
+
+        self._click_chat_info_button()
+        time.sleep(0.5)
+
+        try:
+            self._scroll_room_info_to_bottom()
+
+            hwnd = self._win.NativeWindowHandle
+            if not hwnd:
+                raise RuntimeError("无法获取微信窗口句柄")
+
+            png_bytes = capture_window2(hwnd)
+            ocr_data = get_image_text(png_bytes)
+            img = Image.open(io.BytesIO(png_bytes))
+
+            # 折叠该聊天只在消息免打扰开启时存在
+            if "折叠该聊天" in ocr_data:
+                self._toggle_ocr_switch(img, ocr_data, hwnd, "折叠该聊天", False)
+
+            logger.debug(f"取消折叠群聊成功: {self.current_name}")
+
+        finally:
+            self._close_chat_info_panel()
+
     @staticmethod
     def _detect_ocr_switch_state(img: Image.Image, info: dict) -> bool:
         """
@@ -5720,16 +5793,16 @@ class Chat:
                       remark: str = None, my_nickname: str = None,
                       mute: bool = None, pin: bool = None,
                       save_addressbook: bool = None,
-                      display_member_nickname: bool = None):
+                      display_member_nickname: bool = None,
+                      fold: bool = None):
         """
         一次性设置群聊的多项信息。
 
         只打开一次聊天信息面板，按顺序完成所有操作后关闭。
         参数为 None 时跳过对应项，不做修改。
 
-        name、announcement、remark、my_nickname 共用一次 OCR 识别（面板顶部区域）。
-        save_addressbook、display_member_nickname 共用一次 OCR 识别（滚动到底部后）。
-        mute、pin 也在滚动到底部后的同一次 OCR 中处理。
+        name、announcement、remark、my_nickname 各自独立 OCR 识别（面板顶部区域）。
+        开关类参数滚动到底部后每个独立截图 OCR。
 
         Args:
             name:                    群聊名称
@@ -5740,6 +5813,8 @@ class Chat:
             pin:                     置顶聊天（True 开启 / False 关闭）
             save_addressbook:        保存到通讯录（True 开启 / False 关闭）
             display_member_nickname: 显示群成员昵称（True 开启 / False 关闭）
+            fold:                    折叠该聊天（True 开启 / False 关闭），
+                                     开启时会自动先开启消息免打扰
 
         Raises:
             RuntimeError: 当前非群聊或操作失败时抛出
@@ -5747,7 +5822,7 @@ class Chat:
         # 全部为 None 则不操作
         if all(v is None for v in (name, announcement, remark, my_nickname,
                                    mute, pin, save_addressbook,
-                                   display_member_nickname)):
+                                   display_member_nickname, fold)):
             return
 
         self._ensure_room_chat()
@@ -5903,7 +5978,7 @@ class Chat:
             # ---- 第二组：开关（滚动到底部，每个开关独立截图 OCR） ----
             has_switches = any(v is not None for v in
                               (mute, pin, save_addressbook,
-                               display_member_nickname))
+                               display_member_nickname, fold))
 
             if has_switches:
                 self._scroll_room_info_to_bottom()
@@ -5912,9 +5987,21 @@ class Chat:
                 if not hwnd:
                     raise RuntimeError("无法获取微信窗口句柄")
 
+                # fold=True 需要先开启消息免打扰
+                if fold is True and mute is not True:
+                    png_bytes = capture_window2(hwnd)
+                    ocr_data = get_image_text(png_bytes)
+                    img = Image.open(io.BytesIO(png_bytes))
+                    self._toggle_ocr_switch(
+                        img, ocr_data, hwnd, "消息免打扰", True)
+                    # mute 已处理，跳过后续重复操作
+                    mute = None
+
                 # 每个开关独立截图+OCR，因为点击后界面状态会变化
+                # 折叠该聊天紧跟在消息免打扰之后操作
                 for switch_name, switch_val in [
                     ("消息免打扰", mute),
+                    ("折叠该聊天", fold),
                     ("置顶聊天", pin),
                     ("保存到通讯录", save_addressbook),
                     ("显示群成员昵称", display_member_nickname),
@@ -8564,7 +8651,8 @@ class Weixin(WeixinWindow):
                       announcement: str = None, remark: str = None,
                       my_nickname: str = None, mute: bool = None,
                       pin: bool = None, save_addressbook: bool = None,
-                      display_member_nickname: bool = None):
+                      display_member_nickname: bool = None,
+                      fold: bool = None):
         """一次性设置指定群聊的多项信息，委托给 Chat.set_room_info"""
         chat = self.open_session_by_search(nickname)
         chat.set_room_info(
@@ -8572,7 +8660,18 @@ class Weixin(WeixinWindow):
             my_nickname=my_nickname, mute=mute, pin=pin,
             save_addressbook=save_addressbook,
             display_member_nickname=display_member_nickname,
+            fold=fold,
         )
+
+    def fold_room_chat(self, nickname: str):
+        """折叠指定群聊会话，委托给 Chat.fold_room_chat"""
+        chat = self.open_session_by_search(nickname)
+        chat.fold_room_chat()
+
+    def unfold_room_chat(self, nickname: str):
+        """取消折叠指定群聊会话，委托给 Chat.unfold_room_chat"""
+        chat = self.open_session_by_search(nickname)
+        chat.unfold_room_chat()
 
     def pin_chat(self, nickname: str):
         """置顶指定会话，委托给 Chat.pin_chat"""
@@ -8880,7 +8979,8 @@ if __name__ == "__main__":
         remark="群聊备注",
         my_nickname="milo2 2号",
         pin=True,
-        mute=True,
+        mute=False,
+        fold=True,
         save_addressbook=True,
         display_member_nickname=True
     )
