@@ -6079,13 +6079,27 @@ class Chat:
         finally:
             self._close_chat_info_panel()
 
-    def pin_chat(self):
-        """置顶当前会话"""
+    def pin_contact_chat(self):
+        """置顶当前私聊会话（通过 UI Automation 开关）"""
         self._set_chat_info_switch("置顶聊天", True)
 
-    def unpin_chat(self):
-        """取消置顶当前会话"""
+    def unpin_contact_chat(self):
+        """取消置顶当前私聊会话（通过 UI Automation 开关）"""
         self._set_chat_info_switch("置顶聊天", False)
+
+    def pin_chat(self):
+        """置顶当前会话（自动区分私聊/群聊）"""
+        if self.chat_type == "群聊":
+            self.pin_room_chat()
+        else:
+            self.pin_contact_chat()
+
+    def unpin_chat(self):
+        """取消置顶当前会话（自动区分私聊/群聊）"""
+        if self.chat_type == "群聊":
+            self.unpin_room_chat()
+        else:
+            self.unpin_contact_chat()
 
     @property
     def is_muted(self) -> bool:
@@ -6100,17 +6114,31 @@ class Chat:
         finally:
             self._close_chat_info_panel()
 
-    def mute(self):
-        """开启消息免打扰"""
+    def mute_contact_chat(self):
+        """开启当前私聊的消息免打扰（通过 UI Automation 开关）"""
         self._set_chat_info_switch("消息免打扰", True)
 
-    def unmute(self):
-        """关闭消息免打扰"""
+    def unmute_contact_chat(self):
+        """关闭当前私聊的消息免打扰（通过 UI Automation 开关）"""
         self._set_chat_info_switch("消息免打扰", False)
 
-    def fold_chat(self):
+    def mute(self):
+        """开启消息免打扰（自动区分私聊/群聊）"""
+        if self.chat_type == "群聊":
+            self.mute_room_chat()
+        else:
+            self.mute_contact_chat()
+
+    def unmute(self):
+        """关闭消息免打扰（自动区分私聊/群聊）"""
+        if self.chat_type == "群聊":
+            self.unmute_room_chat()
+        else:
+            self.unmute_contact_chat()
+
+    def fold_contact_chat(self):
         """
-        折叠当前会话。
+        折叠当前私聊会话（通过 UI Automation 开关）。
 
         "折叠该聊天"是"消息免打扰"的子选项，
         只有在消息免打扰开启时才会出现。
@@ -6138,9 +6166,9 @@ class Chat:
         finally:
             self._close_chat_info_panel()
 
-    def unfold_chat(self):
+    def unfold_contact_chat(self):
         """
-        取消折叠当前会话。
+        取消折叠当前私聊会话（通过 UI Automation 开关）。
 
         "折叠该聊天"是"消息免打扰"的子选项，
         只有在消息免打扰开启时才会出现。
@@ -6165,6 +6193,20 @@ class Chat:
                     logger.debug(f"取消折叠聊天成功: {self.current_name}")
         finally:
             self._close_chat_info_panel()
+
+    def fold_chat(self):
+        """折叠当前会话（自动区分私聊/群聊）"""
+        if self.chat_type == "群聊":
+            self.fold_room_chat()
+        else:
+            self.fold_contact_chat()
+
+    def unfold_chat(self):
+        """取消折叠当前会话（自动区分私聊/群聊）"""
+        if self.chat_type == "群聊":
+            self.unfold_room_chat()
+        else:
+            self.unfold_contact_chat()
 
     # ---- 群聊信息面板操作（仅群聊可用） ----
 
@@ -8972,15 +9014,18 @@ if __name__ == "__main__":
     # wx.set_room_announcement("AI测试", "这是群公告2")
     # wx.clear_room_chat_history("AI测试")
 
-    wx.set_room_info(
-        nickname="AI测试",
-        name="AI测试群",
-        announcement="这是群公告",
-        remark="群聊备注",
-        my_nickname="milo2 2号",
-        pin=True,
-        mute=False,
-        fold=True,
-        save_addressbook=True,
-        display_member_nickname=True
-    )
+    # wx.set_room_info(
+    #     nickname="AI测试",
+    #     name="AI测试群",
+    #     announcement="这是群公告",
+    #     remark="群聊备注",
+    #     my_nickname="milo2 2号",
+    #     pin=True,
+    #     mute=False,
+    #     fold=True,
+    #     save_addressbook=True,
+    #     display_member_nickname=True
+    # )
+
+    wx.pin_chat("AI测试")
+    wx.pin_chat("写诗喂狗")
