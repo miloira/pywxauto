@@ -5317,7 +5317,7 @@ class Chat:
 
     def clear_chat_history(self):
         """
-        清空当前会话的聊天记录。
+        清空当前会话的聊天记录（私聊）。
 
         流程：
         1. 点击标题栏右上角"聊天信息"按钮，展开聊天信息面板
@@ -5357,6 +5357,346 @@ class Chat:
         finally:
             # 4. 收回聊天信息面板
             self._close_chat_info_panel()
+
+    def clear_room_chat_history(self):
+        """
+        清空当前群聊会话的聊天记录。
+
+        群聊的聊天信息面板中，"清空聊天记录"按钮位于
+        mmui::ChatRoomMemberInfoView 区域的底部，需要先滚动到底部
+        才能看到该按钮。由于该按钮不暴露为独立的 UI Automation 控件，
+        需要通过 OCR 图像识别定位并点击。
+
+        流程：
+        1. 点击标题栏右上角"聊天信息"按钮，展开聊天信息面板
+        2. 定位 mmui::ChatRoomMemberInfoView 区域
+        3. 将该区域滚动到底部
+        4. 使用 OCR 图像识别定位"清空聊天记录"文本并点击
+        5. 在确认弹窗中点击"清空"按钮
+        6. 收回聊天信息面板
+
+        Raises:
+            RuntimeError: 当前非群聊、控件未找到或操作失败时抛出
+        """
+        self._ensure_room_chat()
+        if self._wx:
+            self._wx.activate()
+
+        # 1. 展开聊天信息面板
+        self._click_chat_info_button()
+        time.sleep(0.5)
+
+        try:
+            # 2. 定位 mmui::ChatRoomMemberInfoView 区域
+            member_info_view = self._win.GroupControl(
+                ClassName="mmui::ChatRoomMemberInfoView",
+            )
+            if not member_info_view.Exists(maxSearchSeconds=3):
+                raise RuntimeError("未找到群聊信息面板 (mmui::ChatRoomMemberInfoView)")
+
+            # 3. 将该区域滚动到底部
+            rect = member_info_view.BoundingRectangle
+            cx = rect.left + rect.width() // 2
+            cy = rect.top + rect.height() // 2
+            # 多次滚动确保到达底部
+            for _ in range(10):
+                win32api.SetCursorPos((cx, cy))
+                time.sleep(0.1)
+                win32api.mouse_event(
+                    win32con.MOUSEEVENTF_WHEEL, cx, cy, -120 * 5, 0,
+                )
+                time.sleep(0.3)
+
+            time.sleep(0.5)
+
+            # 4. 使用 OCR 图像识别定位"清空聊天记录"
+            hwnd = self._win.NativeWindowHandle
+            if not hwnd:
+                raise RuntimeError("无法获取微信窗口句柄")
+
+            png_bytes = capture_window2(hwnd)
+            ocr_data = get_image_text(png_bytes)
+
+            if "清空聊天记录" not in ocr_data:
+                raise RuntimeError(
+                    "OCR 未识别到'清空聊天记录'文本，"
+                    "请确认聊天信息面板已展开且已滚动到底部"
+                )
+
+            info = ocr_data["清空聊天记录"]
+            win_left, win_top, _, _ = win32gui.GetWindowRect(hwnd)
+            click_x = int(win_left + info["center"][0])
+            click_y = int(win_top + info["center"][1])
+            auto.Click(click_x, click_y)
+            time.sleep(0.5)
+
+            # 5. 确认弹窗中点击"清空"
+            confirm_btn = self._win.ButtonControl(
+                Name="清空",
+                ClassName="mmui::XOutlineButton",
+            )
+            if not confirm_btn.Exists(maxSearchSeconds=3):
+                raise RuntimeError("未找到'清空'确认按钮")
+            confirm_btn.Click(ratioX=_rand_ratio(), ratioY=_rand_ratio())
+            time.sleep(0.3)
+
+            logger.debug(f"清空群聊聊天记录成功: {self.current_name}")
+
+        finally:
+            # 6. 收回聊天信息面板
+            self._close_chat_info_panel()
+
+    def exit_room(self):
+        """
+        退出当前群聊。
+
+        群聊的聊天信息面板中，"退出群聊"按钮位于
+        mmui::ChatRoomMemberInfoView 区域的底部，需要先滚动到底部
+        才能看到该按钮。由于该按钮不暴露为独立的 UI Automation 控件，
+        需要通过 OCR 图像识别定位并点击。
+
+        流程：
+        1. 点击标题栏右上角"聊天信息"按钮，展开聊天信息面板
+        2. 定位 mmui::ChatRoomMemberInfoView 区域
+        3. 将该区域滚动到底部
+        4. 使用 OCR 图像识别定位"退出群聊"文本并点击
+        5. 在确认弹窗中点击"确定"按钮
+
+        Raises:
+            RuntimeError: 当前非群聊、控件未找到或操作失败时抛出
+        """
+        self._ensure_room_chat()
+        if self._wx:
+            self._wx.activate()
+
+        # 1. 展开聊天信息面板
+        self._click_chat_info_button()
+        time.sleep(0.5)
+
+        try:
+            # 2. 定位 mmui::ChatRoomMemberInfoView 区域
+            member_info_view = self._win.GroupControl(
+                ClassName="mmui::ChatRoomMemberInfoView",
+            )
+            if not member_info_view.Exists(maxSearchSeconds=3):
+                raise RuntimeError("未找到群聊信息面板 (mmui::ChatRoomMemberInfoView)")
+
+            # 3. 将该区域滚动到底部
+            rect = member_info_view.BoundingRectangle
+            cx = rect.left + rect.width() // 2
+            cy = rect.top + rect.height() // 2
+            for _ in range(10):
+                win32api.SetCursorPos((cx, cy))
+                time.sleep(0.1)
+                win32api.mouse_event(
+                    win32con.MOUSEEVENTF_WHEEL, cx, cy, -120 * 5, 0,
+                )
+                time.sleep(0.3)
+
+            # 4. 使用 OCR 图像识别定位"退出群聊"
+            hwnd = self._win.NativeWindowHandle
+            if not hwnd:
+                raise RuntimeError("无法获取微信窗口句柄")
+
+            png_bytes = capture_window(hwnd)
+            ocr_data = get_image_text(png_bytes)
+
+            if "退出群聊" not in ocr_data:
+                raise RuntimeError(
+                    "OCR 未识别到'退出群聊'文本，"
+                    "请确认聊天信息面板已展开且已滚动到底部"
+                )
+
+            info = ocr_data["退出群聊"]
+            win_left, win_top, _, _ = win32gui.GetWindowRect(hwnd)
+            click_x = int(win_left + info["center"][0])
+            click_y = int(win_top + info["center"][1])
+            auto.Click(click_x, click_y)
+
+            # 5. 确认弹窗中点击"确定"
+            confirm_btn = self._win.ButtonControl(
+                Name="确定",
+                ClassName="mmui::XOutlineButton",
+            )
+            if not confirm_btn.Exists(maxSearchSeconds=3):
+                raise RuntimeError("未找到'确定'确认按钮")
+            confirm_btn.Click(ratioX=_rand_ratio(), ratioY=_rand_ratio())
+            logger.debug(f"退出群聊成功: {self.current_name}")
+
+        finally:
+            # 退出群聊后面板可能已自动关闭，尝试收回
+            self._close_chat_info_panel()
+
+    def _scroll_room_info_to_bottom(self):
+        """
+        在已展开的聊天信息面板中，定位 mmui::ChatRoomMemberInfoView
+        区域并滚动到底部。
+
+        Returns:
+            member_info_view 控件
+
+        Raises:
+            RuntimeError: 未找到控件时抛出
+        """
+        member_info_view = self._win.GroupControl(
+            ClassName="mmui::ChatRoomMemberInfoView",
+        )
+        if not member_info_view.Exists(maxSearchSeconds=3):
+            raise RuntimeError("未找到群聊信息面板 (mmui::ChatRoomMemberInfoView)")
+
+        rect = member_info_view.BoundingRectangle
+        cx = rect.left + rect.width() // 2
+        cy = rect.top + rect.height() // 2
+        for _ in range(10):
+            win32api.SetCursorPos((cx, cy))
+            time.sleep(0.1)
+            win32api.mouse_event(
+                win32con.MOUSEEVENTF_WHEEL, cx, cy, -120 * 5, 0,
+            )
+            time.sleep(0.3)
+        time.sleep(0.5)
+        return member_info_view
+
+    def _ocr_window(self) -> dict:
+        """
+        对微信主窗口截图并执行 OCR，返回识别结果字典。
+
+        Returns:
+            {text: {center, left_top, right_bottom, width, height}} 字典
+
+        Raises:
+            RuntimeError: 无法获取窗口句柄时抛出
+        """
+        hwnd = self._win.NativeWindowHandle
+        if not hwnd:
+            raise RuntimeError("无法获取微信窗口句柄")
+        png_bytes = capture_window2(hwnd)
+        return get_image_text(png_bytes), hwnd
+
+    def _ocr_click(self, text: str):
+        """
+        对微信主窗口截图 OCR 识别，点击指定文本的中心位置。
+
+        Args:
+            text: 要点击的 OCR 文本
+
+        Raises:
+            RuntimeError: OCR 未识别到指定文本时抛出
+        """
+        ocr_data, hwnd = self._ocr_window()
+        if text not in ocr_data:
+            raise RuntimeError(f"OCR 未识别到'{text}'文本")
+        info = ocr_data[text]
+        win_left, win_top, _, _ = win32gui.GetWindowRect(hwnd)
+        click_x = int(win_left + info["center"][0])
+        click_y = int(win_top + info["center"][1])
+        auto.Click(click_x, click_y)
+
+    def _set_room_ocr_switch(self, switch_name: str, enable: bool):
+        """
+        通过 OCR 识别设置群聊信息面板中的开关。
+
+        群聊信息面板中的开关（消息免打扰、置顶聊天、保存到通讯录、
+        显示群成员昵称）不暴露为独立的 UI Automation 控件，
+        需要通过 OCR 定位开关文本，再根据文本右侧的开关位置点击。
+
+        策略：
+        1. 截图 OCR 识别开关文本位置
+        2. 开关控件位于文本右侧，点击文本右侧固定偏移处
+        3. 再次截图 OCR，通过检测开关区域颜色判断当前状态
+           （绿色=开启，灰色=关闭），如果状态不符则再点击一次
+
+        Args:
+            switch_name: 开关名称（如 "消息免打扰"、"置顶聊天"）
+            enable: True 开启，False 关闭
+        """
+        self._ensure_room_chat()
+        if self._wx:
+            self._wx.activate()
+
+        self._click_chat_info_button()
+        time.sleep(0.5)
+
+        try:
+            self._scroll_room_info_to_bottom()
+
+            hwnd = self._win.NativeWindowHandle
+            if not hwnd:
+                raise RuntimeError("无法获取微信窗口句柄")
+
+            png_bytes = capture_window2(hwnd)
+            ocr_data = get_image_text(png_bytes)
+
+            if switch_name not in ocr_data:
+                raise RuntimeError(
+                    f"OCR 未识别到'{switch_name}'文本，"
+                    "请确认聊天信息面板已展开且已滚动到底部"
+                )
+
+            info = ocr_data[switch_name]
+            win_left, win_top, _, _ = win32gui.GetWindowRect(hwnd)
+            win_right = win32gui.GetWindowRect(hwnd)[2]
+
+            # 开关位于文本同一行的最右侧区域
+            # 点击开关中心：X 取窗口右侧偏移，Y 取文本中心
+            switch_x = int(win_right - 30)
+            switch_y = int(win_top + info["center"][1])
+
+            # 通过截图像素判断当前开关状态
+            # 从文本中心 Y 坐标出发，向右侧扫描像素，
+            # 发现绿色像素说明开关处于开启状态
+            img = Image.open(io.BytesIO(png_bytes))
+            sw_img_y = int(info["center"][1])
+            # 从文本右边界开始向右扫描到图片边缘
+            scan_start_x = int(info["right_bottom"][0]) + 5
+            is_on = False
+            for x in range(scan_start_x, img.width):
+                r, g, b = img.getpixel((x, sw_img_y))[:3]
+                if g > 150 and g - r > 40 and g - b > 40:
+                    is_on = True
+                    break
+
+            if is_on != enable:
+                auto.Click(switch_x, switch_y)
+                time.sleep(0.5)
+
+            action = "开启" if enable else "关闭"
+            logger.debug(f"{action}{switch_name}成功: {self.current_name}")
+
+        finally:
+            self._close_chat_info_panel()
+
+    def pin_room_chat(self):
+        """置顶当前群聊会话（通过 OCR 识别开关）"""
+        self._set_room_ocr_switch("置顶聊天", True)
+
+    def unpin_room_chat(self):
+        """取消置顶当前群聊会话（通过 OCR 识别开关）"""
+        self._set_room_ocr_switch("置顶聊天", False)
+
+    def mute_room_chat(self):
+        """开启当前群聊的消息免打扰（通过 OCR 识别开关）"""
+        self._set_room_ocr_switch("消息免打扰", True)
+
+    def unmute_room_chat(self):
+        """关闭当前群聊的消息免打扰（通过 OCR 识别开关）"""
+        self._set_room_ocr_switch("消息免打扰", False)
+
+    def add_room_addressbook(self):
+        """将当前群聊保存到通讯录（通过 OCR 识别开关）"""
+        self._set_room_ocr_switch("保存到通讯录", True)
+
+    def remove_room_addressbook(self):
+        """将当前群聊从通讯录移除（通过 OCR 识别开关）"""
+        self._set_room_ocr_switch("保存到通讯录", False)
+
+    def display_room_member_nickname(self):
+        """显示群成员昵称（通过 OCR 识别开关）"""
+        self._set_room_ocr_switch("显示群成员昵称", True)
+
+    def hidden_room_member_nickname(self):
+        """隐藏群成员昵称（通过 OCR 识别开关）"""
+        self._set_room_ocr_switch("显示群成员昵称", False)
 
     def _get_chat_info_switch(self, name: str) -> tuple:
         """
@@ -7936,6 +8276,56 @@ class Weixin(WeixinWindow):
         chat = self.open_session_by_search(nickname)
         chat.clear_chat_history()
 
+    def clear_room_chat_history(self, nickname: str):
+        """清空指定群聊会话的聊天记录，委托给 Chat.clear_room_chat_history"""
+        chat = self.open_session_by_search(nickname)
+        chat.clear_room_chat_history()
+
+    def exit_room(self, nickname: str):
+        """退出指定群聊，委托给 Chat.exit_room"""
+        chat = self.open_session_by_search(nickname)
+        chat.exit_room()
+
+    def pin_room_chat(self, nickname: str):
+        """置顶指定群聊会话，委托给 Chat.pin_room_chat"""
+        chat = self.open_session_by_search(nickname)
+        chat.pin_room_chat()
+
+    def unpin_room_chat(self, nickname: str):
+        """取消置顶指定群聊会话，委托给 Chat.unpin_room_chat"""
+        chat = self.open_session_by_search(nickname)
+        chat.unpin_room_chat()
+
+    def mute_room_chat(self, nickname: str):
+        """开启指定群聊的消息免打扰，委托给 Chat.mute_room_chat"""
+        chat = self.open_session_by_search(nickname)
+        chat.mute_room_chat()
+
+    def unmute_room_chat(self, nickname: str):
+        """关闭指定群聊的消息免打扰，委托给 Chat.unmute_room_chat"""
+        chat = self.open_session_by_search(nickname)
+        chat.unmute_room_chat()
+
+    def add_room_addressbook(self, nickname: str):
+        """将指定群聊保存到通讯录，委托给 Chat.add_room_addressbook"""
+        chat = self.open_session_by_search(nickname)
+        chat.add_room_addressbook()
+
+    def remove_room_addressbook(self, nickname: str):
+        """将指定群聊从通讯录移除，委托给 Chat.remove_room_addressbook"""
+        chat = self.open_session_by_search(nickname)
+        chat.remove_room_addressbook()
+
+    def display_room_member_nickname(self, nickname: str):
+        """显示指定群聊的群成员昵称，委托给 Chat.display_room_member_nickname"""
+        chat = self.open_session_by_search(nickname)
+        chat.display_room_member_nickname()
+
+    def hidden_room_member_nickname(self, nickname: str):
+        """隐藏指定群聊的群成员昵称，委托给 Chat.hidden_room_member_nickname"""
+        chat = self.open_session_by_search(nickname)
+        chat.hidden_room_member_nickname()
+
     def pin_chat(self, nickname: str):
         """置顶指定会话，委托给 Chat.pin_chat"""
         chat = self.open_session_by_search(nickname)
@@ -8232,4 +8622,10 @@ if __name__ == "__main__":
     # wx.set_room_name("AI测试2", "AI测试")
     # wx.set_room_remark("AI测试", "agi")
     # wx.set_room_nickname("AI测试", "milo2 2号")
-    wx.set_room_announcement("AI测试", "这是群公告2")
+    # wx.set_room_announcement("AI测试", "这是群公告2")
+    # wx.clear_room_chat_history("AI测试")
+
+    wx.pin_room_chat("AI测试")
+    wx.mute_room_chat("AI测试")
+    wx.add_room_addressbook("AI测试")
+    wx.display_room_member_nickname("AI测试")
