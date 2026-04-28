@@ -8860,7 +8860,7 @@ class Weixin(WeixinWindow):
     def set_contact_label(self, nickname: str, labels: list[str]):
         """为联系人设置标签，委托给 Chat.set_contact_info"""
         chat = self.open_session_by_search(nickname)
-        chat.set_contact_info(labels=phones)
+        chat.set_contact_info(labels=labels)
 
     def set_contact_phone(self, nickname: str, phones: list[str]):
         """为联系人设置电话号码，委托给 Chat.set_contact_info"""
