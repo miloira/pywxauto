@@ -6107,6 +6107,54 @@ class Chat:
                 return True
         return False
 
+    @staticmethod
+    def _find_switch_center_x(img: Image.Image, info: dict) -> int:
+        """
+        通过像素扫描定位开关控件的水平中心坐标（图片坐标系）。
+
+        从文本右边界向右扫描，查找开关的彩色区域（绿色=开启，灰色=关闭），
+        返回该区域的水平中心 X 坐标。
+
+        开关像素特征：
+        - 开启状态（绿色）: G > 150, G-R > 40, G-B > 40
+        - 关闭状态（灰色）: R,G,B 接近且在 180~230 范围，排除纯白背景
+
+        Returns:
+            开关中心的 X 坐标（图片坐标系），未找到时回退到文本右侧 60px
+        """
+        sw_img_y = int(info["center"][1])
+        scan_start_x = int(info["right_bottom"][0]) + 5
+
+        switch_left = -1
+        switch_right = -1
+
+        gap = 0  # 连续非开关像素计数，允许小间隙（圆形滑块中间有白色区域）
+        max_gap = 15  # 开关滑块直径约 20px，允许 15px 间隙
+
+        for x in range(scan_start_x, img.width):
+            r, g, b = img.getpixel((x, sw_img_y))[:3]
+            # 绿色（开启）
+            is_green = g > 150 and g - r > 40 and g - b > 40
+            # 灰色（关闭）: 三通道接近，亮度适中，排除纯白背景
+            is_gray = (180 < r < 230 and 180 < g < 230 and 180 < b < 230
+                       and abs(r - g) < 15 and abs(r - b) < 15)
+            if is_green or is_gray:
+                if switch_left < 0:
+                    switch_left = x
+                switch_right = x
+                gap = 0
+            else:
+                if switch_left >= 0:
+                    gap += 1
+                    if gap > max_gap:
+                        break
+
+        if switch_left >= 0 and switch_right > switch_left:
+            return (switch_left + switch_right) // 2
+
+        # 回退：文本右边界 + 60px（大致在开关中心附近）
+        return int(info["right_bottom"][0]) + 60
+
     def _toggle_ocr_switch(self, img, ocr_data, hwnd,
                            switch_name: str, enable: bool):
         """
@@ -6114,6 +6162,9 @@ class Chat:
 
         如果 switch_name 不在 ocr_data 中则跳过（不报错）。
         检测当前状态，状态不符时点击切换。
+
+        通过像素扫描定位开关控件的实际位置（而非固定偏移），
+        确保在不同窗口大小和面板布局下都能准确点击。
 
         Args:
             img:         窗口截图 PIL Image
@@ -6130,8 +6181,9 @@ class Chat:
         is_on = self._detect_ocr_switch_state(img, info)
 
         if is_on != enable:
-            win_left, win_top, win_right, _ = win32gui.GetWindowRect(hwnd)
-            switch_x = int(win_right - 30)
+            win_left, win_top, _, _ = win32gui.GetWindowRect(hwnd)
+            switch_img_x = self._find_switch_center_x(img, info)
+            switch_x = int(win_left + switch_img_x)
             switch_y = int(win_top + info["center"][1])
             auto.Click(switch_x, switch_y)
             time.sleep(0.5)
@@ -9371,18 +9423,18 @@ if __name__ == "__main__":
     # wx.set_room_announcement("AI测试", "这是群公告2")
     # wx.clear_room_chat_history("AI测试")
 
-    # wx.set_room_info(
-    #     nickname="AI测试",
-    #     name="AI测试群",
-    #     announcement="这是群公告",
-    #     remark="群聊备注",
-    #     my_nickname="milo2 2号",
-    #     pin=True,
-    #     mute=False,
-    #     fold=True,
-    #     save_address_book=True,
-    #     display_member_nickname=True
-    # )
+    wx.set_room_info(
+        nickname="AI测试",
+        name="AI测试群",
+        announcement="这是群公告",
+        remark="群聊备注",
+        my_nickname="milo2 2号",
+        pin=False,
+        mute=False,
+        fold=False,
+        save_address_book=False,
+        display_member_nickname=False
+    )
 
-    moments = wx.moment.get(5)
-    print(json.dumps(moments, ensure_ascii=False))
+    # moments = wx.moment.get(5)
+    # print(json.dumps(moments, ensure_ascii=False))
