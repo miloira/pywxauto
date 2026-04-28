@@ -5527,6 +5527,331 @@ class Chat:
             # 退出群聊后面板可能已自动关闭，尝试收回
             self._close_chat_info_panel()
 
+    def add_room_members(self, members: list[str]):
+        """
+        添加群成员。
+
+        仅群聊可用。
+
+        流程：
+        1. 点击"聊天信息"按钮，展开聊天信息面板
+        2. 使用 OCR 识别"添加"文本，点击其下方一个文本高度处（"+"图标位置）
+        3. 在弹出的 SessionPickerWindow 中逐个搜索并勾选成员
+        4. 点击"完成"按钮
+
+        Args:
+            members: 要添加的成员昵称列表
+
+        Raises:
+            ValueError: members 为空时抛出
+            RuntimeError: 操作失败时抛出
+        """
+        if not members:
+            raise ValueError("members 不能为空")
+
+        self._ensure_room_chat()
+        if self._wx:
+            self._wx.activate()
+
+        self._click_chat_info_button()
+        time.sleep(0.5)
+
+        try:
+            # 使用 OCR 识别"添加"文本并点击其下方（"+"图标位置）
+            hwnd = self._win.NativeWindowHandle
+            if not hwnd:
+                raise RuntimeError("无法获取微信窗口句柄")
+
+            png_bytes = capture_window2(hwnd)
+            ocr_data = get_image_text(png_bytes)
+
+            if "添加" not in ocr_data:
+                raise RuntimeError("OCR 未识别到'添加'文本")
+
+            info = ocr_data["添加"]
+            win_left, win_top, _, _ = win32gui.GetWindowRect(hwnd)
+            # 点击"添加"文本中心 X，Y 偏移一个文本高度（即"+"图标所在位置）
+            click_x = int(win_left + info["center"][0])
+            click_y = int(win_top + info["center"][1] - info["height"])
+            auto.Click(click_x, click_y)
+            time.sleep(0.5)
+
+            # 等待 SessionPickerWindow 出现
+            picker_win = self._win.WindowControl(
+                ClassName="mmui::SessionPickerWindow",
+                searchDepth=1,
+            )
+            if not picker_win.Exists(maxSearchSeconds=3):
+                raise RuntimeError("添加群成员窗口未打开")
+
+            # 逐个搜索并勾选成员
+            for nickname in members:
+                fresh_picker = self._win.WindowControl(
+                    ClassName="mmui::SessionPickerWindow",
+                    searchDepth=1,
+                )
+                if not fresh_picker.Exists(maxSearchSeconds=3):
+                    raise RuntimeError("添加群成员窗口已关闭")
+                fresh_picker.SetActive()
+                fresh_picker.SetFocus()
+                time.sleep(0.3)
+
+                search_field = fresh_picker.GroupControl(
+                    ClassName="mmui::XSearchField",
+                    searchDepth=3,
+                )
+                if not search_field.Exists(maxSearchSeconds=2):
+                    raise RuntimeError("未找到搜索区域")
+                search_edit = search_field.EditControl(
+                    ClassName="mmui::XValidatorTextEdit", Name="搜索",
+                    searchDepth=1,
+                )
+                if not search_edit.Exists(maxSearchSeconds=2):
+                    raise RuntimeError("未找到搜索框")
+
+                search_edit.Click(ratioX=_rand_ratio(), ratioY=_rand_ratio())
+                time.sleep(0.3)
+                search_edit.SendKeys("{Ctrl}a{Del}")
+                time.sleep(0.3)
+                search_edit.SendKeys(nickname, interval=0.05)
+                time.sleep(1.5)
+
+                # 添加群成员窗口搜索后使用 SearchContactView
+                search_view = fresh_picker.GroupControl(
+                    ClassName="mmui::SearchContactView",
+                    searchDepth=3,
+                )
+                if not search_view.Exists(maxSearchSeconds=3):
+                    raise RuntimeError(f"搜索联系人 '{nickname}' 后未出现搜索视图")
+
+                result_list = search_view.ListControl(
+                    ClassName="mmui::XTableView",
+                    AutomationId="sp_search_result_list",
+                    searchDepth=1,
+                )
+                if not result_list.Exists(maxSearchSeconds=5):
+                    raise RuntimeError(f"搜索联系人 '{nickname}' 后未出现结果列表")
+
+                contact_row = result_list.CheckBoxControl(
+                    ClassName="mmui::SearchContactCellView",
+                    searchDepth=1,
+                )
+                if not contact_row.Exists(maxSearchSeconds=3):
+                    raise RuntimeError(f"未找到联系人: {nickname}")
+
+                contact_row.Click(ratioX=_rand_ratio(), ratioY=_rand_ratio())
+                time.sleep(0.5)
+
+            # 点击完成按钮
+            final_picker = self._win.WindowControl(
+                ClassName="mmui::SessionPickerWindow",
+                searchDepth=1,
+            )
+            if not final_picker.Exists(maxSearchSeconds=3):
+                raise RuntimeError("添加群成员窗口已关闭")
+            detail_view = final_picker.GroupControl(
+                ClassName="mmui::SPDetailView",
+                searchDepth=3,
+            )
+            if not detail_view.Exists(maxSearchSeconds=2):
+                raise RuntimeError("未找到详情面板")
+            confirm_btn = detail_view.ButtonControl(
+                ClassName="mmui::XOutlineButton",
+                AutomationId="confirm_btn",
+                Name="添加",
+                searchDepth=2,
+            )
+            if not confirm_btn.Exists(maxSearchSeconds=3):
+                raise RuntimeError("未找到'添加'按钮")
+            confirm_btn.Click(ratioX=_rand_ratio(), ratioY=_rand_ratio())
+            time.sleep(0.5)
+
+            # 等待操作窗口消失后再收起聊天信息面板
+            for _ in range(30):
+                check_picker = self._win.WindowControl(
+                    ClassName="mmui::SessionPickerWindow",
+                    searchDepth=1,
+                )
+                if not check_picker.Exists(maxSearchSeconds=1):
+                    break
+                time.sleep(1)
+
+            logger.debug(f"添加群成员成功: {self.current_name} -> {members}")
+
+        finally:
+            self._close_chat_info_panel()
+
+    def remove_room_members(self, members: list[str]):
+        """
+        移除群成员。
+
+        仅群聊可用。
+
+        移除群成员窗口与添加群成员窗口的控件结构不同：
+        - 搜索结果视图: mmui::SearchGroupMemberView（非 SearchContactNewChatView）
+        - 搜索结果列表: mmui::XTableView, AutomationId="sp_search_list"
+        - 搜索结果项: mmui::XTableCell (ListItemControl)
+        - 确认按钮: Name="移出"（非"完成"）
+
+        流程：
+        1. 点击"聊天信息"按钮，展开聊天信息面板
+        2. 使用 OCR 识别"移出"文本，点击其下方一个文本高度处（"-"图标位置）
+        3. 在弹出的 SessionPickerWindow 中逐个搜索并勾选要移除的成员
+        4. 点击"移出"按钮
+        5. 确认弹窗中点击"确定"
+
+        Args:
+            members: 要移除的成员昵称列表
+
+        Raises:
+            ValueError: members 为空时抛出
+            RuntimeError: 操作失败时抛出
+        """
+        if not members:
+            raise ValueError("members 不能为空")
+
+        self._ensure_room_chat()
+        if self._wx:
+            self._wx.activate()
+
+        self._click_chat_info_button()
+        time.sleep(0.5)
+
+        try:
+            # 使用 OCR 识别"移出"文本并点击其下方（"-"图标位置）
+            hwnd = self._win.NativeWindowHandle
+            if not hwnd:
+                raise RuntimeError("无法获取微信窗口句柄")
+
+            png_bytes = capture_window2(hwnd)
+            ocr_data = get_image_text(png_bytes)
+
+            if "移出" not in ocr_data:
+                raise RuntimeError("OCR 未识别到'移出'文本")
+
+            info = ocr_data["移出"]
+            win_left, win_top, _, _ = win32gui.GetWindowRect(hwnd)
+            click_x = int(win_left + info["center"][0])
+            click_y = int(win_top + info["center"][1] - info["height"])
+            auto.Click(click_x, click_y)
+            time.sleep(0.5)
+
+            # 等待 SessionPickerWindow 出现
+            picker_win = self._win.WindowControl(
+                ClassName="mmui::SessionPickerWindow",
+                searchDepth=1,
+            )
+            if not picker_win.Exists(maxSearchSeconds=3):
+                raise RuntimeError("移除群成员窗口未打开")
+
+            # 逐个搜索并勾选要移除的成员
+            for nickname in members:
+                fresh_picker = self._win.WindowControl(
+                    ClassName="mmui::SessionPickerWindow",
+                    searchDepth=1,
+                )
+                if not fresh_picker.Exists(maxSearchSeconds=3):
+                    raise RuntimeError("移除群成员窗口已关闭")
+                fresh_picker.SetActive()
+                fresh_picker.SetFocus()
+                time.sleep(0.3)
+
+                search_field = fresh_picker.GroupControl(
+                    ClassName="mmui::XSearchField",
+                    searchDepth=3,
+                )
+                if not search_field.Exists(maxSearchSeconds=2):
+                    raise RuntimeError("未找到搜索区域")
+                search_edit = search_field.EditControl(
+                    ClassName="mmui::XValidatorTextEdit", Name="搜索",
+                    searchDepth=1,
+                )
+                if not search_edit.Exists(maxSearchSeconds=2):
+                    raise RuntimeError("未找到搜索框")
+
+                search_edit.Click(ratioX=_rand_ratio(), ratioY=_rand_ratio())
+                time.sleep(0.3)
+                search_edit.SendKeys("{Ctrl}a{Del}")
+                time.sleep(0.3)
+                search_edit.SendKeys(nickname, interval=0.05)
+                time.sleep(1.5)
+
+                # 移除群成员窗口使用 SearchGroupMemberView 而非 SearchContactNewChatView
+                search_view = fresh_picker.GroupControl(
+                    ClassName="mmui::SearchGroupMemberView",
+                    searchDepth=3,
+                )
+                if not search_view.Exists(maxSearchSeconds=3):
+                    raise RuntimeError(f"搜索成员 '{nickname}' 后未出现搜索视图")
+
+                # 搜索结果列表 AutomationId 为 sp_search_list
+                result_list = search_view.ListControl(
+                    ClassName="mmui::XTableView",
+                    AutomationId="sp_search_list",
+                    searchDepth=1,
+                )
+                if not result_list.Exists(maxSearchSeconds=5):
+                    raise RuntimeError(f"搜索成员 '{nickname}' 后未出现结果列表")
+
+                # 搜索结果项为 mmui::XTableCell (ListItemControl)
+                contact_row = result_list.ListItemControl(
+                    ClassName="mmui::XTableCell",
+                    searchDepth=1,
+                )
+                if not contact_row.Exists(maxSearchSeconds=3):
+                    raise RuntimeError(f"未找到成员: {nickname}")
+
+                contact_row.Click(ratioX=_rand_ratio(), ratioY=_rand_ratio())
+                time.sleep(0.5)
+
+            # 点击"移出"按钮（非"完成"）
+            final_picker = self._win.WindowControl(
+                ClassName="mmui::SessionPickerWindow",
+                searchDepth=1,
+            )
+            if not final_picker.Exists(maxSearchSeconds=3):
+                raise RuntimeError("移除群成员窗口已关闭")
+            detail_view = final_picker.GroupControl(
+                ClassName="mmui::SPDetailView",
+                searchDepth=3,
+            )
+            if not detail_view.Exists(maxSearchSeconds=2):
+                raise RuntimeError("未找到详情面板")
+            confirm_btn = detail_view.ButtonControl(
+                ClassName="mmui::XOutlineButton",
+                AutomationId="confirm_btn",
+                Name="移出",
+                searchDepth=2,
+            )
+            if not confirm_btn.Exists(maxSearchSeconds=3):
+                raise RuntimeError("未找到'移出'按钮")
+            confirm_btn.Click(ratioX=_rand_ratio(), ratioY=_rand_ratio())
+            time.sleep(0.5)
+
+            # 确认弹窗中点击"确定"
+            ok_btn = self._win.ButtonControl(
+                Name="确定",
+                ClassName="mmui::XOutlineButton",
+            )
+            if ok_btn.Exists(maxSearchSeconds=3):
+                ok_btn.Click(ratioX=_rand_ratio(), ratioY=_rand_ratio())
+                time.sleep(0.3)
+
+            # 等待操作窗口消失后再收起聊天信息面板
+            for _ in range(30):
+                check_picker = self._win.WindowControl(
+                    ClassName="mmui::SessionPickerWindow",
+                    searchDepth=1,
+                )
+                if not check_picker.Exists(maxSearchSeconds=1):
+                    break
+                time.sleep(1)
+
+            logger.debug(f"移除群成员成功: {self.current_name} -> {members}")
+
+        finally:
+            self._close_chat_info_panel()
+
     def _scroll_room_info_to_bottom(self):
         """
         在已展开的聊天信息面板中，定位 mmui::ChatRoomMemberInfoView
@@ -8649,6 +8974,16 @@ class Weixin(WeixinWindow):
         chat = self.open_session_by_search(nickname)
         chat.exit_room()
 
+    def add_room_members(self, nickname: str, members: list[str]):
+        """添加指定群聊的成员，委托给 Chat.add_room_members"""
+        chat = self.open_session_by_search(nickname)
+        chat.add_room_members(members)
+
+    def remove_room_members(self, nickname: str, members: list[str]):
+        """移除指定群聊的成员，委托给 Chat.remove_room_members"""
+        chat = self.open_session_by_search(nickname)
+        chat.remove_room_members(members)
+
     def pin_room_chat(self, nickname: str):
         """置顶指定群聊会话，委托给 Chat.pin_room_chat"""
         chat = self.open_session_by_search(nickname)
@@ -9027,5 +9362,4 @@ if __name__ == "__main__":
     #     display_member_nickname=True
     # )
 
-    wx.pin_chat("AI测试")
-    wx.pin_chat("写诗喂狗")
+    wx.add_room_members("AI测试", ["七夏", "Joseph"])
