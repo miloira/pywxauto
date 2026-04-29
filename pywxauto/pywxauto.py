@@ -108,7 +108,6 @@ from PIL import Image
 import wcocr
 from rapidocr import RapidOCR
 
-rapid_ocr = RapidOCR()
 
 logging.basicConfig(level=logging.INFO, format="%(asctime)s [%(levelname)s] %(message)s")
 logger = logging.getLogger(__name__)
@@ -235,23 +234,6 @@ def find_window_by_name(name_pattern) -> list[int]:
 
     win32gui.EnumWindows(callback, None)
     return result
-
-
-def get_image_text(image_bytes):
-    result = rapid_ocr(image_bytes)
-    data = {}
-    if result.boxes is None or result.txts is None:
-        return data
-    for box, txt in zip(result.boxes, result.txts):
-        point = box.tolist()
-        data[txt] = {
-            "center": (point[0][0] + (point[2][0] - point[0][0]) / 2, point[0][1] + (point[2][1] - point[0][1]) / 2),
-            "left_top": (point[0][0], point[0][1]),
-            "right_bottom": (point[2][0], point[2][1]),
-            "width": point[2][0] - point[0][0],
-            "height": point[2][1] - point[0][1]
-        }
-    return data
 
 
 def select_all():
@@ -3868,6 +3850,16 @@ class Chat:
         self._wx = wx
         self._win = wx.window
 
+    def _get_image_text(self, image: bytes) -> dict:
+        """
+        识别图片中的文本内容。
+
+        委托给 Weixin.get_image_text，根据 ocr 参数自动选择引擎。
+        """
+        if self._wx is None:
+            raise RuntimeError("未关联 Weixin 实例，无法执行 OCR")
+        return self._wx.get_image_text(image)
+
     def __str__(self) -> str:
         try:
             name = self.current_name
@@ -5547,7 +5539,7 @@ class Chat:
                 raise RuntimeError("无法获取微信窗口句柄")
 
             png_bytes = capture_window2(hwnd)
-            ocr_data = get_image_text(png_bytes)
+            ocr_data = self._get_image_text(png_bytes)
 
             if "清空聊天记录" not in ocr_data:
                 raise RuntimeError(
@@ -5631,7 +5623,7 @@ class Chat:
                 raise RuntimeError("无法获取微信窗口句柄")
 
             png_bytes = capture_window(hwnd)
-            ocr_data = get_image_text(png_bytes)
+            ocr_data = self._get_image_text(png_bytes)
 
             if "退出群聊" not in ocr_data:
                 raise RuntimeError(
@@ -5686,7 +5678,6 @@ class Chat:
             self._wx.activate()
 
         self._click_chat_info_button()
-        time.sleep(0.5)
 
         try:
             # 使用 OCR 识别"添加"文本并点击其下方（"+"图标位置）
@@ -5695,7 +5686,7 @@ class Chat:
                 raise RuntimeError("无法获取微信窗口句柄")
 
             png_bytes = capture_window2(hwnd)
-            ocr_data = get_image_text(png_bytes)
+            ocr_data = self._get_image_text(png_bytes)
 
             if "添加" not in ocr_data:
                 raise RuntimeError("OCR 未识别到'添加'文本")
@@ -5704,7 +5695,7 @@ class Chat:
             win_left, win_top, _, _ = win32gui.GetWindowRect(hwnd)
             # 点击"添加"文本中心 X，Y 偏移一个文本高度（即"+"图标所在位置）
             click_x = int(win_left + info["center"][0])
-            click_y = int(win_top + info["center"][1] - info["height"])
+            click_y = int(win_top + info["center"][1] - 2 * info["height"])
             auto.Click(click_x, click_y)
             time.sleep(0.5)
 
@@ -5796,7 +5787,12 @@ class Chat:
             if not confirm_btn.Exists(maxSearchSeconds=3):
                 raise RuntimeError("未找到'添加'按钮")
             confirm_btn.Click(ratioX=_rand_ratio(), ratioY=_rand_ratio())
+
             time.sleep(0.5)
+
+            # 非好友会邀请失败
+            if self._win.TextControl(Name="未能邀请").Exists(0, 0):
+                self._win.ButtonControl(Name="我知道了").Click(ratioX=_rand_ratio(), ratioY=_rand_ratio())
 
             # 等待操作窗口消失后再收起聊天信息面板
             for _ in range(30):
@@ -5856,7 +5852,7 @@ class Chat:
                 raise RuntimeError("无法获取微信窗口句柄")
 
             png_bytes = capture_window2(hwnd)
-            ocr_data = get_image_text(png_bytes)
+            ocr_data = self._get_image_text(png_bytes)
 
             if "移出" not in ocr_data:
                 raise RuntimeError("OCR 未识别到'移出'文本")
@@ -5864,7 +5860,7 @@ class Chat:
             info = ocr_data["移出"]
             win_left, win_top, _, _ = win32gui.GetWindowRect(hwnd)
             click_x = int(win_left + info["center"][0])
-            click_y = int(win_top + info["center"][1] - info["height"])
+            click_y = int(win_top + info["center"][1] - 2 * info["height"])
             auto.Click(click_x, click_y)
             time.sleep(0.5)
 
@@ -6028,7 +6024,7 @@ class Chat:
         if not hwnd:
             raise RuntimeError("无法获取微信窗口句柄")
         png_bytes = capture_window2(hwnd)
-        return get_image_text(png_bytes), hwnd
+        return self._get_image_text(png_bytes), hwnd
 
     def _ocr_click(self, text: str):
         """
@@ -6072,7 +6068,7 @@ class Chat:
                 raise RuntimeError("无法获取微信窗口句柄")
 
             png_bytes = capture_window2(hwnd)
-            ocr_data = get_image_text(png_bytes)
+            ocr_data = self._get_image_text(png_bytes)
 
             if switch_name not in ocr_data:
                 raise RuntimeError(
@@ -6145,13 +6141,13 @@ class Chat:
 
             # 先确保消息免打扰已开启
             png_bytes = capture_window2(hwnd)
-            ocr_data = get_image_text(png_bytes)
+            ocr_data = self._get_image_text(png_bytes)
             img = Image.open(io.BytesIO(png_bytes))
             self._toggle_ocr_switch(img, ocr_data, hwnd, "消息免打扰", True)
 
             # 开启消息免打扰后，"折叠该聊天"选项才会出现，重新截图
             png_bytes = capture_window2(hwnd)
-            ocr_data = get_image_text(png_bytes)
+            ocr_data = self._get_image_text(png_bytes)
             img = Image.open(io.BytesIO(png_bytes))
             self._toggle_ocr_switch(img, ocr_data, hwnd, "折叠该聊天", True)
 
@@ -6182,7 +6178,7 @@ class Chat:
                 raise RuntimeError("无法获取微信窗口句柄")
 
             png_bytes = capture_window2(hwnd)
-            ocr_data = get_image_text(png_bytes)
+            ocr_data = self._get_image_text(png_bytes)
             img = Image.open(io.BytesIO(png_bytes))
 
             # 折叠该聊天只在消息免打扰开启时存在
@@ -6310,7 +6306,7 @@ class Chat:
         只打开一次聊天信息面板，按顺序完成所有操作后关闭。
         参数为 None 时跳过对应项，不做修改。
 
-        name、announcement、remark、my_nickname 各自独立 OCR 识别（面板顶部区域）。
+        name、announcement、remark、my_nickname 每个操作前独立截图 OCR。
         开关类参数滚动到底部后每个独立截图 OCR。
 
         Args:
@@ -6342,147 +6338,139 @@ class Chat:
         time.sleep(0.5)
 
         try:
-            # ---- 第一组：文本字段（面板顶部，共用一次 OCR） ----
-            has_text_fields = any(v is not None for v in
-                                 (name, announcement, remark, my_nickname))
+            hwnd = self._win.NativeWindowHandle
+            if not hwnd:
+                raise RuntimeError("无法获取微信窗口句柄")
 
-            if has_text_fields:
-                hwnd = self._win.NativeWindowHandle
-                if not hwnd:
-                    raise RuntimeError("无法获取微信窗口句柄")
+            def _fresh_ocr():
+                """每次操作前重新截图 + OCR，确保坐标准确"""
+                _png = capture_window2(hwnd)
+                _ocr = self._get_image_text(_png)
+                _left, _top, _, _ = win32gui.GetWindowRect(hwnd)
+                return _png, _ocr, _left, _top
 
-                png_bytes = capture_window2(hwnd)
-                ocr_data = get_image_text(png_bytes)
-                win_left, win_top, _, _ = win32gui.GetWindowRect(hwnd)
+            # ---- 第一组：文本字段（每个字段操作前独立截图 OCR） ----
 
-                # -- 群聊名称 --
-                if name is not None:
-                    if "群聊名称" not in ocr_data:
-                        raise RuntimeError("OCR 未识别到'群聊名称'文本")
-                    info = ocr_data["群聊名称"]
-                    click_x = int(win_left + info["center"][0])
-                    click_y = int(win_top + info["center"][1] + info["height"])
-                    auto.Click(click_x, click_y)
-                    time.sleep(0.2)
-                    self._win.SendKeys("{Ctrl}a{Del}")
-                    time.sleep(0.1)
-                    paste(name)
-                    self._win.SendKeys("{Enter}")
-                    update_btn = self._win.ButtonControl(Name="修改")
-                    if update_btn.Exists(maxSearchSeconds=2):
-                        update_btn.Click(ratioX=_rand_ratio(), ratioY=_rand_ratio())
-                    time.sleep(0.5)
-                    # 名称修改后需要重新截图 OCR
-                    png_bytes = capture_window2(hwnd)
-                    ocr_data = get_image_text(png_bytes)
-                    win_left, win_top, _, _ = win32gui.GetWindowRect(hwnd)
+            # -- 群聊名称 --
+            if name is not None:
+                png_bytes, ocr_data, win_left, win_top = _fresh_ocr()
+                if "群聊名称" not in ocr_data:
+                    raise RuntimeError("OCR 未识别到'群聊名称'文本")
+                info = ocr_data["群聊名称"]
+                click_x = int(win_left + info["center"][0])
+                click_y = int(win_top + info["center"][1] + 1.5 * info["height"])
+                auto.Click(click_x, click_y)
+                time.sleep(0.2)
+                self._win.SendKeys("{Ctrl}a{Del}")
+                time.sleep(0.1)
+                paste(name)
+                self._win.SendKeys("{Enter}")
+                update_btn = self._win.ButtonControl(Name="修改")
+                if update_btn.Exists(maxSearchSeconds=2):
+                    update_btn.Click(ratioX=_rand_ratio(), ratioY=_rand_ratio())
+                time.sleep(0.5)
 
-                # -- 群公告 --
-                if announcement is not None:
-                    if "群公告" not in ocr_data:
-                        raise RuntimeError("OCR 未识别到'群公告'文本")
-                    info = ocr_data["群公告"]
-                    click_x = int(win_left + info["center"][0])
-                    click_y = int(win_top + info["center"][1] + info["height"])
-                    auto.Click(click_x, click_y)
+            # -- 群公告 --
+            if announcement is not None:
+                png_bytes, ocr_data, win_left, win_top = _fresh_ocr()
+                if "群公告" not in ocr_data:
+                    raise RuntimeError("OCR 未识别到'群公告'文本")
+                info = ocr_data["群公告"]
+                click_x = int(win_left + info["center"][0])
+                click_y = int(win_top + info["center"][1] + 1.5 * info["height"])
+                auto.Click(click_x, click_y)
 
-                    # 等待群公告窗口出现
-                    pane_title = f"\u201c{self.current_name}\u201d的群公告"
-                    announcement_pane = auto.PaneControl(Name=pane_title)
-                    if not announcement_pane.Exists(maxSearchSeconds=3):
-                        raise RuntimeError("未找到群公告编辑窗口")
+                # 等待群公告窗口出现
+                pane_title = f"\u201c{self.current_name}\u201d的群公告"
+                announcement_pane = auto.PaneControl(Name=pane_title)
+                if not announcement_pane.Exists(maxSearchSeconds=3):
+                    raise RuntimeError("未找到群公告编辑窗口")
 
-                    pane_hwnd = announcement_pane.NativeWindowHandle
-                    if not pane_hwnd:
-                        raise RuntimeError("无法获取群公告窗口句柄")
-                    pane_png = capture_window2(pane_hwnd)
-                    pane_ocr = get_image_text(pane_png)
+                pane_hwnd = announcement_pane.NativeWindowHandle
+                if not pane_hwnd:
+                    raise RuntimeError("无法获取群公告窗口句柄")
+                pane_png = capture_window2(pane_hwnd)
+                pane_ocr = self._get_image_text(pane_png)
 
-                    # 如果之前发布过群公告，需要先点击"编辑群公告"
-                    if "编辑群公告" in pane_ocr:
-                        ei = pane_ocr["编辑群公告"]
-                        pane_left, pane_top, _, _ = win32gui.GetWindowRect(pane_hwnd)
-                        auto.Click(int(pane_left + ei["center"][0]),
-                                   int(pane_top + ei["center"][1]))
-                        time.sleep(0.5)
-                        pane_png = capture_window2(pane_hwnd)
-                        pane_ocr = get_image_text(pane_png)
-
-                    announcement_pane.SendKeys("{Ctrl}a{Del}")
-                    paste(announcement)
-                    time.sleep(0.5)
-
-                    if "完成" not in pane_ocr:
-                        raise RuntimeError("OCR 未识别到'完成'按钮")
-                    fi = pane_ocr["完成"]
+                # 如果之前发布过群公告，需要先点击"编辑群公告"
+                if "编辑群公告" in pane_ocr:
+                    ei = pane_ocr["编辑群公告"]
                     pane_left, pane_top, _, _ = win32gui.GetWindowRect(pane_hwnd)
-                    auto.Click(int(pane_left + fi["center"][0]),
-                               int(pane_top + fi["center"][1]))
+                    auto.Click(int(pane_left + ei["center"][0]),
+                               int(pane_top + ei["center"][1]))
                     time.sleep(0.5)
+                    pane_png = capture_window2(pane_hwnd)
+                    pane_ocr = self._get_image_text(pane_png)
 
-                    publish_btn = announcement_pane.ButtonControl(Name="发布")
-                    if publish_btn.Exists(maxSearchSeconds=3):
-                        publish_btn.GetInvokePattern().Invoke()
-                    time.sleep(1)
+                announcement_pane.SendKeys("{Ctrl}a{Del}")
+                paste(announcement)
+                time.sleep(0.5)
 
-                    # 等待群公告窗口关闭
-                    for _ in range(10):
-                        if not find_window_by_name(pane_title):
+                if "完成" not in pane_ocr:
+                    raise RuntimeError("OCR 未识别到'完成'按钮")
+                fi = pane_ocr["完成"]
+                pane_left, pane_top, _, _ = win32gui.GetWindowRect(pane_hwnd)
+                auto.Click(int(pane_left + fi["center"][0]),
+                           int(pane_top + fi["center"][1]))
+                time.sleep(0.5)
+
+                publish_btn = announcement_pane.ButtonControl(Name="发布")
+                if publish_btn.Exists(maxSearchSeconds=3):
+                    publish_btn.GetInvokePattern().Invoke()
+                time.sleep(1)
+
+                # 等待群公告窗口关闭
+                for _ in range(10):
+                    if not find_window_by_name(pane_title):
+                        break
+                    time.sleep(3)
+
+                time.sleep(0.5)
+
+            # -- 备注 --
+            if remark is not None:
+                png_bytes, ocr_data, win_left, win_top = _fresh_ocr()
+                if "备注" not in ocr_data:
+                    raise RuntimeError("OCR 未识别到'备注'文本")
+                info = ocr_data["备注"]
+                click_x = int(win_left + info["center"][0])
+                click_y = int(win_top + info["center"][1] + 1.5 * info["height"])
+                auto.Click(click_x, click_y)
+                time.sleep(0.2)
+                self._win.SendKeys("{Ctrl}a{Del}")
+                time.sleep(0.1)
+                paste(remark)
+                self._win.SendKeys("{Enter}")
+                time.sleep(0.5)
+
+            # -- 我在本群的昵称 --
+            if my_nickname is not None:
+                png_bytes, ocr_data, win_left, win_top = _fresh_ocr()
+                ocr_key = None
+                for candidate in ("我在本群的昵称", "我在本群的呢称"):
+                    if candidate in ocr_data:
+                        ocr_key = candidate
+                        break
+                if not ocr_key:
+                    for key in ocr_data:
+                        if "本群" in key and ("昵称" in key or "呢称" in key):
+                            ocr_key = key
                             break
-                        time.sleep(3)
-
-                    time.sleep(0.5)
-                    # 群公告修改后需要重新截图 OCR
-                    png_bytes = capture_window2(hwnd)
-                    ocr_data = get_image_text(png_bytes)
-                    win_left, win_top, _, _ = win32gui.GetWindowRect(hwnd)
-
-                # -- 备注 --
-                if remark is not None:
-                    if "备注" not in ocr_data:
-                        raise RuntimeError("OCR 未识别到'备注'文本")
-                    info = ocr_data["备注"]
-                    click_x = int(win_left + info["center"][0])
-                    click_y = int(win_top + info["center"][1] + info["height"])
-                    auto.Click(click_x, click_y)
-                    time.sleep(0.2)
-                    self._win.SendKeys("{Ctrl}a{Del}")
-                    time.sleep(0.1)
-                    paste(remark)
-                    self._win.SendKeys("{Enter}")
-                    time.sleep(0.5)
-                    # 备注修改后需要重新截图 OCR
-                    png_bytes = capture_window2(hwnd)
-                    ocr_data = get_image_text(png_bytes)
-                    win_left, win_top, _, _ = win32gui.GetWindowRect(hwnd)
-
-                # -- 我在本群的昵称 --
-                if my_nickname is not None:
-                    ocr_key = None
-                    for candidate in ("我在本群的昵称", "我在本群的呢称"):
-                        if candidate in ocr_data:
-                            ocr_key = candidate
-                            break
-                    if not ocr_key:
-                        for key in ocr_data:
-                            if "本群" in key and ("昵称" in key or "呢称" in key):
-                                ocr_key = key
-                                break
-                    if not ocr_key:
-                        raise RuntimeError("OCR 未识别到'我在本群的昵称'文本")
-                    info = ocr_data[ocr_key]
-                    click_x = int(win_left + info["center"][0])
-                    click_y = int(win_top + info["center"][1] + info["height"])
-                    auto.Click(click_x, click_y)
-                    time.sleep(0.2)
-                    self._win.SendKeys("{Ctrl}a{Del}")
-                    time.sleep(0.1)
-                    paste(my_nickname)
-                    self._win.SendKeys("{Enter}")
-                    update_btn = self._win.ButtonControl(Name="修改")
-                    if update_btn.Exists(maxSearchSeconds=2):
-                        update_btn.Click(ratioX=_rand_ratio(), ratioY=_rand_ratio())
-                    time.sleep(0.5)
+                if not ocr_key:
+                    raise RuntimeError("OCR 未识别到'我在本群的昵称'文本")
+                info = ocr_data[ocr_key]
+                click_x = int(win_left + info["center"][0])
+                click_y = int(win_top + info["center"][1] + 1.5 * info["height"])
+                auto.Click(click_x, click_y)
+                time.sleep(0.2)
+                self._win.SendKeys("{Ctrl}a{Del}")
+                time.sleep(0.1)
+                paste(my_nickname)
+                self._win.SendKeys("{Enter}")
+                update_btn = self._win.ButtonControl(Name="修改")
+                if update_btn.Exists(maxSearchSeconds=2):
+                    update_btn.Click(ratioX=_rand_ratio(), ratioY=_rand_ratio())
+                time.sleep(0.5)
 
             # ---- 第二组：开关（滚动到底部，每个开关独立截图 OCR） ----
             has_switches = any(v is not None for v in
@@ -6492,14 +6480,9 @@ class Chat:
             if has_switches:
                 self._scroll_room_info_to_bottom()
 
-                hwnd = self._win.NativeWindowHandle
-                if not hwnd:
-                    raise RuntimeError("无法获取微信窗口句柄")
-
                 # fold=True 需要先开启消息免打扰
                 if fold is True and mute is not True:
-                    png_bytes = capture_window2(hwnd)
-                    ocr_data = get_image_text(png_bytes)
+                    png_bytes, ocr_data, _, _ = _fresh_ocr()
                     img = Image.open(io.BytesIO(png_bytes))
                     self._toggle_ocr_switch(
                         img, ocr_data, hwnd, "消息免打扰", True)
@@ -6517,8 +6500,7 @@ class Chat:
                 ]:
                     if switch_val is None:
                         continue
-                    png_bytes = capture_window2(hwnd)
-                    ocr_data = get_image_text(png_bytes)
+                    png_bytes, ocr_data, _, _ = _fresh_ocr()
                     img = Image.open(io.BytesIO(png_bytes))
                     self._toggle_ocr_switch(
                         img, ocr_data, hwnd, switch_name, switch_val)
@@ -6784,7 +6766,7 @@ class Chat:
                 raise RuntimeError("无法获取微信窗口句柄")
 
             png_bytes = capture_window2(hwnd)
-            ocr_data = get_image_text(png_bytes)
+            ocr_data = self._get_image_text(png_bytes)
 
             if "群聊名称" not in ocr_data:
                 raise RuntimeError("OCR 未识别到'群聊名称'文本，请确认聊天信息面板已展开")
@@ -6849,7 +6831,7 @@ class Chat:
             if not hwnd:
                 raise RuntimeError("无法获取微信窗口句柄")
             png_bytes = capture_window(hwnd)
-            ocr_data = get_image_text(png_bytes)
+            ocr_data = self._get_image_text(png_bytes)
 
             # 点击"群公告"文本下方区域
             if "群公告" not in ocr_data:
@@ -6871,7 +6853,7 @@ class Chat:
             if not pane_hwnd:
                 raise RuntimeError("无法获取群公告窗口句柄")
             png_bytes = capture_window2(pane_hwnd)
-            ocr_data = get_image_text(png_bytes)
+            ocr_data = self._get_image_text(png_bytes)
             if not ocr_data:
                 raise RuntimeError("群公告窗口 OCR 未识别到任何文本")
 
@@ -6886,7 +6868,7 @@ class Chat:
 
                 # 再次识别窗口更新识别信息
                 png_bytes = capture_window2(pane_hwnd)
-                ocr_data = get_image_text(png_bytes)
+                ocr_data = self._get_image_text(png_bytes)
                 if not ocr_data:
                     raise RuntimeError("群公告窗口 OCR 未识别到任何文本")
 
@@ -6959,7 +6941,7 @@ class Chat:
                 raise RuntimeError("无法获取微信窗口句柄")
 
             png_bytes = capture_window(hwnd)
-            ocr_data = get_image_text(png_bytes)
+            ocr_data = self._get_image_text(png_bytes)
 
             if "备注" not in ocr_data:
                 raise RuntimeError("OCR 未识别到'备注'文本，请确认聊天信息面板已展开")
@@ -7020,7 +7002,7 @@ class Chat:
                 raise RuntimeError("无法获取微信窗口句柄")
 
             png_bytes = capture_window(hwnd)
-            ocr_data = get_image_text(png_bytes)
+            ocr_data = self._get_image_text(png_bytes)
 
             # OCR 可能识别为完整文本或拆分文本，按优先级匹配
             ocr_key = None
@@ -8787,15 +8769,32 @@ class Weixin(WeixinWindow):
     WINDOW_CLASS = "mmui::MainWindow"
     WINDOW_REGEX = "微信|Weixin"
 
-    def __init__(self, install_path: Optional[str] = None, wxocr_path: Optional[str] = None):
+    def __init__(self, install_path: Optional[str] = None, wxocr_path: Optional[str] = None,
+                 ocr_engine: str = "wcocr"):
+        """
+        Args:
+            install_path: 微信安装路径，None 时自动检测
+            wxocr_path:   微信 OCR 插件路径，None 时自动检测
+            ocr:          OCR 引擎选择
+                - "wcocr":    使用微信自带 OCR（默认）
+                - "rapidocr": 使用 RapidOCR
+        """
+        if ocr_engine not in ("wcocr", "rapidocr"):
+            raise ValueError(f"ocr_engine 参数必须为 'wcocr' 或 'rapidocr'，当前: {ocr!r}")
+
+        self._ocr_engine = ocr_engine
+
         # 微信安装路径
         self.install_path = install_path or get_wechat_install_path(4)
 
         # 微信OCR插件路径
         self.wxocr_path = wxocr_path or get_wechat_wxocr_path()
 
-        # 初始化微信OCR
-        wcocr.init(self.wxocr_path, self.install_path)
+        # 初始化 OCR 引擎
+        if self._ocr_engine == "wcocr":
+            wcocr.init(self.wxocr_path, self.install_path)
+        else:
+            self._rapid_ocr = RapidOCR()
 
         # 开启讲述人模式标识 激活微信控件通信
         ensure_narrator_registry()
@@ -9348,29 +9347,73 @@ class Weixin(WeixinWindow):
             raise RuntimeError("弹出菜单中未找到锁定按钮")
         lock_btn.Click(ratioX=_rand_ratio(), ratioY=_rand_ratio())
 
-    def ocr(self, image_path: str) -> dict:
-        return wcocr.ocr(image_path)
-
-    def get_image_text(self, image: bytes | str) -> dict:
+    def ocr(self, image: bytes | str) -> dict:
         """
-        识别图片中的文本内容，返回与 get_image_text() 全局函数相同格式的字典。
+        识别图片中的文本内容。
+
+        ocr 是 get_image_text 的别名，根据初始化时的 ocr 参数自动选择引擎。
 
         Args:
             image: 图片数据，支持两种类型：
-                - str:   图片文件路径，直接识别
-                - bytes: 图片字节数据，内部生成临时文件后识别
+                - str:   图片文件路径
+                - bytes: 图片字节数据
 
         Returns:
             {text: {center, left_top, right_bottom, width, height}} 字典
         """
+        return self.get_image_text(image)
+
+    def get_image_text(self, image: bytes | str) -> dict:
+        """
+        识别图片中的文本内容。
+
+        根据 ocr 参数选择引擎：
+        - "wcocr":    使用微信自带 OCR（通过 wcocr 库）
+        - "rapidocr": 使用 RapidOCR
+
+        Args:
+            image: 图片数据，支持两种类型：
+                - str:   图片文件路径
+                - bytes: 图片字节数据
+
+        Returns:
+            {text: {center, left_top, right_bottom, width, height}} 字典
+        """
+        if self._ocr_engine == "rapidocr":
+            return self._get_image_text_rapidocr(image)
+        return self._get_image_text_wcocr(image)
+
+    def _get_image_text_rapidocr(self, image: bytes | str) -> dict:
+        """使用 RapidOCR 识别图片"""
         if isinstance(image, str):
-            result = self.ocr(image)
+            with open(image, "rb") as f:
+                image = f.read()
+        result = self._rapid_ocr(image)
+        data = {}
+        if result.boxes is None or result.txts is None:
+            return data
+        for box, txt in zip(result.boxes, result.txts):
+            point = box.tolist()
+            data[txt] = {
+                "center": (point[0][0] + (point[2][0] - point[0][0]) / 2,
+                           point[0][1] + (point[2][1] - point[0][1]) / 2),
+                "left_top": (point[0][0], point[0][1]),
+                "right_bottom": (point[2][0], point[2][1]),
+                "width": point[2][0] - point[0][0],
+                "height": point[2][1] - point[0][1],
+            }
+        return data
+
+    def _get_image_text_wcocr(self, image: bytes | str) -> dict:
+        """使用微信 OCR 识别图片"""
+        if isinstance(image, str):
+            result = wcocr.ocr(image)
         else:
             tmp_path = os.path.join(tempfile.gettempdir(), "_pywxauto_ocr_tmp.png")
             try:
                 with open(tmp_path, "wb") as f:
                     f.write(image)
-                result = self.ocr(tmp_path)
+                result = wcocr.ocr(tmp_path)
             finally:
                 if os.path.exists(tmp_path):
                     try:
@@ -9593,25 +9636,26 @@ class Weixin(WeixinWindow):
 
 
 if __name__ == "__main__":
-    wx = Weixin()
+    wx = Weixin(ocr_engine="wcocr")
     # wx.set_room_name("AI测试2", "AI测试")
     # wx.set_room_remark("AI测试", "agi")
     # wx.set_room_nickname("AI测试", "milo2 2号")
     # wx.set_room_announcement("AI测试", "这是群公告2")
     # wx.clear_room_chat_history("AI测试")
 
-    wx.set_room_info(
-        nickname="AI测试",
-        name="AI测试群",
-        announcement="这是群公告",
-        remark="群聊备注",
-        my_nickname="milo2 2号",
-        pin=False,
-        mute=False,
-        fold=False,
-        save_address_book=False,
-        display_member_nickname=False
-    )
+    # wx.set_room_info(
+    #     nickname="AI测试",
+    #     name="AI测试群",
+    #     announcement="这是群公告",
+    #     remark="群聊备注",
+    #     my_nickname="milo2 2号",
+    #     pin=True,
+    #     mute=True,
+    #     fold=True,
+    #     save_address_book=True,
+    #     display_member_nickname=True
+    # )
+    wx.add_room_members("AI测试", ["七夏"])
 
     # moments = wx.moment.get(5)
     # print(json.dumps(moments, ensure_ascii=False))
