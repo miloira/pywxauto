@@ -3063,35 +3063,48 @@ class Session:
         if not self.search_and_select(keyword, chat_type):
             raise RuntimeError(f"搜索未找到结果: {keyword}")
 
-    def open_by_search(self, name: str, chat_type: Optional[list[str]] = None):
+    def open_by_search(self, name: str, chat_type: Optional[list[str]] = None,
+                       force_search: bool = False):
         """
         打开指定名称的会话。
-        如果当前聊天对象已经是目标会话，则不做任何操作。
-        否则优先在会话列表中直接点击，找不到则通过搜索打开。
+
+        默认行为（force_search=False）：
+        1. 如果当前聊天对象已经是目标会话，则不做任何操作
+        2. 优先在会话列表中直接点击
+        3. 找不到则通过搜索打开
+
+        当 force_search=True 时，跳过前两步快捷方式，直接走搜索流程。
+
+        Args:
+            name:         会话名称
+            chat_type:    优先匹配的分类，如 ["联系人", "群聊", "功能"]
+            force_search: 是否强制走搜索流程，跳过标题检查和列表直接点击
         """
-        # 检查当前聊天对象是否已经是目标会话
-        for aid in Chat.TITLE_LABEL_IDS:
-            title = self._win.TextControl(AutomationId=aid)
-            if title.Exists(0, 0) and title.Name == name:
+        if not force_search:
+            # 检查当前聊天对象是否已经是目标会话
+            for aid in Chat.TITLE_LABEL_IDS:
+                title = self._win.TextControl(AutomationId=aid)
+                if title.Exists(0, 0) and title.Name == name:
+                    return
+
+            # 先尝试直接在列表中点击
+            item = self._win.ListItemControl(
+                ClassName="mmui::ChatSessionCell",
+                AutomationId=f"session_item_{name}",
+            )
+            if item.Exists(0, 0):
+                # 如果已激活则不重复点击
+                try:
+                    pattern = item.GetSelectionItemPattern()
+                    if pattern and pattern.IsSelected:
+                        return
+                except Exception:
+                    pass
+                item.Click(ratioX=_rand_ratio(), ratioY=_rand_ratio())
+                time.sleep(0.3)
                 return
 
-        # 先尝试直接在列表中点击
-        item = self._win.ListItemControl(
-            ClassName="mmui::ChatSessionCell",
-            AutomationId=f"session_item_{name}",
-        )
-        if item.Exists(0, 0):
-            # 如果已激活则不重复点击
-            try:
-                pattern = item.GetSelectionItemPattern()
-                if pattern and pattern.IsSelected:
-                    return
-            except Exception:
-                pass
-            item.Click(ratioX=_rand_ratio(), ratioY=_rand_ratio())
-            time.sleep(0.3)
-            return
-        # 列表中没有，走搜索
+        # 列表中没有（或强制搜索），走搜索
         self.search(name, chat_type)
 
     def scroll(self, direction: str = "down", clicks: int = 3):
@@ -8825,12 +8838,12 @@ class Weixin(WeixinWindow):
             time.sleep(0.3)
         raise RuntimeError(f"打开会话失败: {nickname}")
 
-    def open_session_by_search(self, nickname: str) -> Chat:
+    def open_session_by_search(self, nickname: str, force_search: bool = False) -> Chat:
         """通过搜索打开指定会话，返回 Chat 对象"""
         self.activate()
         if not self.has_session:
             self.navigator.switch_to("微信")
-        self.session.open_by_search(nickname)
+        self.session.open_by_search(nickname, force_search)
         # 等待聊天界面加载完成（搜索点击后界面切换需要时间）
         for _ in range(10):
             chat = self.chat
