@@ -6385,7 +6385,7 @@ class Chat:
                 auto.Click(click_x, click_y)
 
                 # 等待群公告窗口出现
-                pane_title = f"\u201c{self.current_name}\u201d的群公告"
+                pane_title = f"“{self.current_name}”的群公告"
                 announcement_pane = auto.PaneControl(Name=pane_title)
                 if not announcement_pane.Exists(maxSearchSeconds=3):
                     raise RuntimeError("未找到群公告编辑窗口")
@@ -9653,7 +9653,7 @@ if __name__ == "__main__":
     wx.set_room_info(
         nickname="AI测试",
         name="AI测试群",
-        announcement="这是群公告",
+        announcement="群公告测试",
         remark="群聊备注",
         my_nickname="milo2 2号",
         pin=True,
