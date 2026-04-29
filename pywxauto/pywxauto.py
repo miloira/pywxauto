@@ -106,6 +106,9 @@ import uiautomation as auto
 from PIL import Image
 
 import wcocr
+from rapidocr import RapidOCR
+
+rapid_ocr = RapidOCR()
 
 logging.basicConfig(level=logging.INFO, format="%(asctime)s [%(levelname)s] %(message)s")
 logger = logging.getLogger(__name__)
@@ -235,9 +238,7 @@ def find_window_by_name(name_pattern) -> list[int]:
 
 
 def get_image_text(image_bytes):
-    from rapidocr import RapidOCR
-    ocr = RapidOCR()
-    result = ocr(image_bytes)
+    result = rapid_ocr(image_bytes)
     data = {}
     if result.boxes is None or result.txts is None:
         return data
@@ -9350,6 +9351,36 @@ class Weixin(WeixinWindow):
     def ocr(self, image_path: str) -> dict:
         return wcocr.ocr(image_path)
 
+    def get_image_text(self, image_path: str) -> dict:
+        """
+        识别图片中的文本内容，返回与 get_image_text() 全局函数相同格式的字典。
+
+        Returns:
+            {text: {center, left_top, right_bottom, width, height}} 字典
+        """
+        result = self.ocr(image_path)
+        data = {}
+        if not result or "ocr_response" not in result:
+            return data
+        for item in result["ocr_response"]:
+            txt = item.get("text", "")
+            if not txt:
+                continue
+            left = item["left"]
+            top = item["top"]
+            right = item["right"]
+            bottom = item["bottom"]
+            width = right - left
+            height = bottom - top
+            data[txt] = {
+                "center": (left + width / 2, top + height / 2),
+                "left_top": (left, top),
+                "right_bottom": (right, bottom),
+                "width": width,
+                "height": height,
+            }
+        return data
+
     @property
     def _window(self) -> auto.WindowControl:
         """覆盖基类属性，Weixin 使用 self.window 而非 self._win"""
@@ -9551,18 +9582,18 @@ if __name__ == "__main__":
     # wx.set_room_announcement("AI测试", "这是群公告2")
     # wx.clear_room_chat_history("AI测试")
 
-    # wx.set_room_info(
-    #     nickname="AI测试",
-    #     name="AI测试群",
-    #     announcement="这是群公告",
-    #     remark="群聊备注",
-    #     my_nickname="milo2 2号",
-    #     pin=False,
-    #     mute=False,
-    #     fold=False,
-    #     save_address_book=False,
-    #     display_member_nickname=False
-    # )
+    wx.set_room_info(
+        nickname="AI测试",
+        name="AI测试群",
+        announcement="这是群公告",
+        remark="群聊备注",
+        my_nickname="milo2 2号",
+        pin=False,
+        mute=False,
+        fold=False,
+        save_address_book=False,
+        display_member_nickname=False
+    )
 
     # moments = wx.moment.get(5)
     # print(json.dumps(moments, ensure_ascii=False))
