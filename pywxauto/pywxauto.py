@@ -9351,14 +9351,32 @@ class Weixin(WeixinWindow):
     def ocr(self, image_path: str) -> dict:
         return wcocr.ocr(image_path)
 
-    def get_image_text(self, image_path: str) -> dict:
+    def get_image_text(self, image: bytes | str) -> dict:
         """
         识别图片中的文本内容，返回与 get_image_text() 全局函数相同格式的字典。
+
+        Args:
+            image: 图片数据，支持两种类型：
+                - str:   图片文件路径，直接识别
+                - bytes: 图片字节数据，内部生成临时文件后识别
 
         Returns:
             {text: {center, left_top, right_bottom, width, height}} 字典
         """
-        result = self.ocr(image_path)
+        if isinstance(image, str):
+            result = self.ocr(image)
+        else:
+            tmp_path = os.path.join(tempfile.gettempdir(), "_pywxauto_ocr_tmp.png")
+            try:
+                with open(tmp_path, "wb") as f:
+                    f.write(image)
+                result = self.ocr(tmp_path)
+            finally:
+                if os.path.exists(tmp_path):
+                    try:
+                        os.remove(tmp_path)
+                    except OSError:
+                        pass
         data = {}
         if not result or "ocr_response" not in result:
             return data
