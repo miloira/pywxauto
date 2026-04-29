@@ -72,6 +72,7 @@ from __future__ import annotations
 import ctypes
 from ctypes import Structure, c_uint, c_long, c_int, c_bool, sizeof
 import fnmatch
+import glob
 import hashlib
 import json
 import io
@@ -104,6 +105,7 @@ import uiautomation as auto
 
 from PIL import Image
 
+import wcocr
 
 logging.basicConfig(level=logging.INFO, format="%(asctime)s [%(levelname)s] %(message)s")
 logger = logging.getLogger(__name__)
@@ -122,6 +124,93 @@ json.JSONEncoder.default = _custom_json_default
 # DROPFILES struct: pFiles(uint), x(long), y(long), fNC(int), fWide(bool)
 _DROPFILES_FORMAT = "Illii"
 _DROPFILES_SIZE = struct.calcsize(_DROPFILES_FORMAT)
+
+
+def query_reg_install_path(reg_path):
+    try:
+        root_map = {
+            "HKCU": winreg.HKEY_CURRENT_USER,
+            "HKLM": winreg.HKEY_LOCAL_MACHINE,
+        }
+
+        root_name, sub_key = reg_path.split("\\", 1)
+        root = root_map.get(root_name)
+
+        if not root:
+            return None
+
+        with winreg.OpenKey(root, sub_key) as key:
+            for value_name in ["InstallLocation", "InstallPath", "Path", "UninstallString"]:
+                try:
+                    value, _ = winreg.QueryValueEx(key, value_name)
+                    if value:
+                        return value
+                except FileNotFoundError:
+                    continue
+    except Exception:
+        return None
+
+    return None
+
+
+def get_wechat_install_path(version=None):
+    reg_paths_map = {
+        3: [
+            r"HKCU\Software\Tencent\WeChat",
+        ],
+        4: [
+            r"HKLM\SOFTWARE\WOW6432Node\Microsoft\Windows\CurrentVersion\Uninstall\Weixin",
+            r"HKLM\SOFTWARE\Microsoft\Windows\CurrentVersion\Uninstall\Weixin",
+        ],
+    }
+
+    # 根据 version 决定查找顺序
+    if version in reg_paths_map:
+        reg_paths = reg_paths_map[version]
+    else:
+        # 自动模式：先试3，再试4
+        reg_paths = reg_paths_map[3] + reg_paths_map[4]
+
+    # 查注册表
+    for reg in reg_paths:
+        path = query_reg_install_path(reg)
+        if path:
+            path = path.replace('"', '')
+
+        if path and os.path.exists(path):
+            result = glob.glob(fr'{path}\*\WeChatOcr.bin')
+            if result:
+                return os.path.dirname(result[0])
+
+    # 默认目录兜底
+    default_dirs = [
+        r"C:\Program Files\Tencent\WeChat",
+        r"C:\Program Files (x86)\Tencent\WeChat",
+        r"D:\Program Files\WeChat",
+        r"D:\Tencent\WeChat",
+    ]
+
+    for path in default_dirs:
+        if os.path.exists(path):
+            result = glob.glob(fr'{path}\*\WeChatOcr.bin')
+            if result:
+                return os.path.dirname(result[0])
+
+    return None
+
+
+def get_wechat_wxocr_path():
+    appdata_path = os.getenv('APPDATA')
+
+    ocr_dir = os.path.join(appdata_path, r"Tencent\xwechat\XPlugin\Plugins\WeChatOcr")
+    if not os.path.exists(ocr_dir):
+        return None
+
+    result = glob.glob(fr"{ocr_dir}\*\extracted\wxocr.dll")
+    if len(result) == 0:
+        return None
+
+    return os.path.join(os.path.dirname(result[0]), "wxocr.dll")
 
 
 def wechat_ocr(wechat_ocr_dir, wechat_dir, img_path):
@@ -8697,14 +8786,30 @@ class Weixin(WeixinWindow):
     WINDOW_CLASS = "mmui::MainWindow"
     WINDOW_REGEX = "微信|Weixin"
 
-    def __init__(self):
+    def __init__(self, install_path: Optional[str] = None, wxocr_path: Optional[str] = None):
+        # 微信安装路径
+        self.install_path = install_path or get_wechat_install_path(4)
+
+        # 微信OCR插件路径
+        self.wxocr_path = wxocr_path or get_wechat_wxocr_path()
+
+        # 初始化微信OCR
+        wcocr.init(self.wxocr_path, self.install_path)
+
+        # 开启讲述人模式标识 激活微信控件通信
         ensure_narrator_registry()
+
+        # 初始化微信窗口
         self._ensure_running()
+
+        # 窗口定位
         self.window: auto.WindowControl = auto.WindowControl(
             ClassName=self.WINDOW_CLASS,
             RegexName=self.WINDOW_REGEX,
             Depth=1,
         )
+
+        # 窗口功能
         self.navigator = Navigator(self)
         self.session = Session(self)
         self.file_manager = FileManager(self)
@@ -9242,6 +9347,9 @@ class Weixin(WeixinWindow):
             raise RuntimeError("弹出菜单中未找到锁定按钮")
         lock_btn.Click(ratioX=_rand_ratio(), ratioY=_rand_ratio())
 
+    def ocr(self, image_path: str) -> dict:
+        return wcocr.ocr(image_path)
+
     @property
     def _window(self) -> auto.WindowControl:
         """覆盖基类属性，Weixin 使用 self.window 而非 self._win"""
@@ -9443,18 +9551,21 @@ if __name__ == "__main__":
     # wx.set_room_announcement("AI测试", "这是群公告2")
     # wx.clear_room_chat_history("AI测试")
 
-    wx.set_room_info(
-        nickname="AI测试",
-        name="AI测试群",
-        announcement="这是群公告",
-        remark="群聊备注",
-        my_nickname="milo2 2号",
-        pin=False,
-        mute=False,
-        fold=False,
-        save_address_book=False,
-        display_member_nickname=False
-    )
+    # wx.set_room_info(
+    #     nickname="AI测试",
+    #     name="AI测试群",
+    #     announcement="这是群公告",
+    #     remark="群聊备注",
+    #     my_nickname="milo2 2号",
+    #     pin=False,
+    #     mute=False,
+    #     fold=False,
+    #     save_address_book=False,
+    #     display_member_nickname=False
+    # )
 
     # moments = wx.moment.get(5)
     # print(json.dumps(moments, ensure_ascii=False))
+
+    result = wx.ocr(r"C:\Users\张明明\Desktop\QQ截图20260429110605.png")
+    print(result)
