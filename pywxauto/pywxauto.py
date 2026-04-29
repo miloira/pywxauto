@@ -2643,6 +2643,7 @@ class FileManager:
     # 确认对话框的类名（微信 v4 使用 mmui::XDialog，浮动于桌面层级）
     CONFIRM_DIALOG_WIN_CLASS = "mmui::XDialog"
     SAVE_AS_MENU_ITEM_NAME = "另存为..."
+    DOWNLOAD_MENU_ITEM_NAME = "下载"
     DELETE_MENU_ITEM_NAME = "删除"
 
     def __init__(self, wx: "Weixin"):
@@ -2929,6 +2930,71 @@ class FileManager:
             delete_btn.Click(simulateMove=False)
             time.sleep(0.5)
             return True
+        return False
+
+    def download_file(self, file_cell, timeout: int = 60) -> bool:
+        """
+        下载文件列表中的某个文件。
+
+        流程:
+        1. 右键点击文件项 → 弹出微信右键菜单
+        2. 点击"下载"菜单项 → 开始下载
+        3. 轮询文件状态，等待 file_status 变为空（即已下载）
+
+        Args:
+            file_cell: mmui::FileListCell 控件对象（从 get_all_files 返回的 ChatFile._cell）
+            timeout:   等待下载完成的超时时间（秒），默认 60 秒
+
+        Returns:
+            True 下载成功（状态变为已下载），False 下载超时
+
+        Raises:
+            RuntimeError: 聊天文件窗口未打开、右键菜单未弹出或未找到"下载"菜单项时抛出
+        """
+        fm_win = self._find_window()
+        if not fm_win:
+            raise RuntimeError("聊天文件窗口未打开")
+
+        # 1. 右键点击文件项
+        file_cell.RightClick(simulateMove=False, waitTime=0.3)
+        time.sleep(0.5)
+
+        # 2. 定位右键菜单
+        menu = self._find_context_menu_by_point()
+        if not menu:
+            raise RuntimeError("未找到右键菜单")
+
+        # 查找"下载"菜单项
+        download_item = None
+        for child in menu.GetChildren():
+            if child.Name == self.DOWNLOAD_MENU_ITEM_NAME:
+                download_item = child
+                break
+
+        if not download_item:
+            raise RuntimeError("未找到'下载'菜单项，文件可能已下载")
+
+        download_item.Click(simulateMove=False, waitTime=0.3)
+        time.sleep(0.5)
+
+        # 3. 轮询文件状态，等待下载完成
+        # 下载完成后，文件的 Name 属性中不再包含"将在X天后无法下载"等状态文本，
+        # 即 parse_file_cell_text 解析出的 file_status 为空字符串。
+        deadline = time.monotonic() + timeout
+        while time.monotonic() < deadline:
+            # 重新读取文件项的 Name 属性（下载过程中会实时更新）
+            cell_text = file_cell.Name
+            if not cell_text:
+                time.sleep(1)
+                continue
+
+            chat_file = self.parse_file_cell_text(cell_text)
+            if chat_file and not chat_file.file_status:
+                # file_status 为空表示已下载
+                return True
+
+            time.sleep(1)
+
         return False
 
     @staticmethod
