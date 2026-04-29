@@ -236,18 +236,57 @@ def find_window_by_name(name_pattern) -> list[int]:
     return result
 
 
+# ---- 虚拟键码映射 ----
+_VK_MAP = {
+    "ctrl":  win32con.VK_CONTROL,
+    "alt":   win32con.VK_MENU,
+    "shift": win32con.VK_SHIFT,
+    "win":   win32con.VK_LWIN,
+    "enter": win32con.VK_RETURN,
+    "tab":   win32con.VK_TAB,
+    "esc":   win32con.VK_ESCAPE,
+}
+
+
+def send_shortcut(combo: str):
+    """
+    模拟键盘快捷键。
+
+    将 "Ctrl+Alt+W" 这样的组合键字符串解析为虚拟键码序列，
+    按顺序按下、逆序释放，模拟真实的键盘快捷键操作。
+
+    支持的修饰键: Ctrl, Alt, Shift, Win
+    支持的特殊键: Enter, Tab, Esc
+    支持单个字母键: A-Z（不区分大小写）
+
+    Args:
+        combo: 按键组合字符串，如 "Ctrl+A"、"Alt+Shift+S"、"Enter"
+
+    Raises:
+        ValueError: 包含无法识别的按键时抛出
+    """
+    keys = [k.strip().lower() for k in combo.split("+")]
+    vk_codes: list[int] = []
+    for key in keys:
+        if key in _VK_MAP:
+            vk_codes.append(_VK_MAP[key])
+        elif len(key) == 1 and key.isalpha():
+            vk_codes.append(ord(key.upper()))
+        else:
+            raise ValueError(f"无法识别的按键: {key!r}")
+
+    for vk in vk_codes:
+        win32api.keybd_event(vk, 0, 0, 0)
+    for vk in reversed(vk_codes):
+        win32api.keybd_event(vk, 0, win32con.KEYEVENTF_KEYUP, 0)
+
+
 def select_all():
-    win32api.keybd_event(win32con.VK_CONTROL, 0, 0, 0)
-    win32api.keybd_event(ord("A"), 0, 0, 0)
-    win32api.keybd_event(ord("A"), 0, win32con.KEYEVENTF_KEYUP, 0)
-    win32api.keybd_event(win32con.VK_CONTROL, 0, win32con.KEYEVENTF_KEYUP, 0)
+    send_shortcut("Ctrl+A")
 
 
 def copy():
-    win32api.keybd_event(win32con.VK_CONTROL, 0, 0, 0)
-    win32api.keybd_event(ord("C"), 0, 0, 0)
-    win32api.keybd_event(ord("C"), 0, win32con.KEYEVENTF_KEYUP, 0)
-    win32api.keybd_event(win32con.VK_CONTROL, 0, win32con.KEYEVENTF_KEYUP, 0)
+    send_shortcut("Ctrl+C")
 
 
 def get_clipboard():
@@ -271,10 +310,7 @@ def set_clipboard(fmt, data):
 
 
 def simulate_paste():
-    win32api.keybd_event(win32con.VK_CONTROL, 0, 0, 0)
-    win32api.keybd_event(ord("V"), 0, 0, 0)
-    win32api.keybd_event(ord("V"), 0, win32con.KEYEVENTF_KEYUP, 0)
-    win32api.keybd_event(win32con.VK_CONTROL, 0, win32con.KEYEVENTF_KEYUP, 0)
+    send_shortcut("Ctrl+V")
 
 
 def copy_text(text):
@@ -8786,6 +8822,14 @@ class Weixin(WeixinWindow):
                 - "wcocr":    使用微信自带 OCR（默认）
                 - "rapidocr": 使用 RapidOCR
         """
+        # 微信全局快捷键映射：名称 -> 按键组合
+        self._shortcuts = {
+            "发送消息": "Enter",
+            "语音输入文字": "Ctrl+Win",
+            "截图": "Alt+A",
+            "锁定": "Ctrl+L",
+            "显示窗口": "Ctrl+Alt+W",
+        }
         if ocr_engine not in ("wcocr", "rapidocr"):
             raise ValueError(f"ocr_engine 参数必须为 'wcocr' 或 'rapidocr'，当前: {ocr!r}")
 
@@ -8839,12 +8883,7 @@ class Weixin(WeixinWindow):
     @staticmethod
     def wakeup_window():
         """按下ctrl+alt+w唤醒微信窗口"""
-        win32api.keybd_event(win32con.VK_CONTROL, 0, 0, 0)
-        win32api.keybd_event(win32con.VK_MENU, 0, 0, 0)
-        win32api.keybd_event(ord('W'), 0, 0, 0)
-        win32api.keybd_event(ord('W'), 0, win32con.KEYEVENTF_KEYUP, 0)
-        win32api.keybd_event(win32con.VK_MENU, 0, win32con.KEYEVENTF_KEYUP, 0)
-        win32api.keybd_event(win32con.VK_CONTROL, 0, win32con.KEYEVENTF_KEYUP, 0)
+        send_shortcut("Ctrl+Alt+W")
 
     @staticmethod
     def _is_process_running(name: str) -> bool:
@@ -9354,6 +9393,28 @@ class Weixin(WeixinWindow):
             raise RuntimeError("弹出菜单中未找到锁定按钮")
         lock_btn.Click(ratioX=_rand_ratio(), ratioY=_rand_ratio())
 
+    def shortcut(self, name: str):
+        """
+        通过快捷键名称执行对应的键盘快捷键。
+
+        支持的快捷键名称（见 self._shortcuts）：
+        - "发送消息":     Enter
+        - "语音输入文字": Ctrl+Win
+        - "截图":         Alt+A
+        - "锁定":         Ctrl+L
+        - "显示窗口":     Ctrl+Alt+W
+
+        也可以直接传入按键组合字符串，如 "Ctrl+Shift+A"。
+
+        Args:
+            name: 快捷键名称或按键组合字符串
+
+        Raises:
+            ValueError: 名称未注册且无法解析为按键组合时抛出
+        """
+        combo = self._shortcuts.get(name, name)
+        send_shortcut(combo)
+
     def ocr(self, image: bytes | str) -> dict:
         """
         识别图片中的文本内容。
@@ -9644,21 +9705,22 @@ class Weixin(WeixinWindow):
 
 if __name__ == "__main__":
     wx = Weixin(ocr_engine="wcocr")
+    wx.shortcut("截图")
     # wx.set_room_name("AI测试2", "AI测试")
     # wx.set_room_remark("AI测试", "agi")
     # wx.set_room_nickname("AI测试", "milo2 2号")
     # wx.set_room_announcement("AI测试", "这是群公告2")
     # wx.clear_room_chat_history("AI测试")
 
-    wx.set_room_info(
-        nickname="AI测试",
-        name="AI测试群",
-        announcement="群公告测试",
-        remark="群聊备注",
-        my_nickname="milo2 2号",
-        pin=True,
-        mute=True,
-        fold=True,
-        save_address_book=True,
-        display_member_nickname=True
-    )
+    # wx.set_room_info(
+    #     nickname="AI测试",
+    #     name="AI测试群",
+    #     announcement="群公告测试",
+    #     remark="群聊备注",
+    #     my_nickname="milo2 2号",
+    #     pin=True,
+    #     mute=True,
+    #     fold=True,
+    #     save_address_book=True,
+    #     display_member_nickname=True
+    # )
