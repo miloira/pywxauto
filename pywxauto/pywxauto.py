@@ -105,7 +105,11 @@ import uiautomation as auto
 
 from PIL import Image
 
-import wcocr
+try:
+    import wcocr
+except ImportError:
+    pass
+
 from rapidocr import RapidOCR
 
 
@@ -9704,8 +9708,8 @@ class Weixin(WeixinWindow):
 
 
 if __name__ == "__main__":
-    wx = Weixin(ocr_engine="wcocr")
-    wx.shortcut("截图")
+    wx = Weixin(ocr_engine="rapidocr")
+    # wx.shortcut("截图")
     # wx.set_room_name("AI测试2", "AI测试")
     # wx.set_room_remark("AI测试", "agi")
     # wx.set_room_nickname("AI测试", "milo2 2号")
