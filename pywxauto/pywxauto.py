@@ -6206,8 +6206,9 @@ class Chat:
             True 开启，False 关闭
         """
         sw_img_y = int(info["center"][1])
-        scan_start_x = int(info["right_bottom"][0]) + 5
-        for x in range(scan_start_x, img.width):
+        min_x = int(info["right_bottom"][0]) + 5
+        # 从图片右边界向左扫描，开关控件总是靠右对齐
+        for x in range(img.width - 1, min_x, -1):
             r, g, b = img.getpixel((x, sw_img_y))[:3]
             if g > 150 and g - r > 40 and g - b > 40:
                 return True
@@ -6218,7 +6219,8 @@ class Chat:
         """
         通过像素扫描定位开关控件的水平中心坐标（图片坐标系）。
 
-        从文本右边界向右扫描，查找开关的彩色区域（绿色=开启，灰色=关闭），
+        从图片右边界向左扫描（开关控件总是靠右对齐），
+        查找开关的彩色区域（绿色=开启，灰色=关闭），
         返回该区域的水平中心 X 坐标。
 
         开关像素特征：
@@ -6226,10 +6228,11 @@ class Chat:
         - 关闭状态（灰色）: R,G,B 接近且在 180~230 范围，排除纯白背景
 
         Returns:
-            开关中心的 X 坐标（图片坐标系），未找到时回退到文本右侧 60px
+            开关中心的 X 坐标（图片坐标系），未找到时回退到图片右侧 - 40px
         """
         sw_img_y = int(info["center"][1])
-        scan_start_x = int(info["right_bottom"][0]) + 5
+        # 开关不会超出文本右边界的左侧，设为扫描下限
+        min_x = int(info["right_bottom"][0]) + 5
 
         switch_left = -1
         switch_right = -1
@@ -6237,7 +6240,8 @@ class Chat:
         gap = 0  # 连续非开关像素计数，允许小间隙（圆形滑块中间有白色区域）
         max_gap = 15  # 开关滑块直径约 20px，允许 15px 间隙
 
-        for x in range(scan_start_x, img.width):
+        # 从图片右边界向左扫描，先找到开关的右边缘
+        for x in range(img.width - 1, min_x, -1):
             r, g, b = img.getpixel((x, sw_img_y))[:3]
             # 绿色（开启）
             is_green = g > 150 and g - r > 40 and g - b > 40
@@ -6245,12 +6249,12 @@ class Chat:
             is_gray = (180 < r < 230 and 180 < g < 230 and 180 < b < 230
                        and abs(r - g) < 15 and abs(r - b) < 15)
             if is_green or is_gray:
-                if switch_left < 0:
-                    switch_left = x
-                switch_right = x
+                if switch_right < 0:
+                    switch_right = x
+                switch_left = x
                 gap = 0
             else:
-                if switch_left >= 0:
+                if switch_right >= 0:
                     gap += 1
                     if gap > max_gap:
                         break
@@ -6258,8 +6262,8 @@ class Chat:
         if switch_left >= 0 and switch_right > switch_left:
             return (switch_left + switch_right) // 2
 
-        # 回退：文本右边界 + 60px（大致在开关中心附近）
-        return int(info["right_bottom"][0]) + 60
+        # 回退：图片右边界 - 40px（开关通常在最右侧）
+        return img.width - 40
 
     def _toggle_ocr_switch(self, img, ocr_data, hwnd,
                            switch_name: str, enable: bool):
@@ -6404,8 +6408,11 @@ class Chat:
 
                 announcement_pane.SendKeys("{Ctrl}a{Del}")
                 paste(announcement)
+
                 time.sleep(0.5)
 
+                pane_png = capture_window2(pane_hwnd)
+                pane_ocr = self._get_image_text(pane_png)
                 if "完成" not in pane_ocr:
                     raise RuntimeError("OCR 未识别到'完成'按钮")
                 fi = pane_ocr["完成"]
@@ -9643,22 +9650,15 @@ if __name__ == "__main__":
     # wx.set_room_announcement("AI测试", "这是群公告2")
     # wx.clear_room_chat_history("AI测试")
 
-    # wx.set_room_info(
-    #     nickname="AI测试",
-    #     name="AI测试群",
-    #     announcement="这是群公告",
-    #     remark="群聊备注",
-    #     my_nickname="milo2 2号",
-    #     pin=True,
-    #     mute=True,
-    #     fold=True,
-    #     save_address_book=True,
-    #     display_member_nickname=True
-    # )
-    wx.add_room_members("AI测试", ["七夏"])
-
-    # moments = wx.moment.get(5)
-    # print(json.dumps(moments, ensure_ascii=False))
-
-    result = wx.ocr(r"C:\Users\张明明\Desktop\QQ截图20260429110605.png")
-    print(result)
+    wx.set_room_info(
+        nickname="AI测试",
+        name="AI测试群",
+        announcement="这是群公告",
+        remark="群聊备注",
+        my_nickname="milo2 2号",
+        pin=True,
+        mute=True,
+        fold=True,
+        save_address_book=True,
+        display_member_nickname=True
+    )
