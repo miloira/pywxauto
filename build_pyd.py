@@ -52,7 +52,7 @@ for root, dirs, files in os.walk("build"):
             src_path = os.path.join(root, f)
             dst_path = os.path.join("pywxauto", f)
             shutil.copy2(src_path, dst_path)
-            print(f"\n✅ 编译成功: {dst_path}")
-            print(f"   文件大小: {os.path.getsize(dst_path) / 1024:.1f} KB")
+            print(f"\n[OK] compile success: {dst_path}")
+            print(f"     file size: {os.path.getsize(dst_path) / 1024:.1f} KB")
 
-print("\n💡 提示: 分发时只需要 .pyd 文件，可以删除 pywxauto/pywxauto.py 源码")
+print("\n[TIP] only .pyd/.so files are needed for distribution, you can remove pywxauto.py source code")
