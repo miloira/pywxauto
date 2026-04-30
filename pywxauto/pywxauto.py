@@ -342,14 +342,6 @@ def paste(content, interval=0):
     simulate_paste()
 
 
-def recognize_qrcode(image_bytes):
-    image_matrix = np.frombuffer(image_bytes, np.uint8)
-    image = cv2.imdecode(image_matrix, cv2.IMREAD_COLOR)
-    detector = cv2.QRCodeDetector()
-    content, box, _ = detector.detectAndDecode(image)
-    return content
-
-
 def capture_window(hwnd, offset_left=0, offset_top=0, offset_right=0, offset_bottom=0):
     """
     获取窗口截图，支持四边偏移裁剪。
@@ -8978,7 +8970,7 @@ class Weixin(WeixinWindow):
             "显示窗口": "Ctrl+Alt+W",
         }
         if ocr_engine not in ("wcocr", "rapidocr"):
-            raise ValueError(f"ocr_engine 参数必须为 'wcocr' 或 'rapidocr'，当前: {ocr!r}")
+            raise ValueError(f"ocr_engine 参数必须为 'wcocr' 或 'rapidocr'，当前: {ocr_engine!r}")
 
         self._ocr_engine = ocr_engine
 
