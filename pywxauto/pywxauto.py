@@ -70,6 +70,7 @@
 from __future__ import annotations
 
 import ctypes
+import ctypes.wintypes
 import fnmatch
 import glob
 import hashlib
@@ -104,7 +105,7 @@ from pyee.base import EventEmitter
 from rapidocr import RapidOCR
 
 try:
-    import wcocr
+    from . import wcocr
 except ImportError:
     pass
 
@@ -300,6 +301,177 @@ def select_all() -> None:
 
 def copy() -> None:
     send_shortcut("Ctrl+C")
+
+
+# ---- 用户物理输入空闲检测 ----
+# 通过 WH_KEYBOARD_LL / WH_MOUSE_LL 底层钩子监听输入事件，
+# 利用 LLKHF_INJECTED 标志位过滤掉程序模拟的输入（keybd_event、SendInput），
+# 只记录物理键盘/鼠标的最后操作时间。
+
+_LLKHF_INJECTED = 0x00000010
+_LLMHF_INJECTED = 0x00000001
+_WH_KEYBOARD_LL = 13
+_WH_MOUSE_LL = 14
+_WM_QUIT = 0x0012
+
+_LowLevelHookProc = ctypes.WINFUNCTYPE(
+    ctypes.c_long,       # LRESULT
+    ctypes.c_int,        # nCode
+    ctypes.c_ulonglong,  # wParam (WPARAM)
+    ctypes.c_void_p,     # lParam (LPARAM)
+)
+
+# 设置 CallNextHookEx 参数类型，避免 64 位系统上 lParam 溢出
+ctypes.windll.user32.CallNextHookEx.argtypes = [
+    ctypes.c_void_p,     # hhk (HHOOK)
+    ctypes.c_int,        # nCode
+    ctypes.c_ulonglong,  # wParam (WPARAM)
+    ctypes.c_void_p,     # lParam (LPARAM)
+]
+ctypes.windll.user32.CallNextHookEx.restype = ctypes.c_long
+
+
+class _KBDLLHOOKSTRUCT(ctypes.Structure):
+    _fields_ = [
+        ("vkCode", ctypes.c_ulong),
+        ("scanCode", ctypes.c_ulong),
+        ("flags", ctypes.c_ulong),
+        ("time", ctypes.c_ulong),
+        ("dwExtraInfo", ctypes.POINTER(ctypes.c_ulong)),
+    ]
+
+
+class _MSLLHOOKSTRUCT(ctypes.Structure):
+    _fields_ = [
+        ("pt_x", ctypes.c_long),
+        ("pt_y", ctypes.c_long),
+        ("mouseData", ctypes.c_ulong),
+        ("flags", ctypes.c_ulong),
+        ("time", ctypes.c_ulong),
+        ("dwExtraInfo", ctypes.POINTER(ctypes.c_ulong)),
+    ]
+
+
+class PhysicalInputMonitor:
+    """
+    物理键盘/鼠标输入监控器。
+
+    在后台线程中运行底层钩子，仅记录物理设备的输入时间，
+    过滤掉 keybd_event / SendInput 等程序模拟的输入。
+
+    用法::
+
+        monitor = PhysicalInputMonitor()
+        monitor.start()
+
+        # 获取物理输入空闲秒数
+        idle = monitor.get_idle_duration()
+
+        # 等待用户停止物理操作 3 秒
+        monitor.wait_for_idle(3.0)
+
+        monitor.stop()
+    """
+
+    def __init__(self):
+        self._last_physical_input: float = time.monotonic()
+        self._lock = threading.Lock()
+        self._thread: Optional[threading.Thread] = None
+        self._thread_id: Optional[int] = None
+        self._running = False
+        # 保持回调引用防止被 GC
+        self._kb_proc = _LowLevelHookProc(self._keyboard_hook)
+        self._mouse_proc = _LowLevelHookProc(self._mouse_hook)
+
+    def _touch(self) -> None:
+        with self._lock:
+            self._last_physical_input = time.monotonic()
+
+    def _keyboard_hook(self, nCode, wParam, lParam) -> int:
+        if nCode >= 0 and lParam:
+            kb = ctypes.cast(lParam, ctypes.POINTER(_KBDLLHOOKSTRUCT)).contents
+            if not (kb.flags & _LLKHF_INJECTED):
+                self._touch()
+        return ctypes.windll.user32.CallNextHookEx(None, nCode, wParam, lParam)
+
+    def _mouse_hook(self, nCode, wParam, lParam) -> int:
+        if nCode >= 0 and lParam:
+            ms = ctypes.cast(lParam, ctypes.POINTER(_MSLLHOOKSTRUCT)).contents
+            if not (ms.flags & _LLMHF_INJECTED):
+                self._touch()
+        return ctypes.windll.user32.CallNextHookEx(None, nCode, wParam, lParam)
+
+    def _hook_thread(self) -> None:
+        self._thread_id = ctypes.windll.kernel32.GetCurrentThreadId()
+
+        kb_hook = ctypes.windll.user32.SetWindowsHookExW(
+            _WH_KEYBOARD_LL, self._kb_proc, None, 0,
+        )
+        mouse_hook = ctypes.windll.user32.SetWindowsHookExW(
+            _WH_MOUSE_LL, self._mouse_proc, None, 0,
+        )
+
+        # 消息循环（钩子需要消息泵驱动）
+        msg = ctypes.wintypes.MSG()
+        while ctypes.windll.user32.GetMessageW(ctypes.byref(msg), None, 0, 0) > 0:
+            ctypes.windll.user32.TranslateMessage(ctypes.byref(msg))
+            ctypes.windll.user32.DispatchMessageW(ctypes.byref(msg))
+
+        if kb_hook:
+            ctypes.windll.user32.UnhookWindowsHookEx(kb_hook)
+        if mouse_hook:
+            ctypes.windll.user32.UnhookWindowsHookEx(mouse_hook)
+
+    def start(self) -> None:
+        """启动物理输入监控（后台线程）"""
+        if self._running:
+            return
+        self._running = True
+        self._last_physical_input = time.monotonic()
+        self._thread = threading.Thread(
+            target=self._hook_thread, daemon=True, name="physical-input-monitor",
+        )
+        self._thread.start()
+        # 等待线程 ID 就绪
+        for _ in range(50):
+            if self._thread_id is not None:
+                break
+            time.sleep(0.01)
+
+    def stop(self) -> None:
+        """停止物理输入监控"""
+        if not self._running:
+            return
+        self._running = False
+        if self._thread_id:
+            ctypes.windll.user32.PostThreadMessageW(
+                self._thread_id, _WM_QUIT, 0, 0,
+            )
+        if self._thread:
+            self._thread.join(timeout=3)
+        self._thread = None
+        self._thread_id = None
+
+    def get_idle_duration(self) -> float:
+        """
+        获取自上次物理键盘/鼠标操作以来的空闲秒数。
+
+        Returns:
+            空闲秒数（float）
+        """
+        with self._lock:
+            return time.monotonic() - self._last_physical_input
+
+    def wait_for_idle(self, min_idle: float = 3.0, check_interval: float = 0.5) -> None:
+        """
+        阻塞等待，直到物理输入空闲时间达到指定秒数。
+
+        Args:
+            min_idle:       最小空闲时长（秒），默认 3 秒
+            check_interval: 检测间隔（秒），默认 0.5 秒
+        """
+        while self.get_idle_duration() < min_idle:
+            time.sleep(check_interval)
 
 
 def get_clipboard() -> str:
@@ -9069,7 +9241,7 @@ class Weixin(WeixinWindow):
     WINDOW_REGEX = "微信|Weixin"
 
     def __init__(self, install_path: Optional[str] = None, wxocr_path: Optional[str] = None,
-                 ocr_engine: str = "wcocr"):
+                 ocr_engine: str = "wcocr", human_wait: float = 0):
         """
         Args:
             install_path: 微信安装路径，None 时自动检测
@@ -9077,9 +9249,18 @@ class Weixin(WeixinWindow):
             ocr_engine:   OCR 引擎选择
                 - "wcocr":    使用微信自带 OCR（默认）
                 - "rapidocr": 使用 RapidOCR
+            human_wait:   人类操作等待时间（秒），大于 0 时启用物理输入监控，
+                          自动化操作前会等待用户停止物理键盘/鼠标操作达到该秒数。
+                          默认 0 表示不等待。
         """
         # 事件处理器 (pyee EventEmitter)
         self._ee = EventEmitter()
+        # 人类操作等待
+        self._human_wait = human_wait
+        self._input_monitor: Optional[PhysicalInputMonitor] = None
+        if human_wait > 0:
+            self._input_monitor = PhysicalInputMonitor()
+            self._input_monitor.start()
         # 微信全局快捷键映射：名称 -> 按键组合
         self._shortcuts = {
             "发送消息": "Enter",
@@ -9236,6 +9417,7 @@ class Weixin(WeixinWindow):
 
     def open_session(self, nickname: str) -> Chat:
         """通过在会话列表中查找并点击来打开指定会话，返回 Chat 对象"""
+        self._wait_human_idle()
         self.activate()
         if not self.has_session:
             self.navigator.switch_to("微信")
@@ -9249,6 +9431,7 @@ class Weixin(WeixinWindow):
 
     def open_session_by_search(self, nickname: str, chat_type: Optional[list[str]] = None, force_search: bool = False) -> Chat:
         """通过搜索打开指定会话，返回 Chat 对象"""
+        self._wait_human_idle()
         self.activate()
         if not self.has_session:
             self.navigator.switch_to("微信")
@@ -9309,6 +9492,7 @@ class Weixin(WeixinWindow):
 
         content: 笔记内容
         """
+        self._wait_human_idle()
         self.activate()
         self.navigator.switch_to("微信")
         note = self.session.new_note()
@@ -9322,6 +9506,7 @@ class Weixin(WeixinWindow):
 
         nickname_list: 好友昵称列表，至少需要两个好友才能创建群聊。
         """
+        self._wait_human_idle()
         self.activate()
         if not self.has_session:
             self.navigator.switch_to("微信")
@@ -9638,6 +9823,7 @@ class Weixin(WeixinWindow):
             f.write(png_bytes)
 
     def lock(self) -> None:
+        self._wait_human_idle()
         self.activate()
         more_btn = self.navigator._win.ButtonControl(Name="更多")
         if not more_btn.Exists(maxSearchSeconds=2):
@@ -9772,6 +9958,17 @@ class Weixin(WeixinWindow):
     def _window(self) -> auto.WindowControl:
         """覆盖基类属性，Weixin 使用 self.window 而非 self._win"""
         return self.window
+
+    # ---- 人类操作等待 ----
+
+    def _wait_human_idle(self) -> None:
+        """
+        等待物理输入空闲达到 human_wait 秒。
+
+        仅在 human_wait > 0 且 PhysicalInputMonitor 已启动时生效。
+        """
+        if self._input_monitor and self._human_wait > 0:
+            self._input_monitor.wait_for_idle(self._human_wait)
 
     # ---- 事件处理机制 (pyee) ----
 
@@ -10313,38 +10510,3 @@ class Weixin(WeixinWindow):
             for t in threads.values():
                 t.join(timeout=3)
             logger.info("监听已停止")
-
-
-if __name__ == "__main__":
-    wx = Weixin()
-
-    @wx.handle(TEXT_MESSAGE)
-    def on_msg(chat, message):
-        print(f"[{chat.current_name}] {message}")
-        if message.sender_type != SenderType.SELF:
-            chat.send_text(message.content)
-
-    wx.add_listener(["写诗喂狗", "AI测试群", "泡泡马特发货群"], offscreen=True)
-    wx.run()  
-
-
-    # 阻塞运行，Ctrl+C 退出
-    # wx.shortcut("截图")
-    # wx.set_room_name("AI测试2", "AI测试")
-    # wx.set_room_remark("AI测试", "agi")
-    # wx.set_room_nickname("AI测试", "milo2 2号")
-    # wx.set_room_announcement("AI测试", "这是群公告2")
-    # wx.clear_room_chat_history("AI测试")
-
-    # wx.set_room_info(
-    #     nickname="AI测试",
-    #     name="AI测试群",
-    #     announcement="群公告测试",
-    #     remark="群聊备注",
-    #     my_nickname="milo2 2号",
-    #     pin=True,
-    #     mute=True,
-    #     fold=True,
-    #     save_address_book=True,
-    #     display_member_nickname=True
-    # )
