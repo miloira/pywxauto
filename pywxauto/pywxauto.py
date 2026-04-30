@@ -2643,6 +2643,7 @@ class FileManager:
     # 确认对话框的类名（微信 v4 使用 mmui::XDialog，浮动于桌面层级）
     CONFIRM_DIALOG_WIN_CLASS = "mmui::XDialog"
     SAVE_AS_MENU_ITEM_NAME = "另存为..."
+    DOWNLOAD_TO_MENU_ITEM_NAME = "下载到..."
     DOWNLOAD_MENU_ITEM_NAME = "下载"
     DELETE_MENU_ITEM_NAME = "删除"
 
@@ -2877,6 +2878,73 @@ class FileManager:
             auto.SendKeys("{Esc}", waitTime=0.3)
             return False
 
+    def download_to(self, file_cell, file_path: str) -> bool:
+        """
+        对文件列表中的某个文件执行"下载到"操作。
+
+        流程与 save_file_as 一致，只是点击的菜单项为"下载到..."。
+
+        Args:
+            file_cell: mmui::FileListCell 控件对象（从 get_all_files 返回的 ChatFile._cell）
+            file_path: 完整的保存路径（含文件名），如 "C:\\download\\test.xlsx"
+        """
+        fm_win = self._find_window()
+        if not fm_win:
+            raise RuntimeError("聊天文件窗口未打开")
+
+        # 确保目标目录存在
+        dir_path = os.path.dirname(file_path)
+        if dir_path:
+            os.makedirs(dir_path, exist_ok=True)
+
+        # 1. 右键点击文件项
+        file_cell.RightClick(simulateMove=False, waitTime=0.3)
+        time.sleep(0.5)
+
+        # 2. 定位右键菜单
+        menu = self._find_context_menu_by_point()
+        if not menu:
+            raise RuntimeError("未找到右键菜单")
+
+        # 查找"下载到..."菜单项
+        download_to_item = None
+        for child in menu.GetChildren():
+            if child.Name == self.DOWNLOAD_TO_MENU_ITEM_NAME:
+                download_to_item = child
+                break
+
+        if not download_to_item:
+            raise RuntimeError("未找到'下载到'菜单项")
+
+        download_to_item.Click(simulateMove=False, waitTime=0.3)
+        time.sleep(1)
+
+        # 3. 查找 Windows 文件保存对话框（聊天文件窗口的子窗口）
+        save_dialog = fm_win.WindowControl(ClassName="#32770", searchDepth=3)
+        if not save_dialog.Exists(maxSearchSeconds=5):
+            raise RuntimeError("未找到 Windows 文件保存对话框")
+
+        # 定位文件名输入框
+        file_name_edit = save_dialog.EditControl(
+            AutomationId="1001", searchDepth=10
+        )
+        if not file_name_edit.Exists(maxSearchSeconds=3):
+            raise RuntimeError("未找到文件名输入框")
+
+        file_name_edit.GetValuePattern().SetValue(file_path)
+
+        # 如果目标文件已存在，先删除（避免覆盖确认弹窗）
+        if os.path.exists(file_path):
+            os.remove(file_path)
+
+        # 快捷键保存
+        auto.SendKeys("{Alt}s", waitTime=0.5)
+        if not save_dialog.Exists(maxSearchSeconds=2):
+            return True
+        else:
+            auto.SendKeys("{Esc}", waitTime=0.3)
+            return False
+
     def delete_file(self, file_cell) -> bool:
         """
         删除文件列表中的某个文件。
@@ -3053,6 +3121,15 @@ class FileManager:
             file_status = " ".join(status_tokens)
         else:
             file_status = ""
+
+        # 处理 source_name 以 " 未下载" 结尾的情况：
+        # 微信文件列表中未下载的文件，"未下载"会紧跟在来源名称后面，
+        # 被错误地解析为 source_name 的一部分。
+        # 例如: "泡泡马特发货群 未下载 18:20 ..." 中 source_name 会被解析为
+        # "泡泡马特发货群 未下载"，需要将 "未下载" 拆分到 file_status 中。
+        if source_name.endswith(" 未下载"):
+            source_name = source_name.rstrip(" 未下载")
+            file_status = "未下载"
 
         left_tokens = left_part.rsplit(" ", 1)
         if len(left_tokens) == 2:
