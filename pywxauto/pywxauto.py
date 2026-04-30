@@ -383,6 +383,7 @@ class PIM:
 
     # ---- 类变量（全局单例状态） ----
     human_wait: float = 0
+    block: bool = False
     _running: bool = False
     _last_physical_input: float = 0
     _lock: threading.Lock = threading.Lock()
@@ -391,12 +392,15 @@ class PIM:
     _kb_proc = None
     _mouse_proc = None
 
-    def __init__(self, human_wait: float = 0):
+    def __init__(self, human_wait: float = 0, block: bool = False):
         PIM.human_wait = human_wait
+        PIM.block = block
 
-    def __call__(self, human_wait: float = None) -> "PIM":
+    def __call__(self, human_wait: float = None, block: bool = None) -> "PIM":
         if human_wait is not None:
             PIM.human_wait = human_wait
+        if block is not None:
+            PIM.block = block
         return self
 
     def __enter__(self) -> "PIM":
@@ -499,10 +503,30 @@ class PIM:
         while PIM.get_idle_duration() < min_idle:
             time.sleep(check_interval)
 
+    # ---- 锁定/解锁物理输入 ----
+
+    @staticmethod
+    def block_input() -> None:
+        """锁定物理键盘鼠标输入（需要管理员权限）"""
+        ctypes.windll.user32.BlockInput(True)
+
+    @staticmethod
+    def unblock_input() -> None:
+        """解锁物理键盘鼠标输入"""
+        ctypes.windll.user32.BlockInput(False)
+
+    # ---- 装饰器 ----
+
     @staticmethod
     def wait_idle(func_or_wait=None):
         """
         类装饰器：被装饰的方法执行前等待物理输入空闲。
+
+        等待时间和是否锁定输入由 PIM.human_wait 和 PIM.block 控制，
+        通过 PIM(human_wait=3, block=True) 或 Weixin(human_wait=3, block=True) 设置。
+
+        Args:
+            func_or_wait: 函数或等待秒数（覆盖 human_wait）
 
         用法::
 
@@ -514,21 +538,29 @@ class PIM:
         """
         import functools
 
-        def _make_wrapper(fn, fixed_wait=None):
+        def _make_wrapper(fn, fixed_wait=None, do_block=None):
             @functools.wraps(fn)
             def wrapper(*args, **kwargs):
                 if PIM._running and PIM.human_wait > 0:
                     t = fixed_wait if fixed_wait is not None else PIM.human_wait
                     PIM.wait_for_idle(t)
-                return fn(*args, **kwargs)
+                should_block = do_block if do_block is not None else PIM.block
+                if should_block:
+                    PIM.block_input()
+                try:
+                    return fn(*args, **kwargs)
+                finally:
+                    if should_block:
+                        PIM.unblock_input()
             return wrapper
 
         if callable(func_or_wait):
             return _make_wrapper(func_or_wait)
 
         if isinstance(func_or_wait, (int, float)):
+            fixed = float(func_or_wait)
             def decorator(fn):
-                return _make_wrapper(fn, float(func_or_wait))
+                return _make_wrapper(fn, fixed_wait=fixed)
             return decorator
 
         if func_or_wait is None:
@@ -9444,7 +9476,7 @@ class Weixin(WeixinWindow):
     WINDOW_REGEX = "微信|Weixin"
 
     def __init__(self, install_path: Optional[str] = None, wxocr_path: Optional[str] = None,
-                 ocr_engine: str = "wcocr", human_wait: float = 0):
+                 ocr_engine: str = "wcocr", human_wait: float = 0, block: bool = False):
         """
         Args:
             install_path: 微信安装路径，None 时自动检测
@@ -9455,10 +9487,12 @@ class Weixin(WeixinWindow):
             human_wait:   人类操作等待时间（秒），大于 0 时自动启动物理输入监控，
                           所有 UI 操作方法执行前会等待用户停止物理键盘/鼠标操作达到该秒数。
                           默认 0 表示不等待。
+            block:        True 时在自动化操作期间锁定物理键盘鼠标（需管理员权限），
+                          默认 False。
         """
         # 物理输入监控
         if human_wait > 0:
-            PIM(human_wait=human_wait)
+            PIM(human_wait=human_wait, block=block)
             PIM.start()
         # 事件处理器 (pyee EventEmitter)
         self._ee = EventEmitter()
