@@ -407,6 +407,93 @@ def capture_window(hwnd: int, offset_left: int = 0, offset_top: int = 0,
     return buffer.getvalue()
 
 
+def c(hwnd, control) -> bytes:
+    """
+    通过 PrintWindow API 截取微信窗口，然后裁剪出指定控件区域的图像。
+
+    PrintWindow 支持截取被遮挡/最小化的窗口，适合在消息监听场景下
+    对单条消息控件进行截图（控件可能不在前台可见区域）。
+
+    Args:
+        hwnd:    微信窗口句柄（主窗口或独立聊天窗口）
+        control: uiautomation 控件对象（如 ListItemControl），
+                 需要有 BoundingRectangle 属性
+
+    Returns:
+        PNG 格式的 bytes 数据（裁剪后的控件区域图像）
+
+    Raises:
+        Exception: 窗口区域无效或控件区域超出窗口范围时抛出
+    """
+    # 获取窗口在屏幕上的绝对坐标
+    win_left, win_top, win_right, win_bottom = win32gui.GetWindowRect(hwnd)
+    win_width = win_right - win_left
+    win_height = win_bottom - win_top
+
+    if win_width <= 0 or win_height <= 0:
+        raise Exception(f"窗口区域无效: 宽度={win_width}, 高度={win_height}")
+
+    # 获取控件在屏幕上的绝对坐标
+    ctrl_rect = control.BoundingRectangle
+    ctrl_left = ctrl_rect.left
+    ctrl_top = ctrl_rect.top
+    ctrl_right = ctrl_rect.right
+    ctrl_bottom = ctrl_rect.bottom
+
+    # 计算控件相对于窗口左上角的偏移
+    rel_left = ctrl_left - win_left
+    rel_top = ctrl_top - win_top
+    rel_right = ctrl_right - win_left
+    rel_bottom = ctrl_bottom - win_top
+
+    # 裁剪区域边界检查（限制在窗口范围内）
+    rel_left = max(0, rel_left)
+    rel_top = max(0, rel_top)
+    rel_right = min(win_width, rel_right)
+    rel_bottom = min(win_height, rel_bottom)
+
+    crop_width = rel_right - rel_left
+    crop_height = rel_bottom - rel_top
+
+    if crop_width <= 0 or crop_height <= 0:
+        raise Exception(
+            f"控件区域无效: 宽度={crop_width}, 高度={crop_height}，"
+            f"控件可能不在窗口可见范围内"
+        )
+
+    # 使用 PrintWindow 截取整个窗口
+    hwndDC = win32gui.GetWindowDC(hwnd)
+    mfcDC = win32ui.CreateDCFromHandle(hwndDC)
+    saveDC = mfcDC.CreateCompatibleDC()
+
+    saveBitmap = win32ui.CreateBitmap()
+    saveBitmap.CreateCompatibleBitmap(mfcDC, win_width, win_height)
+    saveDC.SelectObject(saveBitmap)
+
+    # PW_RENDERFULLCONTENT = 3，支持 DWM 合成窗口
+    ctypes.windll.user32.PrintWindow(hwnd, saveDC.GetSafeHdc(), 3)
+
+    bmp_info = saveBitmap.GetInfo()
+    bmp_str = saveBitmap.GetBitmapBits(True)
+    img = Image.frombuffer(
+        "RGB",
+        (bmp_info["bmWidth"], bmp_info["bmHeight"]),
+        bmp_str, "raw", "BGRX", 0, 1,
+    )
+
+    win32gui.DeleteObject(saveBitmap.GetHandle())
+    saveDC.DeleteDC()
+    mfcDC.DeleteDC()
+    win32gui.ReleaseDC(hwnd, hwndDC)
+
+    # 裁剪出控件区域
+    img = img.crop((rel_left, rel_top, rel_right, rel_bottom))
+
+    buffer = io.BytesIO()
+    img.save(buffer, format="PNG")
+    return buffer.getvalue()
+
+
 class RegistryError(Exception):
     """注册表操作异常"""
     pass
@@ -4085,6 +4172,9 @@ class Chat:
         list_rect = lc.BoundingRectangle
         list_center_x = (list_rect.left + list_rect.right) // 2
 
+        # 获取窗口句柄，用于 PrintWindow 截图
+        hwnd = self._win.NativeWindowHandle or 0
+
         # 收集所有消息控件
         candidates: list[auto.Control] = []
         for ctrl, _ in auto.WalkControl(lc):
@@ -4098,7 +4188,7 @@ class Chat:
         # 倒序查找自己发的
         for ctrl in reversed(candidates):
             sender, sender_type = self._detect_sender(
-                ctrl, list_center_x, self.current_name or "对方",
+                ctrl, list_center_x, self.current_name or "对方", hwnd,
             )
             if sender_type == SenderType.SELF:
                 return ctrl
@@ -5268,6 +5358,9 @@ class Chat:
         list_rect = lc.BoundingRectangle
         list_center_x = (list_rect.left + list_rect.right) // 2
 
+        # 获取窗口句柄，用于 PrintWindow 截图
+        hwnd = self._win.NativeWindowHandle or 0
+
         # ClassName -> 消息子类映射
         cls_map: dict[str, type[Message]] = {
             "mmui::ChatTextItemView": TextMessage,
@@ -5314,7 +5407,7 @@ class Chat:
 
             # 判断发送者
             sender, sender_type = self._detect_sender(
-                ctrl, list_center_x, chat_name,
+                ctrl, list_center_x, chat_name, hwnd,
             )
 
             # 构造具体消息对象
@@ -5348,6 +5441,7 @@ class Chat:
     @staticmethod
     def _detect_sender(
         ctrl, list_center_x: int, chat_name: str,
+        hwnd: int = 0,
     ) -> tuple[str, SenderType]:
         """
         判断消息发送者和来源类型。
@@ -5371,11 +5465,11 @@ class Chat:
             return chat_name, SenderType.FRIEND
 
         # 策略2: 截图像素分析
-        return Chat._detect_sender_by_pixel(ctrl, chat_name)
+        return Chat._detect_sender_by_pixel(ctrl, chat_name, hwnd)
 
     @staticmethod
     def _detect_sender_by_pixel(
-        ctrl, chat_name: str,
+        ctrl, chat_name: str, hwnd: int = 0,
     ) -> tuple[str, SenderType]:
         """
         通过扫描气泡区域的颜色判断消息发送者。
@@ -5384,19 +5478,27 @@ class Chat:
         - 绿色气泡：自己发的消息 (G > 180, G-R > 50, G-B > 80)
         - 灰色/白色气泡：对方发的消息 (R,G,B 接近且 > 200)
         采样中间几行像素，统计绿色和灰色像素数量来判断。
+
+        优先使用 capture_control（PrintWindow API）截取控件区域，
+        支持被遮挡/最小化的窗口；若无 hwnd 则回退到 CaptureToImage。
         """
-        tmp_path = os.path.join(tempfile.gettempdir(), "_wxuia_msg.png")
         try:
-            ctrl.CaptureToImage(tmp_path)
-            img = Image.open(tmp_path)
+            if hwnd:
+                png_bytes = capture_control(hwnd, ctrl)
+                img = Image.open(io.BytesIO(png_bytes))
+            else:
+                tmp_path = os.path.join(tempfile.gettempdir(), "_wxuia_msg.png")
+                try:
+                    ctrl.CaptureToImage(tmp_path)
+                    img = Image.open(tmp_path)
+                finally:
+                    if os.path.exists(tmp_path):
+                        try:
+                            os.remove(tmp_path)
+                        except OSError:
+                            pass
         except Exception:
             return "", SenderType.OTHER
-        finally:
-            if os.path.exists(tmp_path):
-                try:
-                    os.remove(tmp_path)
-                except OSError:
-                    pass
 
         w, h = img.size
         green_count = 0
@@ -9628,8 +9730,7 @@ class Weixin(WeixinWindow):
             snap_hash: str = ""
             first_scan = True
 
-            # 置顶并移到屏幕外，窗口仍处于正常状态，UI Automation 正常工作
-            chat.pin()
+            # 移到屏幕外，窗口仍处于正常状态，UI Automation 正常工作
             chat.move_offscreen()
             time.sleep(0.3)
 
@@ -9843,7 +9944,6 @@ class Weixin(WeixinWindow):
             snap_hash: str = ""
             first_scan = True
 
-            chat.pin()
             if self._offscreen:
                 chat.move_offscreen()
             time.sleep(0.3)
@@ -9950,9 +10050,11 @@ class Weixin(WeixinWindow):
 if __name__ == "__main__":
     def on_msg(chat, message):
         print(f"[{chat.current_name}] {message}")
+        if message.sender_type != "self":
+            chat.send_text(message.content)
 
     wx = Weixin(on_msg=on_msg)
-    wx.add_listener(["写诗喂狗", "AI测试群"], offscreen=False)
+    wx.add_listener(["写诗喂狗", "AI测试群"], offscreen=True)
     wx.run()  
 
 
