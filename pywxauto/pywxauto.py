@@ -1368,7 +1368,7 @@ class SessionItem:
         """独立窗口显示"""
         self._require_session()._session_context_action(self.name, "独立窗口显示")
 
-    def separate(self) -> "SeparateChat":
+    def separate_by_dbclick(self) -> "SeparateChat":
         """双击打开独立窗口，返回 SeparateChat 实例"""
         session = self._require_session()
         if session._wx:
@@ -4463,7 +4463,7 @@ class Chat:
 
         raise RuntimeError("未找到收藏面板搜索框")
 
-    def _find_collection_item(self, detail_list, keywords) -> Optional[auto.ListItemControl]:
+    def _find_collection_item(self, detail_list, keyword) -> Optional[auto.ListItemControl]:
         """
         在收藏详情列表中查找第一个有效的搜索结果项。
 
@@ -5000,10 +5000,6 @@ class Chat:
 
             logger.debug(f"名片发送成功: {contact_name} -> {receiver_nickname}")
             return True
-
-        except Exception:
-            # 6. 点击"发送"按钮‘
-            pass
         except Exception:
             # 出错时尝试关闭可能残留的弹窗
             self._cleanup_send_card()
