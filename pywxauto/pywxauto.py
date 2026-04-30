@@ -3995,8 +3995,6 @@ class Chat:
     def _get_image_text(self, image: bytes) -> dict:
         """
         识别图片中的文本内容。
-
-        委托给 Weixin.get_image_text，根据 ocr 参数自动选择引擎。
         """
         if self._wx is None:
             raise RuntimeError("未关联 Weixin 实例，无法执行 OCR")
@@ -9138,7 +9136,7 @@ class Weixin(WeixinWindow):
             return None
 
     def get_contact_profile(self, nickname: str) -> dict:
-        """获取联系人的资料信息，委托给 Chat.get_contact_profile"""
+        """获取联系人的资料信息"""
         chat = self.open_session_by_search(nickname)
         return chat.get_contact_profile()
 
@@ -9148,180 +9146,180 @@ class Weixin(WeixinWindow):
                          phones: list = None,
                          description: str = None,
                          images: list = None) -> None:
-        """一次性设置联系人的备注、标签、电话、描述、图片，委托给 Chat.set_contact_info"""
+        """一次性设置联系人的备注、标签、电话、描述、图片"""
         chat = self.open_session_by_search(nickname)
         chat.set_contact_info(remark=remark, labels=labels, phones=phones,
                               description=description, images=images)
 
     def set_contact_remark(self, nickname: str, remark: str) -> None:
-        """设置联系人的备注名，委托给 Chat.set_contact_remark"""
+        """设置联系人的备注名"""
         chat = self.open_session_by_search(nickname)
         chat.set_contact_remark(remark)
 
     def set_contact_label(self, nickname: str, labels: list[str]) -> None:
-        """为联系人设置标签，委托给 Chat.set_contact_info"""
+        """为联系人设置标签"""
         chat = self.open_session_by_search(nickname)
         chat.set_contact_info(labels=labels)
 
     def set_contact_phone(self, nickname: str, phones: list[str]) -> None:
-        """为联系人设置电话号码，委托给 Chat.set_contact_info"""
+        """为联系人设置电话号码"""
         chat = self.open_session_by_search(nickname)
         chat.set_contact_info(phones=phones)
 
     def set_contact_description(self, nickname: str, description: str) -> None:
-        """设置联系人的描述信息，委托给 Chat.set_contact_info"""
+        """设置联系人的描述信息"""
         chat = self.open_session_by_search(nickname)
         chat.set_contact_info(description=description)
 
     def set_contact_image(self, nickname: str, images: list[str]) -> None:
-        """设置联系人的备注图片（覆盖式），委托给 Chat.set_contact_info"""
+        """设置联系人的备注图片（覆盖式）"""
         chat = self.open_session_by_search(nickname)
         chat.set_contact_info(images=images)
 
     def add_contact_label(self, nickname: str, labels: list[str]) -> None:
-        """为联系人添加标签，委托给 Chat.add_contact_label"""
+        """为联系人添加标签"""
         chat = self.open_session_by_search(nickname)
         chat.add_contact_label(labels)
 
     def add_contact_phone(self, nickname: str, phones: list[str]) -> None:
-        """为联系人添加电话号码，委托给 Chat.add_contact_phone"""
+        """为联系人添加电话号码"""
         chat = self.open_session_by_search(nickname)
         chat.add_contact_phone(phones)
 
     def add_contact_image(self, nickname: str, images: list[str]) -> None:
-        """为联系人添加备注图片，委托给 Chat.add_contact_image"""
+        """为联系人添加备注图片"""
         chat = self.open_session_by_search(nickname)
         chat.add_contact_image(images)
 
     def remove_contact_label(self, nickname: str, labels: list[str]) -> None:
-        """移除联系人的标签，委托给 Chat.remove_contact_label"""
+        """移除联系人的标签"""
         chat = self.open_session_by_search(nickname)
         chat.remove_contact_label(labels)
 
     def remove_contact_phone(self, nickname: str, phones: list[str]) -> None:
-        """移除联系人的电话号码，委托给 Chat.remove_contact_phone"""
+        """移除联系人的电话号码"""
         chat = self.open_session_by_search(nickname)
         chat.remove_contact_phone(phones)
 
     def remove_contact_image(self, nickname: str, images: list[int]) -> None:
-        """删除联系人的备注图片（按序号），委托给 Chat.remove_contact_image"""
+        """删除联系人的备注图片（按序号）"""
         chat = self.open_session_by_search(nickname)
         chat.remove_contact_image(images)
 
     def collect_contact_image(self, nickname: str, images: list[int]) -> int:
-        """收藏联系人的指定备注图片，委托给 Chat.collect_contact_image"""
+        """收藏联系人的指定备注图片"""
         chat = self.open_session_by_search(nickname)
         return chat.collect_contact_image(images)
 
     def save_contact_image(self, nickname: str, images: list[int], save_path: str) -> int:
-        """保存联系人的指定备注图片到指定目录，委托给 Chat.save_contact_image"""
+        """保存联系人的指定备注图片到指定目录"""
         chat = self.open_session_by_search(nickname)
         return chat.save_contact_image(images, save_path)
 
     def set_contact_star(self, nickname: str) -> None:
-        """将联系人设为星标朋友，委托给 Chat.set_contact_star"""
+        """将联系人设为星标朋友"""
         chat = self.open_session_by_search(nickname)
         chat.set_contact_star()
 
     def cancel_contact_star(self, nickname: str) -> None:
-        """取消联系人的星标朋友，委托给 Chat.cancel_contact_star"""
+        """取消联系人的星标朋友"""
         chat = self.open_session_by_search(nickname)
         chat.cancel_contact_star()
 
     def get_friend_permission(self, nickname: str) -> dict:
-        """获取联系人的朋友权限设置，委托给 Chat.get_friend_permission"""
+        """获取联系人的朋友权限设置"""
         chat = self.open_session_by_search(nickname)
         return chat.get_friend_permission()
 
     def set_friend_permission(self, nickname: str, permission: str = "all",
                               hide_my_posts: bool = False,
                               hide_their_posts: bool = False) -> None:
-        """设置联系人的朋友权限，委托给 Chat.set_friend_permission"""
+        """设置联系人的朋友权限"""
         chat = self.open_session_by_search(nickname)
         chat.set_friend_permission(permission, hide_my_posts, hide_their_posts)
 
     def black_contact(self, nickname: str) -> None:
-        """将联系人加入黑名单，委托给 Chat.black_contact"""
+        """将联系人加入黑名单"""
         chat = self.open_session_by_search(nickname)
         chat.black_contact()
 
     def unblack_contact(self, nickname: str) -> None:
-        """将联系人移出黑名单，委托给 Chat.unblack_contact"""
+        """将联系人移出黑名单"""
         chat = self.open_session_by_search(nickname)
         chat.unblack_contact()
 
     def delete_contact(self, nickname: str) -> None:
-        """删除联系人，委托给 Chat.delete_contact"""
+        """删除联系人"""
         chat = self.open_session_by_search(nickname)
         chat.delete_contact()
 
     def recommend_contact(self, nickname: str, receiver_nickname: str) -> bool:
-        """将指定联系人推荐给另一个朋友（发送名片），委托给 Chat.recommend_contact"""
+        """将指定联系人推荐给另一个朋友（发送名片）"""
         chat = self.open_session_by_search(nickname)
         return chat.recommend_contact(receiver_nickname)
 
     def clear_chat_history(self, nickname: str) -> None:
-        """清空指定会话的聊天记录，委托给 Chat.clear_chat_history"""
+        """清空指定会话的聊天记录"""
         chat = self.open_session_by_search(nickname)
         chat.clear_chat_history()
 
     def clear_room_chat_history(self, nickname: str) -> None:
-        """清空指定群聊会话的聊天记录，委托给 Chat.clear_room_chat_history"""
+        """清空指定群聊会话的聊天记录"""
         chat = self.open_session_by_search(nickname)
         chat.clear_room_chat_history()
 
     def exit_room(self, nickname: str) -> None:
-        """退出指定群聊，委托给 Chat.exit_room"""
+        """退出指定群聊"""
         chat = self.open_session_by_search(nickname)
         chat.exit_room()
 
     def add_room_members(self, nickname: str, members: list[str]) -> None:
-        """添加指定群聊的成员，委托给 Chat.add_room_members"""
+        """添加指定群聊的成员"""
         chat = self.open_session_by_search(nickname)
         chat.add_room_members(members)
 
     def remove_room_members(self, nickname: str, members: list[str]) -> None:
-        """移除指定群聊的成员，委托给 Chat.remove_room_members"""
+        """移除指定群聊的成员"""
         chat = self.open_session_by_search(nickname)
         chat.remove_room_members(members)
 
     def pin_room_chat(self, nickname: str) -> None:
-        """置顶指定群聊会话，委托给 Chat.pin_room_chat"""
+        """置顶指定群聊会话"""
         chat = self.open_session_by_search(nickname)
         chat.pin_room_chat()
 
     def unpin_room_chat(self, nickname: str) -> None:
-        """取消置顶指定群聊会话，委托给 Chat.unpin_room_chat"""
+        """取消置顶指定群聊会话"""
         chat = self.open_session_by_search(nickname)
         chat.unpin_room_chat()
 
     def mute_room_chat(self, nickname: str) -> None:
-        """开启指定群聊的消息免打扰，委托给 Chat.mute_room_chat"""
+        """开启指定群聊的消息免打扰"""
         chat = self.open_session_by_search(nickname)
         chat.mute_room_chat()
 
     def unmute_room_chat(self, nickname: str) -> None:
-        """关闭指定群聊的消息免打扰，委托给 Chat.unmute_room_chat"""
+        """关闭指定群聊的消息免打扰"""
         chat = self.open_session_by_search(nickname)
         chat.unmute_room_chat()
 
     def add_room_address_book(self, nickname: str) -> None:
-        """将指定群聊保存到通讯录，委托给 Chat.add_room_address_book"""
+        """将指定群聊保存到通讯录"""
         chat = self.open_session_by_search(nickname)
         chat.add_room_address_book()
 
     def remove_room_address_book(self, nickname: str) -> None:
-        """将指定群聊从通讯录移除，委托给 Chat.remove_room_address_book"""
+        """将指定群聊从通讯录移除"""
         chat = self.open_session_by_search(nickname)
         chat.remove_room_address_book()
 
     def display_room_member_nickname(self, nickname: str) -> None:
-        """显示指定群聊的群成员昵称，委托给 Chat.display_room_member_nickname"""
+        """显示指定群聊的群成员昵称"""
         chat = self.open_session_by_search(nickname)
         chat.display_room_member_nickname()
 
     def hidden_room_member_nickname(self, nickname: str) -> None:
-        """隐藏指定群聊的群成员昵称，委托给 Chat.hidden_room_member_nickname"""
+        """隐藏指定群聊的群成员昵称"""
         chat = self.open_session_by_search(nickname)
         chat.hidden_room_member_nickname()
 
@@ -9331,7 +9329,7 @@ class Weixin(WeixinWindow):
                       pin: bool = None, save_address_book: bool = None,
                       display_member_nickname: bool = None,
                       fold: bool = None) -> None:
-        """一次性设置指定群聊的多项信息，委托给 Chat.set_room_info"""
+        """一次性设置指定群聊的多项信息"""
         chat = self.open_session_by_search(nickname)
         chat.set_room_info(
             name=name, announcement=announcement, remark=remark,
@@ -9342,62 +9340,62 @@ class Weixin(WeixinWindow):
         )
 
     def fold_room_chat(self, nickname: str) -> None:
-        """折叠指定群聊会话，委托给 Chat.fold_room_chat"""
+        """折叠指定群聊会话"""
         chat = self.open_session_by_search(nickname)
         chat.fold_room_chat()
 
     def unfold_room_chat(self, nickname: str) -> None:
-        """取消折叠指定群聊会话，委托给 Chat.unfold_room_chat"""
+        """取消折叠指定群聊会话"""
         chat = self.open_session_by_search(nickname)
         chat.unfold_room_chat()
 
     def pin_chat(self, nickname: str) -> None:
-        """置顶指定会话，委托给 Chat.pin_chat"""
+        """置顶指定会话"""
         chat = self.open_session_by_search(nickname)
         chat.pin_chat()
 
     def unpin_chat(self, nickname: str) -> None:
-        """取消置顶指定会话，委托给 Chat.unpin_chat"""
+        """取消置顶指定会话"""
         chat = self.open_session_by_search(nickname)
         chat.unpin_chat()
 
     def mute_chat(self, nickname: str) -> None:
-        """开启指定会话的消息免打扰，委托给 Chat.mute"""
+        """开启指定会话的消息免打扰"""
         chat = self.open_session_by_search(nickname)
         chat.mute_chat()
 
     def unmute_chat(self, nickname: str) -> None:
-        """关闭指定会话的消息免打扰，委托给 Chat.unmute"""
+        """关闭指定会话的消息免打扰"""
         chat = self.open_session_by_search(nickname)
         chat.unmute_chat()
 
     def fold_chat(self, nickname: str) -> None:
-        """折叠指定会话，委托给 Chat.fold_chat"""
+        """折叠指定会话"""
         chat = self.open_session_by_search(nickname)
         chat.fold_chat()
 
     def unfold_chat(self, nickname: str) -> None:
-        """取消折叠指定会话，委托给 Chat.unfold_chat"""
+        """取消折叠指定会话"""
         chat = self.open_session_by_search(nickname)
         chat.unfold_chat()
 
     def set_room_name(self, nickname: str, name: str) -> None:
-        """设置指定群聊的名称，委托给 Chat.set_room_name"""
+        """设置指定群聊的名称"""
         chat = self.open_session_by_search(nickname)
         chat.set_room_name(name)
 
     def set_room_announcement(self, nickname: str, content: str) -> None:
-        """设置指定群聊的群公告，委托给 Chat.set_room_announcement"""
+        """设置指定群聊的群公告"""
         chat = self.open_session_by_search(nickname)
         chat.set_room_announcement(content)
 
     def set_room_remark(self, nickname: str, remark: str) -> None:
-        """设置指定群聊的备注，委托给 Chat.set_room_remark"""
+        """设置指定群聊的备注"""
         chat = self.open_session_by_search(nickname)
         chat.set_room_remark(remark)
 
     def set_room_nickname(self, nickname: str, my_nickname: str) -> None:
-        """设置我在指定群聊中的昵称，委托给 Chat.set_room_nickname"""
+        """设置我在指定群聊中的昵称"""
         chat = self.open_session_by_search(nickname)
         chat.set_room_nickname(my_nickname)
 
