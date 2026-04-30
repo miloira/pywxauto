@@ -70,7 +70,6 @@
 from __future__ import annotations
 
 import ctypes
-from ctypes import Structure, c_uint, c_long, c_int, c_bool, sizeof
 import fnmatch
 import glob
 import hashlib
@@ -85,8 +84,7 @@ import subprocess
 import tempfile
 import threading
 import time
-import requests
-import urllib.parse
+import urllib
 from dataclasses import dataclass, field
 from datetime import date
 from enum import Enum
@@ -99,17 +97,13 @@ import win32con
 import win32gui
 import win32ui
 import winreg
-
-import numpy as np
+import requests
 import uiautomation as auto
-
 from PIL import Image
-
 try:
     import wcocr
 except ImportError:
     pass
-
 from rapidocr import RapidOCR
 
 
@@ -213,13 +207,6 @@ def get_wechat_wxocr_path():
         return None
 
     return os.path.join(os.path.dirname(result[0]), "wxocr.dll")
-
-
-def wechat_ocr(wechat_ocr_dir, wechat_dir, img_path):
-    import wcocr
-    wcocr.init(wechat_ocr_dir, wechat_dir)
-    result = wcocr.ocr(img_path)
-    return result
 
 
 def find_window_by_name(name_pattern) -> list[int]:
@@ -1368,7 +1355,7 @@ class SessionItem:
         """独立窗口显示"""
         self._require_session()._session_context_action(self.name, "独立窗口显示")
 
-    def separate_by_dbclick(self) -> "SeparateChat":
+    def separate_by_click(self) -> "SeparateChat":
         """双击打开独立窗口，返回 SeparateChat 实例"""
         session = self._require_session()
         if session._wx:
@@ -5118,52 +5105,6 @@ class Chat:
         contact_row.Click(ratioX=_rand_ratio(), ratioY=_rand_ratio())
 
         # 选中后等待面板刷新完成，再点击之前预获取的发送按钮
-        # 等待按钮变为可用
-        for _ in range(10):
-            try:
-                if send_btn.IsEnabled:
-                    break
-            except Exception:
-                pass
-            time.sleep(0.3)
-        else:
-            raise RuntimeError("'发送'按钮未启用，可能接收者未正确选中")
-
-        send_btn.Click(ratioX=_rand_ratio(), ratioY=_rand_ratio())
-        time.sleep(0.5)
-
-    def _click_picker_send_button(self):
-        """点击"微信发送给"弹窗中的"发送"按钮"""
-        # confirm_btn 位于 SPDetailView（右侧详情面板）下，
-        # 选择联系人后面板会刷新重建，旧的控件引用会失效。
-        # 关键：每次重试都必须从桌面根节点重新查找 SessionPickerWindow，
-        # 彻底绕过 uiautomation 的控件缓存问题。
-        send_btn = None
-        for attempt in range(8):
-            time.sleep(0.5)
-            try:
-                # 每次都从桌面根节点重新查找，获取全新的控件引用
-                fresh_picker = auto.WindowControl(
-                    ClassName="mmui::SessionPickerWindow",
-                )
-                if not fresh_picker.Exists(maxSearchSeconds=2):
-                    continue
-                fresh_picker.SetActive()
-                fresh_picker.SetFocus()
-                time.sleep(0.3)
-                # 从全新的窗口引用中查找发送按钮
-                btn = fresh_picker.ButtonControl(
-                    AutomationId="confirm_btn",
-                )
-                if btn.Exists(maxSearchSeconds=1):
-                    send_btn = btn
-                    break
-            except Exception:
-                continue
-
-        if send_btn is None:
-            raise RuntimeError("未找到'发送'按钮")
-
         # 等待按钮变为可用
         for _ in range(10):
             try:
@@ -8949,7 +8890,7 @@ class Weixin(WeixinWindow):
         Args:
             install_path: 微信安装路径，None 时自动检测
             wxocr_path:   微信 OCR 插件路径，None 时自动检测
-            ocr:          OCR 引擎选择
+            ocr_engine:          OCR 引擎选择
                 - "wcocr":    使用微信自带 OCR（默认）
                 - "rapidocr": 使用 RapidOCR
         """
