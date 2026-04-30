@@ -170,14 +170,11 @@ def get_wechat_install_path(version=None):
         ],
     }
 
-    # 根据 version 决定查找顺序
     if version in reg_paths_map:
         reg_paths = reg_paths_map[version]
     else:
-        # 自动模式：先试3，再试4
         reg_paths = reg_paths_map[3] + reg_paths_map[4]
 
-    # 查注册表
     for reg in reg_paths:
         path = query_reg_install_path(reg)
         if path:
@@ -188,7 +185,6 @@ def get_wechat_install_path(version=None):
             if result:
                 return os.path.dirname(result[0])
 
-    # 默认目录兜底
     default_dirs = [
         r"C:\Program Files\Tencent\WeChat",
         r"C:\Program Files (x86)\Tencent\WeChat",
