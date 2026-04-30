@@ -313,6 +313,56 @@ def get_clipboard() -> str:
         win32clipboard.CloseClipboard()
 
 
+# 保存/恢复剪贴板时优先尝试的格式（按优先级排列）
+_CLIPBOARD_SAVE_FORMATS = [
+    win32con.CF_HDROP,         # 文件列表
+    win32con.CF_DIB,           # 图片 (DIB)
+    win32con.CF_UNICODETEXT,   # Unicode 文本
+    win32con.CF_TEXT,          # ANSI 文本
+]
+
+
+def save_clipboard() -> Optional[tuple[int, object]]:
+    """
+    保存当前剪贴板中的一条数据（按优先级匹配格式）。
+
+    Returns:
+        (format, data) 元组，剪贴板为空时返回 None
+    """
+    win32clipboard.OpenClipboard()
+    try:
+        for fmt in _CLIPBOARD_SAVE_FORMATS:
+            if win32clipboard.IsClipboardFormatAvailable(fmt):
+                try:
+                    data = win32clipboard.GetClipboardData(fmt)
+                    return (fmt, data)
+                except Exception:
+                    continue
+        return None
+    finally:
+        win32clipboard.CloseClipboard()
+
+
+def restore_clipboard(saved: Optional[tuple[int, object]]) -> None:
+    """
+    恢复之前保存的剪贴板数据。
+
+    Args:
+        saved: save_clipboard 返回的 (format, data)，None 则清空剪贴板
+    """
+    win32clipboard.OpenClipboard()
+    try:
+        win32clipboard.EmptyClipboard()
+        if saved:
+            fmt, data = saved
+            try:
+                win32clipboard.SetClipboardData(fmt, data)
+            except Exception:
+                pass
+    finally:
+        win32clipboard.CloseClipboard()
+
+
 def set_clipboard(fmt, data) -> None:
     win32clipboard.OpenClipboard()
     try:
@@ -340,15 +390,20 @@ def copy_files(file_paths) -> None:
 
 
 def paste(content, interval=0) -> None:
-    if isinstance(content, str):
-        copy_text(content)
-    elif isinstance(content, list):
-        copy_files(content)
-    else:
-        raise TypeError(f"Not support type: {type(content)}")
+    saved = save_clipboard()
+    try:
+        if isinstance(content, str):
+            copy_text(content)
+        elif isinstance(content, list):
+            copy_files(content)
+        else:
+            raise TypeError(f"Not support type: {type(content)}")
 
-    time.sleep(interval)
-    simulate_paste()
+        time.sleep(interval)
+        simulate_paste()
+        time.sleep(0.3)
+    finally:
+        restore_clipboard(saved)
 
 
 class CaptureMode(Enum):
