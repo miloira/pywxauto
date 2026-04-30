@@ -1187,7 +1187,7 @@ class WeixinWindow:
         """窗口是否已最大化"""
         return self._window.IsMaximize()
 
-    @pim.wait_idle
+    @PIM.wait_idle
     def activate(self) -> None:
         """激活窗口（置前并聚焦）"""
         self._window.SetActive()
