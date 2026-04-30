@@ -100,6 +100,7 @@ import win32gui
 import win32ui
 import winreg
 from PIL import Image
+from pyee.base import EventEmitter
 from rapidocr import RapidOCR
 
 try:
@@ -110,6 +111,30 @@ except ImportError:
 
 logging.basicConfig(level=logging.INFO, format="%(asctime)s [%(levelname)s] %(message)s")
 logger = logging.getLogger(__name__)
+
+
+# ---- 消息事件类型常量 ----
+# 用于 handle 装饰器注册事件处理器
+ALL_MESSAGE = "all_message"
+TEXT_MESSAGE = "text_message"
+IMAGE_MESSAGE = "image_message"
+VIDEO_MESSAGE = "video_message"
+FILE_MESSAGE = "file_message"
+VOICE_MESSAGE = "voice_message"
+QUOTE_MESSAGE = "quote_message"
+EMOTION_MESSAGE = "emotion_message"
+LOCATION_MESSAGE = "location_message"
+LINK_MESSAGE = "link_message"
+CARD_MESSAGE = "card_message"
+PERSONAL_CARD_MESSAGE = "personal_card_message"
+MERGE_MESSAGE = "merge_message"
+NOTE_MESSAGE = "note_message"
+VOIP_MESSAGE = "voip_message"
+SYSTEM_MESSAGE = "system_message"
+OTHER_MESSAGE = "other_message"
+
+# 消息类 -> 事件类型常量映射
+_MSG_CLASS_TO_EVENT: dict[type, str] = {}  # 延迟填充，在类定义之后
 
 # 让拥有 to_dict() 方法的对象支持 json.dumps 直接序列化
 _original_json_default = json.JSONEncoder().default
@@ -785,6 +810,27 @@ class OtherMessage(Message):
     @property
     def type_label(self) -> str:
         return "其他消息"
+
+
+# 填充消息类 -> 事件类型常量映射
+_MSG_CLASS_TO_EVENT.update({
+    TextMessage: TEXT_MESSAGE,
+    ImageMessage: IMAGE_MESSAGE,
+    VideoMessage: VIDEO_MESSAGE,
+    FileMessage: FILE_MESSAGE,
+    VoiceMessage: VOICE_MESSAGE,
+    QuoteMessage: QUOTE_MESSAGE,
+    EmotionMessage: EMOTION_MESSAGE,
+    LocationMessage: LOCATION_MESSAGE,
+    LinkMessage: LINK_MESSAGE,
+    CardMessage: CARD_MESSAGE,
+    PersonalCardMessage: PERSONAL_CARD_MESSAGE,
+    MergeMessage: MERGE_MESSAGE,
+    NoteMessage: NOTE_MESSAGE,
+    VoipMessage: VOIP_MESSAGE,
+    SystemMessage: SYSTEM_MESSAGE,
+    OtherMessage: OTHER_MESSAGE,
+})
 
 
 @dataclass
@@ -8968,7 +9014,7 @@ class Weixin(WeixinWindow):
     WINDOW_REGEX = "微信|Weixin"
 
     def __init__(self, install_path: Optional[str] = None, wxocr_path: Optional[str] = None,
-                 ocr_engine: str = "wcocr", on_msg=None):
+                 ocr_engine: str = "wcocr"):
         """
         Args:
             install_path: 微信安装路径，None 时自动检测
@@ -8976,9 +9022,9 @@ class Weixin(WeixinWindow):
             ocr_engine:   OCR 引擎选择
                 - "wcocr":    使用微信自带 OCR（默认）
                 - "rapidocr": 使用 RapidOCR
-            on_msg: 消息回调函数，签名为 on_msg(chat: SeparateChat, message: Message)
         """
-        self._on_msg = on_msg
+        # 事件处理器 (pyee EventEmitter)
+        self._ee = EventEmitter()
         # 微信全局快捷键映射：名称 -> 按键组合
         self._shortcuts = {
             "发送消息": "Enter",
@@ -9672,6 +9718,141 @@ class Weixin(WeixinWindow):
         """覆盖基类属性，Weixin 使用 self.window 而非 self._win"""
         return self.window
 
+    # ---- 事件处理机制 (pyee) ----
+
+    def handle(
+        self,
+        events: "str | list[str] | None" = None,
+        once: bool = False,
+    ) -> "callable":
+        """
+        注册消息事件处理器的装饰器。
+
+        基于 pyee EventEmitter 实现事件注册与分发。
+
+        用法::
+
+            @wx.handle(TEXT_MESSAGE)
+            def on_text(chat, message):
+                print(message.content)
+
+            @wx.handle([TEXT_MESSAGE, IMAGE_MESSAGE])
+            def on_text_or_image(chat, message):
+                print(message.type_label)
+
+            @wx.handle()  # 监听所有消息
+            def on_all(chat, message):
+                print(message)
+
+            @wx.handle(TEXT_MESSAGE, once=True)  # 只触发一次
+            def on_first_text(chat, message):
+                print("第一条文本消息:", message.content)
+
+        Args:
+            events: 事件类型常量（如 TEXT_MESSAGE）或列表，
+                    None 或不传表示监听所有消息 (ALL_MESSAGE)
+            once:   True 时回调只触发一次后自动移除
+
+        Returns:
+            装饰器函数
+        """
+        def decorator(func):
+            if not events:
+                event_list = [ALL_MESSAGE]
+            elif isinstance(events, list):
+                event_list = events
+            else:
+                event_list = [events]
+
+            listen = self._ee.once if once else self._ee.on
+            for event in event_list:
+                listen(event, func)
+
+            return func
+
+        return decorator
+
+    def on(
+        self,
+        events: "str | list[str] | None" = None,
+    ) -> "callable":
+        """
+        注册消息事件处理器（handle 的别名，once=False）。
+
+        用法::
+
+            @wx.on(TEXT_MESSAGE)
+            def on_text(chat, message):
+                print(message.content)
+        """
+        return self.handle(events, once=False)
+
+    def once(
+        self,
+        events: "str | list[str] | None" = None,
+    ) -> "callable":
+        """
+        注册一次性消息事件处理器（handle 的别名，once=True）。
+
+        回调触发一次后自动移除。
+
+        用法::
+
+            @wx.once(TEXT_MESSAGE)
+            def on_first_text(chat, message):
+                print("第一条文本消息:", message.content)
+        """
+        return self.handle(events, once=True)
+
+    def off(
+        self,
+        events: "str | list[str] | None" = None,
+        func: "callable | None" = None,
+    ) -> None:
+        """
+        移除事件处理器。
+
+        Args:
+            events: 事件类型，None 表示移除所有事件的处理器
+            func:   要移除的回调函数，None 表示移除该事件的所有处理器
+        """
+        if events is None:
+            if func is None:
+                self._ee.remove_all_listeners()
+            else:
+                for event in list(self._ee.event_names()):
+                    self._ee.remove_listener(event, func)
+            return
+
+        event_list = events if isinstance(events, list) else [events]
+        for event in event_list:
+            if func is None:
+                self._ee.remove_all_listeners(event)
+            else:
+                self._ee.remove_listener(event, func)
+
+    def _emit(self, chat: "SeparateChat", message: "Message") -> None:
+        """
+        触发消息事件，通过 pyee EventEmitter 分发到所有匹配的处理器。
+
+        分发逻辑：
+        1. 根据消息类型查找对应的事件类型常量
+        2. emit 该事件类型（触发具体类型的处理器）
+        3. emit ALL_MESSAGE（触发全局处理器）
+
+        Args:
+            chat:    聊天窗口对象
+            message: 消息对象
+        """
+        event_type = _MSG_CLASS_TO_EVENT.get(type(message), OTHER_MESSAGE)
+        self._ee.emit(event_type, chat, message)
+        self._ee.emit(ALL_MESSAGE, chat, message)
+
+    @property
+    def has_handlers(self) -> bool:
+        """是否注册了任何事件处理器"""
+        return bool(self._ee.event_names())
+
     def listen(
         self,
         callback,
@@ -9919,13 +10100,16 @@ class Weixin(WeixinWindow):
         启动消息监听（阻塞运行，Ctrl+C 退出）。
 
         仅监听通过 add_listener 注册的聊天窗口。
+        消息通过 handle/on/once 装饰器注册的事件处理器分发。
 
         Args:
             interval:      有新消息时的轮询间隔（秒）
             idle_interval: 无新消息时的轮询间隔（秒）
         """
-        if not self._on_msg:
-            raise ValueError("未指定回调函数，请在 Weixin(on_msg=...) 中传入")
+        if not self.has_handlers:
+            raise ValueError(
+                "未注册任何事件处理器，请使用 @wx.handle(EVENT) 装饰器注册"
+            )
         if not hasattr(self, '_listeners') or not self._listeners:
             raise RuntimeError("未注册任何监听，请先调用 add_listener")
 
@@ -10021,6 +10205,35 @@ class Weixin(WeixinWindow):
         if not threads:
             raise RuntimeError("没有可监听的窗口")
 
+        # 以 ASCII 树形式输出监听列表
+        contacts = []
+        rooms = []
+        for name, chat in self._listeners.items():
+            if name not in threads:
+                continue
+            if chat.chat_type == "群聊":
+                rooms.append(name)
+            else:
+                contacts.append(name)
+
+        tree_lines = ["*监听列表"]
+        sections = []
+        if contacts:
+            sections.append(("私聊", contacts))
+        if rooms:
+            sections.append(("群聊", rooms))
+
+        for si, (section_name, names) in enumerate(sections):
+            is_last_section = si == len(sections) - 1
+            branch = "└── " if is_last_section else "├── "
+            tree_lines.append(f"{branch}{section_name}")
+            prefix = "    " if is_last_section else "│   "
+            for ni, name in enumerate(names):
+                is_last_name = ni == len(names) - 1
+                node = "└── " if is_last_name else "├── "
+                tree_lines.append(f"{prefix}{node}{name}")
+
+        logger.info("\n" + "\n".join(tree_lines))
         logger.info("消息监听已启动 (Ctrl+C 退出)...")
 
         try:
@@ -10036,9 +10249,9 @@ class Weixin(WeixinWindow):
                 except Empty:
                     continue
                 try:
-                    self._on_msg(chat, msg)
+                    self._emit(chat, msg)
                 except Exception:
-                    logger.exception("回调异常 [%s]", chat.current_name)
+                    logger.exception("事件分发异常 [%s]", chat.current_name)
         except KeyboardInterrupt:
             logger.info("正在停止监听线程...")
             stop_event.set()
@@ -10048,13 +10261,15 @@ class Weixin(WeixinWindow):
 
 
 if __name__ == "__main__":
+    wx = Weixin()
+
+    @wx.handle(TEXT_MESSAGE)
     def on_msg(chat, message):
         print(f"[{chat.current_name}] {message}")
-        if message.sender_type != "self":
+        if message.sender_type != SenderType.SELF:
             chat.send_text(message.content)
 
-    wx = Weixin(on_msg=on_msg)
-    wx.add_listener(["写诗喂狗", "AI测试群"], offscreen=True)
+    wx.add_listener(["写诗喂狗", "AI测试群", "泡泡马特发货群"], offscreen=True)
     wx.run()  
 
 
