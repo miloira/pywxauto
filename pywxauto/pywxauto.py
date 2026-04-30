@@ -73,8 +73,8 @@ import ctypes
 import fnmatch
 import glob
 import hashlib
-import json
 import io
+import json
 import logging
 import os
 import random
@@ -88,23 +88,24 @@ import urllib
 from dataclasses import dataclass, field
 from datetime import date
 from enum import Enum
-from queue import Queue, Empty
+from queue import Empty, Queue
 from typing import Optional
 
+import requests
+import uiautomation as auto
 import win32api
 import win32clipboard
 import win32con
 import win32gui
 import win32ui
 import winreg
-import requests
-import uiautomation as auto
 from PIL import Image
+from rapidocr import RapidOCR
+
 try:
     import wcocr
 except ImportError:
     pass
-from rapidocr import RapidOCR
 
 
 logging.basicConfig(level=logging.INFO, format="%(asctime)s [%(levelname)s] %(message)s")
