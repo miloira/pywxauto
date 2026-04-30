@@ -946,7 +946,7 @@ class Login(WeixinWindow):
         # 等待登录窗口消失
         for _ in range(timeout):
             if not self._win.Exists(maxSearchSeconds=1):
-                logger.debug("已进入微信")
+                logger.info("已进入微信")
                 return True
             time.sleep(1)
 
@@ -1865,7 +1865,7 @@ class Moment(WeixinWindow):
         # 5. 等待发布面板消失（表示发布成功）
         for _ in range(30):
             if not panel.Exists(maxSearchSeconds=1):
-                logger.debug("朋友圈文本发布成功")
+                logger.info("朋友圈文本发布成功")
                 return True
             time.sleep(1)
 
@@ -4543,7 +4543,7 @@ class Chat:
         if check_list.Exists(maxSearchSeconds=1):
             raise RuntimeError("发送收藏失败，选择面板未关闭")
 
-        logger.debug("收藏发送成功")
+        logger.info("收藏发送成功")
         return True
 
     # -- 发送表情 --
@@ -4652,7 +4652,7 @@ class Chat:
                 label = "自定义表情" if keyword is None else "表情"
                 raise RuntimeError(f"发送{label}失败，表情面板未关闭")
 
-            logger.debug("表情发送成功")
+            logger.info("表情发送成功")
             return True
 
         except Exception:
@@ -4967,7 +4967,7 @@ class Chat:
             # 5. 在弹窗中搜索、勾选接收者并点击发送
             self._search_and_select_receiver(receiver_nickname)
 
-            logger.debug(f"名片发送成功: {contact_name} -> {receiver_nickname}")
+            logger.info(f"名片发送成功: {contact_name} -> {receiver_nickname}")
             return True
         except Exception:
             # 出错时尝试关闭可能残留的弹窗
@@ -5385,7 +5385,6 @@ class Chat:
         - 灰色/白色气泡：对方发的消息 (R,G,B 接近且 > 200)
         采样中间几行像素，统计绿色和灰色像素数量来判断。
         """
-
         tmp_path = os.path.join(tempfile.gettempdir(), "_wxuia_msg.png")
         try:
             ctrl.CaptureToImage(tmp_path)
@@ -5566,7 +5565,7 @@ class Chat:
             confirm_btn.Click(ratioX=_rand_ratio(), ratioY=_rand_ratio())
             time.sleep(0.3)
 
-            logger.debug(f"清空聊天记录成功: {self.current_name}")
+            logger.info(f"清空聊天记录成功: {self.current_name}")
 
         finally:
             # 4. 收回聊天信息面板
@@ -5654,7 +5653,7 @@ class Chat:
             confirm_btn.Click(ratioX=_rand_ratio(), ratioY=_rand_ratio())
             time.sleep(0.3)
 
-            logger.debug(f"清空群聊聊天记录成功: {self.current_name}")
+            logger.info(f"清空群聊聊天记录成功: {self.current_name}")
 
         finally:
             # 6. 收回聊天信息面板
@@ -5735,7 +5734,7 @@ class Chat:
             if not confirm_btn.Exists(maxSearchSeconds=3):
                 raise RuntimeError("未找到'确定'确认按钮")
             confirm_btn.Click(ratioX=_rand_ratio(), ratioY=_rand_ratio())
-            logger.debug(f"退出群聊成功: {self.current_name}")
+            logger.info(f"退出群聊成功: {self.current_name}")
 
         finally:
             # 退出群聊后面板可能已自动关闭，尝试收回
@@ -5894,7 +5893,7 @@ class Chat:
                     break
                 time.sleep(1)
 
-            logger.debug(f"添加群成员成功: {self.current_name} -> {members}")
+            logger.info(f"添加群成员成功: {self.current_name} -> {members}")
 
         finally:
             self._close_chat_info_panel()
@@ -6065,7 +6064,7 @@ class Chat:
                     break
                 time.sleep(1)
 
-            logger.debug(f"移除群成员成功: {self.current_name} -> {members}")
+            logger.info(f"移除群成员成功: {self.current_name} -> {members}")
 
         finally:
             self._close_chat_info_panel()
@@ -6170,7 +6169,7 @@ class Chat:
             self._toggle_ocr_switch(img, ocr_data, hwnd, switch_name, enable)
 
             action = "开启" if enable else "关闭"
-            logger.debug(f"{action}{switch_name}成功: {self.current_name}")
+            logger.info(f"{action}{switch_name}成功: {self.current_name}")
 
         finally:
             self._close_chat_info_panel()
@@ -6241,7 +6240,7 @@ class Chat:
             img = Image.open(io.BytesIO(png_bytes))
             self._toggle_ocr_switch(img, ocr_data, hwnd, "折叠该聊天", True)
 
-            logger.debug(f"折叠群聊成功: {self.current_name}")
+            logger.info(f"折叠群聊成功: {self.current_name}")
 
         finally:
             self._close_chat_info_panel()
@@ -6275,7 +6274,7 @@ class Chat:
             if "折叠该聊天" in ocr_data:
                 self._toggle_ocr_switch(img, ocr_data, hwnd, "折叠该聊天", False)
 
-            logger.debug(f"取消折叠群聊成功: {self.current_name}")
+            logger.info(f"取消折叠群聊成功: {self.current_name}")
 
         finally:
             self._close_chat_info_panel()
@@ -6602,7 +6601,7 @@ class Chat:
                     self._toggle_ocr_switch(
                         img, ocr_data, hwnd, switch_name, switch_val)
 
-            logger.debug(f"设置群聊信息成功: {self.current_name}")
+            logger.info(f"设置群聊信息成功: {self.current_name}")
 
         finally:
             self._close_chat_info_panel()
@@ -6650,7 +6649,7 @@ class Chat:
                 sw.Click(ratioX=_rand_ratio(), ratioY=_rand_ratio())
                 time.sleep(0.3)
                 action = "开启" if enable else "关闭"
-                logger.debug(f"{action}{name}成功: {self.current_name}")
+                logger.info(f"{action}{name}成功: {self.current_name}")
         finally:
             self._close_chat_info_panel()
 
@@ -6750,7 +6749,7 @@ class Chat:
             if not fold_on:
                 fold_sw.Click(ratioX=_rand_ratio(), ratioY=_rand_ratio())
                 time.sleep(0.3)
-                logger.debug(f"折叠聊天成功: {self.current_name}")
+                logger.info(f"折叠聊天成功: {self.current_name}")
         finally:
             self._close_chat_info_panel()
 
@@ -6778,7 +6777,7 @@ class Chat:
                 if toggle and toggle.ToggleState == 1:
                     fold_sw.Click(ratioX=_rand_ratio(), ratioY=_rand_ratio())
                     time.sleep(0.3)
-                    logger.debug(f"取消折叠聊天成功: {self.current_name}")
+                    logger.info(f"取消折叠聊天成功: {self.current_name}")
         finally:
             self._close_chat_info_panel()
 
@@ -6888,7 +6887,7 @@ class Chat:
             # 点击搜索框 完成保存
             update_bth = self._win.ButtonControl(Name="修改")
             update_bth.Click(ratioX=_rand_ratio(), ratioY=_rand_ratio())
-            logger.debug(f"设置群聊名称成功: {name}")
+            logger.info(f"设置群聊名称成功: {name}")
 
         finally:
             self._close_chat_info_panel()
@@ -6994,11 +6993,11 @@ class Chat:
 
             for i in range(10):
                 if not find_window_by_name(pane_title):
-                    logger.debug(f"设置群公告成功: {self.current_name}")
+                    logger.info(f"设置群公告成功: {self.current_name}")
                     return
                 time.sleep(3)
 
-            logger.debug(f"设置群公告失败: {self.current_name}")
+            logger.info(f"设置群公告失败: {self.current_name}")
         finally:
             self._close_chat_info_panel()
 
@@ -7058,7 +7057,7 @@ class Chat:
             paste(remark)
             self._win.SendKeys("{Enter}")
 
-            logger.debug(f"设置群聊备注成功: {self.current_name} -> {remark}")
+            logger.info(f"设置群聊备注成功: {self.current_name} -> {remark}")
 
         finally:
             self._close_chat_info_panel()
@@ -7135,7 +7134,7 @@ class Chat:
             update_btn = self._win.ButtonControl(Name="修改")
             update_btn.Click(ratioX=_rand_ratio(), ratioY=_rand_ratio())
 
-            logger.debug(f"设置群内昵称成功: {self.current_name} -> {nickname}")
+            logger.info(f"设置群内昵称成功: {self.current_name} -> {nickname}")
 
         finally:
             self._close_chat_info_panel()
@@ -7358,7 +7357,7 @@ class Chat:
                     if val:
                         result["finder_name"] = val
 
-            logger.debug(f"获取联系人资料成功: {self.current_name}")
+            logger.info(f"获取联系人资料成功: {self.current_name}")
             return result
 
         except Exception:
@@ -7601,7 +7600,7 @@ class Chat:
             if ok_btn.Exists(maxSearchSeconds=2):
                 ok_btn.Click(ratioX=_rand_ratio(), ratioY=_rand_ratio())
 
-            logger.debug(f"设置联系人信息成功: {self.current_name}")
+            logger.info(f"设置联系人信息成功: {self.current_name}")
 
         except Exception:
             self._cleanup_profile()
@@ -7661,7 +7660,7 @@ class Chat:
             ok_btn.Click(ratioX=_rand_ratio(), ratioY=_rand_ratio())
             time.sleep(0.3)
 
-            logger.debug(f"设置备注成功: {self.current_name} -> {remark}")
+            logger.info(f"设置备注成功: {self.current_name} -> {remark}")
 
         except Exception:
             self._cleanup_profile()
@@ -7711,7 +7710,7 @@ class Chat:
 
             new_labels = [l for l in labels if l not in existing_labels]
             if not new_labels:
-                logger.debug(f"所有标签已存在，跳过: {self.current_name} -> {labels}")
+                logger.info(f"所有标签已存在，跳过: {self.current_name} -> {labels}")
                 cancel_btn = remark_pop.ButtonControl(Name="取消")
                 if cancel_btn.Exists(maxSearchSeconds=1):
                     cancel_btn.Click(ratioX=_rand_ratio(), ratioY=_rand_ratio())
@@ -7744,7 +7743,7 @@ class Chat:
                     label_item.Click(ratioX=_rand_ratio(), ratioY=_rand_ratio())
                     time.sleep(0.3)
                 else:
-                    logger.debug(f"搜索结果中未找到标签，跳过: {label}")
+                    logger.info(f"搜索结果中未找到标签，跳过: {label}")
 
                 tag_edit.SendKeys("{Ctrl}a{Del}")
                 time.sleep(0.2)
@@ -7755,7 +7754,7 @@ class Chat:
             )
             ok_btn.Click(ratioX=_rand_ratio(), ratioY=_rand_ratio())
             time.sleep(0.3)
-            logger.debug(f"添加标签成功: {self.current_name} -> {labels}")
+            logger.info(f"添加标签成功: {self.current_name} -> {labels}")
 
         except Exception:
             self._cleanup_profile()
@@ -7805,7 +7804,7 @@ class Chat:
 
             to_remove = [l for l in labels if l in existing_labels]
             if not to_remove:
-                logger.debug(f"标签均不存在，跳过: {self.current_name} -> {labels}")
+                logger.info(f"标签均不存在，跳过: {self.current_name} -> {labels}")
                 cancel_btn = remark_pop.ButtonControl(Name="取消")
                 if cancel_btn.Exists(maxSearchSeconds=1):
                     cancel_btn.Click(ratioX=_rand_ratio(), ratioY=_rand_ratio())
@@ -7831,7 +7830,7 @@ class Chat:
             )
             ok_btn.Click(ratioX=_rand_ratio(), ratioY=_rand_ratio())
             time.sleep(0.3)
-            logger.debug(f"移除标签成功: {self.current_name} -> {labels}")
+            logger.info(f"移除标签成功: {self.current_name} -> {labels}")
 
         except Exception:
             self._cleanup_profile()
@@ -7885,7 +7884,7 @@ class Chat:
             # 过滤掉已存在的号码
             new_phones = [p for p in phones if p not in existing_phones]
             if not new_phones:
-                logger.debug(f"所有电话号码已存在，跳过: {self.current_name} -> {phones}")
+                logger.info(f"所有电话号码已存在，跳过: {self.current_name} -> {phones}")
                 cancel_btn = remark_pop.ButtonControl(Name="取消")
                 if cancel_btn.Exists(maxSearchSeconds=1):
                     cancel_btn.Click(ratioX=_rand_ratio(), ratioY=_rand_ratio())
@@ -7937,7 +7936,7 @@ class Chat:
             )
             ok_btn.Click(ratioX=_rand_ratio(), ratioY=_rand_ratio())
             time.sleep(0.3)
-            logger.debug(f"添加电话号码成功: {self.current_name} -> {phones}")
+            logger.info(f"添加电话号码成功: {self.current_name} -> {phones}")
 
         except Exception:
             self._cleanup_profile()
@@ -8022,7 +8021,7 @@ class Chat:
             ok_btn.Click(ratioX=_rand_ratio(), ratioY=_rand_ratio())
             time.sleep(0.3)
 
-            logger.debug(f"添加备注图片成功: {self.current_name} -> {images}")
+            logger.info(f"添加备注图片成功: {self.current_name} -> {images}")
 
         except Exception:
             self._cleanup_profile()
@@ -8077,7 +8076,7 @@ class Chat:
 
             to_remove = [p for p in phones if p in existing_phones]
             if not to_remove:
-                logger.debug(f"电话号码均不存在，跳过: {self.current_name} -> {phones}")
+                logger.info(f"电话号码均不存在，跳过: {self.current_name} -> {phones}")
                 cancel_btn = remark_pop.ButtonControl(Name="取消")
                 if cancel_btn.Exists(maxSearchSeconds=1):
                     cancel_btn.Click(ratioX=_rand_ratio(), ratioY=_rand_ratio())
@@ -8108,7 +8107,7 @@ class Chat:
             )
             ok_btn.Click(ratioX=_rand_ratio(), ratioY=_rand_ratio())
             time.sleep(0.3)
-            logger.debug(f"移除电话号码成功: {self.current_name} -> {phones}")
+            logger.info(f"移除电话号码成功: {self.current_name} -> {phones}")
 
         except Exception:
             self._cleanup_profile()
@@ -8217,7 +8216,7 @@ class Chat:
                 if ok_btn.Exists(maxSearchSeconds=2):
                     ok_btn.Click(ratioX=_rand_ratio(), ratioY=_rand_ratio())
                     time.sleep(0.3)
-                logger.debug(f"删除备注图片成功: {self.current_name} -> 删除{deleted}张")
+                logger.info(f"删除备注图片成功: {self.current_name} -> 删除{deleted}张")
             else:
                 cancel_btn = remark_pop.ButtonControl(Name="取消")
                 if cancel_btn.Exists(maxSearchSeconds=1):
@@ -8237,7 +8236,7 @@ class Chat:
             self._open_contact_profile()
             self._click_profile_menu_item("设为星标朋友")
             time.sleep(0.3)
-            logger.debug(f"设为星标朋友操作完成: {self.current_name}")
+            logger.info(f"设为星标朋友操作完成: {self.current_name}")
         except Exception:
             self._cleanup_profile()
             raise
@@ -8252,7 +8251,7 @@ class Chat:
             self._open_contact_profile()
             self._click_profile_menu_item("不再设为星标朋友")
             time.sleep(0.3)
-            logger.debug(f"取消星标朋友操作完成: {self.current_name}")
+            logger.info(f"取消星标朋友操作完成: {self.current_name}")
         except Exception:
             self._cleanup_profile()
             raise
@@ -8272,7 +8271,7 @@ class Chat:
             if confirm_btn.Exists(maxSearchSeconds=3):
                 confirm_btn.Click(ratioX=_rand_ratio(), ratioY=_rand_ratio())
                 time.sleep(0.3)
-                logger.debug(f"加入黑名单成功: {self.current_name}")
+                logger.info(f"加入黑名单成功: {self.current_name}")
             else:
                 logger.warning(f"未找到确认按钮，加入黑名单可能未完成: {self.current_name}")
 
@@ -8290,7 +8289,7 @@ class Chat:
             self._open_contact_profile()
             self._click_profile_menu_item("移出黑名单")
             time.sleep(0.3)
-            logger.debug(f"移出黑名单成功: {self.current_name}")
+            logger.info(f"移出黑名单成功: {self.current_name}")
         except Exception:
             self._cleanup_profile()
             raise
@@ -8310,7 +8309,7 @@ class Chat:
             if confirm_btn.Exists(maxSearchSeconds=3):
                 confirm_btn.Click(ratioX=_rand_ratio(), ratioY=_rand_ratio())
                 time.sleep(0.3)
-                logger.debug(f"删除联系人成功: {self.current_name}")
+                logger.info(f"删除联系人成功: {self.current_name}")
             else:
                 logger.warning(f"未找到'删除'确认按钮，删除联系人可能未完成: {self.current_name}")
 
@@ -8388,7 +8387,7 @@ class Chat:
                 cancel_btn.Click(ratioX=_rand_ratio(), ratioY=_rand_ratio())
             time.sleep(0.3)
 
-            logger.debug(f"获取朋友权限成功: {self.current_name} -> {result}")
+            logger.info(f"获取朋友权限成功: {self.current_name} -> {result}")
             return result
 
         except Exception:
@@ -8490,7 +8489,7 @@ class Chat:
                     cancel_btn.Click(ratioX=_rand_ratio(), ratioY=_rand_ratio())
                     time.sleep(0.2)
 
-            logger.debug(f"设置朋友权限成功: {self.current_name} -> permission={permission}, "
+            logger.info(f"设置朋友权限成功: {self.current_name} -> permission={permission}, "
                         f"hide_my={hide_my_posts}, hide_their={hide_their_posts}")
 
         except Exception:
@@ -8601,7 +8600,7 @@ class Chat:
             if cancel_btn.Exists(maxSearchSeconds=1):
                 cancel_btn.Click(ratioX=_rand_ratio(), ratioY=_rand_ratio())
 
-            logger.debug(f"收藏备注图片成功: {self.current_name} -> 收藏{collected}张")
+            logger.info(f"收藏备注图片成功: {self.current_name} -> 收藏{collected}张")
             return collected
 
         except Exception:
@@ -8747,7 +8746,7 @@ class Chat:
             if cancel_btn.Exists(maxSearchSeconds=1):
                 cancel_btn.Click(ratioX=_rand_ratio(), ratioY=_rand_ratio())
 
-            logger.debug(f"保存备注图片成功: {self.current_name} -> {save_dir} ({saved}张)")
+            logger.info(f"保存备注图片成功: {self.current_name} -> {save_dir} ({saved}张)")
             return saved
 
         except Exception:
@@ -8784,7 +8783,7 @@ class SeparateChat(Chat, WeixinWindow):
             Name=contact_name,
             Depth=1
         )
-        if not self._win.Exists(maxSearchSeconds=3):
+        if not self._win.Exists(0, 0):
             raise RuntimeError(f"独立聊天窗口未找到: {contact_name}")
         self._wx = None
 
@@ -8867,15 +8866,17 @@ class Weixin(WeixinWindow):
     WINDOW_REGEX = "微信|Weixin"
 
     def __init__(self, install_path: Optional[str] = None, wxocr_path: Optional[str] = None,
-                 ocr_engine: str = "wcocr"):
+                 ocr_engine: str = "wcocr", on_msg=None):
         """
         Args:
             install_path: 微信安装路径，None 时自动检测
             wxocr_path:   微信 OCR 插件路径，None 时自动检测
-            ocr_engine:          OCR 引擎选择
+            ocr_engine:   OCR 引擎选择
                 - "wcocr":    使用微信自带 OCR（默认）
                 - "rapidocr": 使用 RapidOCR
+            on_msg: 消息回调函数，签名为 on_msg(chat: SeparateChat, message: Message)
         """
+        self._on_msg = on_msg
         # 微信全局快捷键映射：名称 -> 按键组合
         self._shortcuts = {
             "发送消息": "Enter",
@@ -9699,10 +9700,17 @@ class Weixin(WeixinWindow):
 
         def _discover_chats() -> dict[str, SeparateChat]:
             found: dict[str, SeparateChat] = {}
+            # 过滤掉微信主窗口同名的伪独立窗口
+            skip_names = {"微信", "Weixin"}
             for ctrl in auto.GetRootControl().GetChildren():
-                if ctrl.ClassName == SeparateChat.WINDOW_CLASS and ctrl.Name:
+                try:
+                    class_name = ctrl.ClassName
+                    name = ctrl.Name
+                except Exception:
+                    continue
+                if class_name == SeparateChat.WINDOW_CLASS and name and name not in skip_names:
                     try:
-                        found[ctrl.Name] = SeparateChat(ctrl.Name)
+                        found[name] = SeparateChat(name)
                     except (RuntimeError, ValueError):
                         pass
             return found
@@ -9722,17 +9730,17 @@ class Weixin(WeixinWindow):
                             )
                             threads[name] = t
                             t.start()
-                            logger.debug("开始监听: %s", name)
+                            logger.info("开始监听: [%s] %s", chat.chat_type, name)
 
                     for name in list(threads.keys()):
                         if not threads[name].is_alive():
                             threads.pop(name)
-                            logger.debug("停止监听: %s", name)
+                            logger.info("停止监听: %s", name)
 
                 if stop_event.wait(scan_interval):
                     break
 
-        logger.debug("开始多线程监听独立聊天窗口消息 (Ctrl+C 退出)...")
+        logger.info("开始多线程监听独立聊天窗口消息 (Ctrl+C 退出)...")
         scanner = threading.Thread(target=_scan_loop, daemon=True, name="scanner")
         scanner.start()
 
@@ -9747,17 +9755,208 @@ class Weixin(WeixinWindow):
                 except Exception as e:
                     logger.exception("回调异常 [%s]", chat.current_name)
         except KeyboardInterrupt:
-            logger.debug("正在停止监听线程...")
+            logger.info("正在停止监听线程...")
             stop_event.set()
             scanner.join(timeout=3)
             with threads_lock:
                 for t in threads.values():
                     t.join(timeout=3)
-            logger.debug("监听已停止")
+            logger.info("监听已停止")
+
+    def add_listener(self, names: str | list[str], offscreen: bool = True) -> list[SeparateChat]:
+        """
+        注册要监听的聊天窗口。
+
+        如果独立聊天窗口已打开则直接加入监听列表，
+        未打开则通过搜索打开会话后双击打开独立窗口。
+
+        Args:
+            names: 联系人/群聊名称，支持单个字符串或列表
+            offscreen: 是否将窗口移到屏幕外监听，默认 True
+
+        Returns:
+            成功打开的 SeparateChat 实例列表
+        """
+        if isinstance(names, str):
+            names = [names]
+
+        if not hasattr(self, '_listeners'):
+            self._listeners: dict[str, SeparateChat] = {}
+        self._offscreen = offscreen
+
+        result: list[SeparateChat] = []
+        for name in names:
+            if not name:
+                continue
+            if name in self._listeners and self._listeners[name].exists:
+                result.append(self._listeners[name])
+                continue
+
+            # 尝试获取已打开的独立窗口
+            chat = self.get_separate_chat(name)
+            if chat is None:
+                # 未打开，通过主窗口搜索并打开独立窗口
+                try:
+                    main_chat = self.open_session_by_search(name)
+                    chat = main_chat.separate()
+                except Exception as e:
+                    logger.error("打开独立窗口失败 [%s]: %s", name, e)
+                    continue
+
+            self._listeners[name] = chat
+            result.append(chat)
+            logger.info("已注册监听: [%s] %s", chat.chat_type, name)
+
+        return result
+
+    def run(
+        self,
+        interval: float = 0.1,
+        idle_interval: float = 0.1,
+    ) -> None:
+        """
+        启动消息监听（阻塞运行，Ctrl+C 退出）。
+
+        仅监听通过 add_listener 注册的聊天窗口。
+
+        Args:
+            interval:      有新消息时的轮询间隔（秒）
+            idle_interval: 无新消息时的轮询间隔（秒）
+        """
+        if not self._on_msg:
+            raise ValueError("未指定回调函数，请在 Weixin(on_msg=...) 中传入")
+        if not hasattr(self, '_listeners') or not self._listeners:
+            raise RuntimeError("未注册任何监听，请先调用 add_listener")
+
+        stop_event = threading.Event()
+        msg_queue: Queue[tuple[SeparateChat, Message]] = Queue()
+        threads: dict[str, threading.Thread] = {}
+
+        def _msg_sig(msg: Message) -> str:
+            return f"{msg.__class__.__name__}|{msg.sender_type.value}|{msg.content}"
+
+        def _snapshot_hash(sigs: list[str]) -> str:
+            return hashlib.md5("\n".join(sigs).encode()).hexdigest()
+
+        def _watch_chat(chat: SeparateChat, name: str) -> None:
+            snap_sigs: list[str] = []
+            snap_hash: str = ""
+            first_scan = True
+
+            chat.pin()
+            if self._offscreen:
+                chat.move_offscreen()
+            time.sleep(0.3)
+
+            while not stop_event.is_set():
+                if not chat.exists:
+                    break
+
+                try:
+                    visible = chat.get_visible_messages()
+                except Exception:
+                    if stop_event.wait(interval):
+                        break
+                    continue
+
+                curr_sigs = [_msg_sig(m) for m in visible]
+                curr_hash = _snapshot_hash(curr_sigs)
+
+                if first_scan:
+                    snap_sigs = curr_sigs
+                    snap_hash = curr_hash
+                    first_scan = False
+                    if stop_event.wait(interval):
+                        break
+                    continue
+
+                if curr_hash == snap_hash:
+                    if stop_event.wait(idle_interval):
+                        break
+                    continue
+
+                anchor_len = max(1, len(snap_sigs) // 2)
+                anchor = snap_sigs[-anchor_len:]
+
+                new_msgs: list[Message] = []
+                found = -1
+                for i in range(len(curr_sigs) - anchor_len, -1, -1):
+                    if curr_sigs[i:i + anchor_len] == anchor:
+                        found = i + anchor_len
+                        break
+                if found >= 0:
+                    new_msgs = visible[found:]
+
+                snap_sigs = curr_sigs
+                snap_hash = curr_hash
+
+                for msg in new_msgs:
+                    msg_queue.put((chat, msg))
+
+                wait_time = interval if new_msgs else idle_interval
+                if stop_event.wait(wait_time):
+                    break
+
+            if chat.exists and self._offscreen:
+                try:
+                    chat.move_back()
+                except Exception:
+                    pass
+
+        # 为每个已注册的监听启动线程
+        for name, chat in self._listeners.items():
+            if not chat.exists:
+                logger.warning("窗口已关闭，跳过: %s", name)
+                continue
+            t = threading.Thread(
+                target=_watch_chat,
+                args=(chat, name),
+                daemon=True,
+                name=f"listen-{name}",
+            )
+            threads[name] = t
+            t.start()
+            logger.info("开始监听: [%s] %s", chat.chat_type, name)
+
+        if not threads:
+            raise RuntimeError("没有可监听的窗口")
+
+        logger.info("消息监听已启动 (Ctrl+C 退出)...")
+
+        try:
+            while True:
+                # 检查是否所有线程都已退出
+                alive = [n for n, t in threads.items() if t.is_alive()]
+                if not alive:
+                    logger.info("所有监听线程已退出")
+                    break
+
+                try:
+                    chat, msg = msg_queue.get(timeout=0.1)
+                except Empty:
+                    continue
+                try:
+                    self._on_msg(chat, msg)
+                except Exception:
+                    logger.exception("回调异常 [%s]", chat.current_name)
+        except KeyboardInterrupt:
+            logger.info("正在停止监听线程...")
+            stop_event.set()
+            for t in threads.values():
+                t.join(timeout=3)
+            logger.info("监听已停止")
 
 
 if __name__ == "__main__":
-    wx = Weixin(ocr_engine="rapidocr")
+    def on_msg(chat, message):
+        print(f"[{chat.current_name}] {message}")
+
+    wx = Weixin(on_msg=on_msg)
+    wx.add_listener(["写诗喂狗", "AI测试群"], offscreen=False)
+    wx.run()  
+
+
+    # 阻塞运行，Ctrl+C 退出
     # wx.shortcut("截图")
     # wx.set_room_name("AI测试2", "AI测试")
     # wx.set_room_remark("AI测试", "agi")
