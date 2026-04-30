@@ -48,7 +48,7 @@ cmd.run()
 # 把编译产物从 build/ 复制到 pywxauto/ 目录
 for root, dirs, files in os.walk("build"):
     for f in files:
-        if f.endswith(".pyd"):
+        if f.endswith(".pyd") or f.endswith(".so"):
             src_path = os.path.join(root, f)
             dst_path = os.path.join("pywxauto", f)
             shutil.copy2(src_path, dst_path)
