@@ -325,7 +325,15 @@ def paste(content, interval=0) -> None:
     simulate_paste()
 
 
-def capture_window(hwnd: int, offset_left: int = 0, offset_top: int = 0, offset_right: int = 0, offset_bottom: int = 0) -> bytes:
+class CaptureMode(Enum):
+    """窗口截图模式"""
+    BITBLT = "bitblt"            # 从屏幕 DC 拷贝，速度快，但截不到被遮挡/最小化的窗口
+    PRINT_WINDOW = "print_window"  # 通过 PrintWindow API，支持被遮挡/最小化的窗口
+
+
+def capture_window(hwnd: int, offset_left: int = 0, offset_top: int = 0,
+                   offset_right: int = 0, offset_bottom: int = 0,
+                   mode: CaptureMode = CaptureMode.BITBLT) -> bytes:
     """
     获取窗口截图，支持四边偏移裁剪。
 
@@ -335,32 +343,43 @@ def capture_window(hwnd: int, offset_left: int = 0, offset_top: int = 0, offset_
         offset_top:    上边裁剪像素
         offset_right:  右边裁剪像素
         offset_bottom: 下边裁剪像素
+        mode: 截图模式，CaptureMode.BITBLT 或 CaptureMode.PRINT_WINDOW
 
     Returns:
         PNG 格式的 bytes 数据
     """
-    # 获取窗口矩形并应用偏移
     left, top, right, bottom = win32gui.GetWindowRect(hwnd)
-    left += offset_left
-    top += offset_top
-    right -= offset_right
-    bottom -= offset_bottom
-    width = right - left
-    height = bottom - top
+    win_width = right - left
+    win_height = bottom - top
 
-    if width <= 0 or height <= 0:
-        raise Exception(f"偏移后截图区域无效: 宽度={width}, 高度={height}")
+    if win_width <= 0 or win_height <= 0:
+        raise Exception(f"窗口区域无效: 宽度={win_width}, 高度={win_height}")
 
     hwndDC = win32gui.GetWindowDC(hwnd)
     mfcDC = win32ui.CreateDCFromHandle(hwndDC)
     saveDC = mfcDC.CreateCompatibleDC()
 
-    saveBitmap = win32ui.CreateBitmap()
-    saveBitmap.CreateCompatibleBitmap(mfcDC, width, height)
-    saveDC.SelectObject(saveBitmap)
+    if mode == CaptureMode.PRINT_WINDOW:
+        # PrintWindow 必须先截取整个窗口，再裁剪
+        saveBitmap = win32ui.CreateBitmap()
+        saveBitmap.CreateCompatibleBitmap(mfcDC, win_width, win_height)
+        saveDC.SelectObject(saveBitmap)
 
-    saveDC.BitBlt((0, 0), (width, height), mfcDC,
-                  (offset_left, offset_top), win32con.SRCCOPY)
+        ctypes.windll.user32.PrintWindow(hwnd, saveDC.GetSafeHdc(), 3)
+    else:
+        # BitBlt 可以直接指定源偏移，只拷贝裁剪后的区域
+        crop_width = win_width - offset_left - offset_right
+        crop_height = win_height - offset_top - offset_bottom
+
+        if crop_width <= 0 or crop_height <= 0:
+            raise Exception(f"偏移后截图区域无效: 宽度={crop_width}, 高度={crop_height}")
+
+        saveBitmap = win32ui.CreateBitmap()
+        saveBitmap.CreateCompatibleBitmap(mfcDC, crop_width, crop_height)
+        saveDC.SelectObject(saveBitmap)
+
+        saveDC.BitBlt((0, 0), (crop_width, crop_height), mfcDC,
+                      (offset_left, offset_top), win32con.SRCCOPY)
 
     bmp_info = saveBitmap.GetInfo()
     bmp_str = saveBitmap.GetBitmapBits(True)
@@ -375,48 +394,12 @@ def capture_window(hwnd: int, offset_left: int = 0, offset_top: int = 0, offset_
     mfcDC.DeleteDC()
     win32gui.ReleaseDC(hwnd, hwndDC)
 
-    buffer = io.BytesIO()
-    img.save(buffer, format="PNG")
-    return buffer.getvalue()
-
-
-def capture_window2(hwnd: int) -> bytes:
-    """
-    获取窗口截图（使用 PrintWindow，支持被遮挡/最小化的窗口）。
-
-    Returns:
-        PNG 格式的 bytes 数据
-    """
-    window_rect = win32gui.GetWindowRect(hwnd)
-    win_left, win_top, win_right, win_bottom = window_rect
-    win_width = win_right - win_left
-    win_height = win_bottom - win_top
-
-    if win_width <= 0 or win_height <= 0:
-        raise Exception(f"窗口区域无效: 宽度={win_width}, 高度={win_height}")
-
-    hwndDC = win32gui.GetWindowDC(hwnd)
-    mfcDC = win32ui.CreateDCFromHandle(hwndDC)
-    saveDC = mfcDC.CreateCompatibleDC()
-
-    saveBitMap = win32ui.CreateBitmap()
-    saveBitMap.CreateCompatibleBitmap(mfcDC, win_width, win_height)
-    saveDC.SelectObject(saveBitMap)
-
-    ctypes.windll.user32.PrintWindow(hwnd, saveDC.GetSafeHdc(), 3)
-
-    bmp_info = saveBitMap.GetInfo()
-    bmp_str = saveBitMap.GetBitmapBits(True)
-    img = Image.frombuffer(
-        "RGB",
-        (bmp_info["bmWidth"], bmp_info["bmHeight"]),
-        bmp_str, "raw", "BGRX", 0, 1,
-    )
-
-    win32gui.DeleteObject(saveBitMap.GetHandle())
-    saveDC.DeleteDC()
-    mfcDC.DeleteDC()
-    win32gui.ReleaseDC(hwnd, hwndDC)
+    # PrintWindow 模式下通过 PIL 裁剪
+    has_offset = offset_left or offset_top or offset_right or offset_bottom
+    if mode == CaptureMode.PRINT_WINDOW and has_offset:
+        crop_box = (offset_left, offset_top,
+                    win_width - offset_right, win_height - offset_bottom)
+        img = img.crop(crop_box)
 
     buffer = io.BytesIO()
     img.save(buffer, format="PNG")
@@ -5646,7 +5629,7 @@ class Chat:
             if not hwnd:
                 raise RuntimeError("无法获取微信窗口句柄")
 
-            png_bytes = capture_window2(hwnd)
+            png_bytes = capture_window(hwnd, mode=CaptureMode.PRINT_WINDOW)
             ocr_data = self._get_image_text(png_bytes)
 
             if "清空聊天记录" not in ocr_data:
@@ -5793,7 +5776,7 @@ class Chat:
             if not hwnd:
                 raise RuntimeError("无法获取微信窗口句柄")
 
-            png_bytes = capture_window2(hwnd)
+            png_bytes = capture_window(hwnd, mode=CaptureMode.PRINT_WINDOW)
             ocr_data = self._get_image_text(png_bytes)
 
             if "添加" not in ocr_data:
@@ -5959,7 +5942,7 @@ class Chat:
             if not hwnd:
                 raise RuntimeError("无法获取微信窗口句柄")
 
-            png_bytes = capture_window2(hwnd)
+            png_bytes = capture_window(hwnd, mode=CaptureMode.PRINT_WINDOW)
             ocr_data = self._get_image_text(png_bytes)
 
             if "移出" not in ocr_data:
@@ -6131,7 +6114,7 @@ class Chat:
         hwnd = self._win.NativeWindowHandle
         if not hwnd:
             raise RuntimeError("无法获取微信窗口句柄")
-        png_bytes = capture_window2(hwnd)
+        png_bytes = capture_window(hwnd, mode=CaptureMode.PRINT_WINDOW)
         return self._get_image_text(png_bytes), hwnd
 
     def _ocr_click(self, text: str) -> None:
@@ -6175,7 +6158,7 @@ class Chat:
             if not hwnd:
                 raise RuntimeError("无法获取微信窗口句柄")
 
-            png_bytes = capture_window2(hwnd)
+            png_bytes = capture_window(hwnd, mode=CaptureMode.PRINT_WINDOW)
             ocr_data = self._get_image_text(png_bytes)
 
             if switch_name not in ocr_data:
@@ -6248,13 +6231,13 @@ class Chat:
                 raise RuntimeError("无法获取微信窗口句柄")
 
             # 先确保消息免打扰已开启
-            png_bytes = capture_window2(hwnd)
+            png_bytes = capture_window(hwnd, mode=CaptureMode.PRINT_WINDOW)
             ocr_data = self._get_image_text(png_bytes)
             img = Image.open(io.BytesIO(png_bytes))
             self._toggle_ocr_switch(img, ocr_data, hwnd, "消息免打扰", True)
 
             # 开启消息免打扰后，"折叠该聊天"选项才会出现，重新截图
-            png_bytes = capture_window2(hwnd)
+            png_bytes = capture_window(hwnd, mode=CaptureMode.PRINT_WINDOW)
             ocr_data = self._get_image_text(png_bytes)
             img = Image.open(io.BytesIO(png_bytes))
             self._toggle_ocr_switch(img, ocr_data, hwnd, "折叠该聊天", True)
@@ -6285,7 +6268,7 @@ class Chat:
             if not hwnd:
                 raise RuntimeError("无法获取微信窗口句柄")
 
-            png_bytes = capture_window2(hwnd)
+            png_bytes = capture_window(hwnd, mode=CaptureMode.PRINT_WINDOW)
             ocr_data = self._get_image_text(png_bytes)
             img = Image.open(io.BytesIO(png_bytes))
 
@@ -6456,7 +6439,7 @@ class Chat:
 
             def _fresh_ocr() -> tuple[bytes, dict, int, int]:
                 """每次操作前重新截图 + OCR，确保坐标准确"""
-                _png = capture_window2(hwnd)
+                _png = capture_window(hwnd, mode=CaptureMode.PRINT_WINDOW)
                 _ocr = self._get_image_text(_png)
                 _left, _top, _, _ = win32gui.GetWindowRect(hwnd)
                 return _png, _ocr, _left, _top
@@ -6501,7 +6484,7 @@ class Chat:
                 pane_hwnd = announcement_pane.NativeWindowHandle
                 if not pane_hwnd:
                     raise RuntimeError("无法获取群公告窗口句柄")
-                pane_png = capture_window2(pane_hwnd)
+                pane_png = capture_window(pane_hwnd, mode=CaptureMode.PRINT_WINDOW)
                 pane_ocr = self._get_image_text(pane_png)
 
                 # 如果之前发布过群公告，需要先点击"编辑群公告"
@@ -6511,7 +6494,7 @@ class Chat:
                     auto.Click(int(pane_left + ei["center"][0]),
                                int(pane_top + ei["center"][1]))
                     time.sleep(0.5)
-                    pane_png = capture_window2(pane_hwnd)
+                    pane_png = capture_window(pane_hwnd, mode=CaptureMode.PRINT_WINDOW)
                     pane_ocr = self._get_image_text(pane_png)
 
                 announcement_pane.SendKeys("{Ctrl}a{Del}")
@@ -6519,7 +6502,7 @@ class Chat:
 
                 time.sleep(0.5)
 
-                pane_png = capture_window2(pane_hwnd)
+                pane_png = capture_window(pane_hwnd, mode=CaptureMode.PRINT_WINDOW)
                 pane_ocr = self._get_image_text(pane_png)
                 if "完成" not in pane_ocr:
                     raise RuntimeError("OCR 未识别到'完成'按钮")
@@ -6880,7 +6863,7 @@ class Chat:
             if not hwnd:
                 raise RuntimeError("无法获取微信窗口句柄")
 
-            png_bytes = capture_window2(hwnd)
+            png_bytes = capture_window(hwnd, mode=CaptureMode.PRINT_WINDOW)
             ocr_data = self._get_image_text(png_bytes)
 
             if "群聊名称" not in ocr_data:
@@ -6967,7 +6950,7 @@ class Chat:
             pane_hwnd = announcement_pane.NativeWindowHandle
             if not pane_hwnd:
                 raise RuntimeError("无法获取群公告窗口句柄")
-            png_bytes = capture_window2(pane_hwnd)
+            png_bytes = capture_window(pane_hwnd, mode=CaptureMode.PRINT_WINDOW)
             ocr_data = self._get_image_text(png_bytes)
             if not ocr_data:
                 raise RuntimeError("群公告窗口 OCR 未识别到任何文本")
@@ -6982,7 +6965,7 @@ class Chat:
                 time.sleep(0.5)
 
                 # 再次识别窗口更新识别信息
-                png_bytes = capture_window2(pane_hwnd)
+                png_bytes = capture_window(pane_hwnd, mode=CaptureMode.PRINT_WINDOW)
                 ocr_data = self._get_image_text(png_bytes)
                 if not ocr_data:
                     raise RuntimeError("群公告窗口 OCR 未识别到任何文本")
