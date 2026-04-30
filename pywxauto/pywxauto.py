@@ -9734,7 +9734,6 @@ class Weixin(WeixinWindow):
                     break
 
         logger.debug("开始多线程监听独立聊天窗口消息 (Ctrl+C 退出)...")
-        # 启动扫描线程
         scanner = threading.Thread(target=_scan_loop, daemon=True, name="scanner")
         scanner.start()
 
