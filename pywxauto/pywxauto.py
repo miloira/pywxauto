@@ -113,7 +113,7 @@ logger = logging.getLogger(__name__)
 # 让拥有 to_dict() 方法的对象支持 json.dumps 直接序列化
 _original_json_default = json.JSONEncoder().default
 
-def _custom_json_default(self, obj):
+def _custom_json_default(self, obj: object) -> object:
     if hasattr(obj, "to_dict"):
         return obj.to_dict()
     return _original_json_default(obj)
@@ -126,7 +126,7 @@ _DROPFILES_FORMAT = "Illii"
 _DROPFILES_SIZE = struct.calcsize(_DROPFILES_FORMAT)
 
 
-def query_reg_install_path(reg_path):
+def query_reg_install_path(reg_path: str) -> Optional[str]:
     try:
         root_map = {
             "HKCU": winreg.HKEY_CURRENT_USER,
@@ -153,7 +153,7 @@ def query_reg_install_path(reg_path):
     return None
 
 
-def get_wechat_install_path(version=None):
+def get_wechat_install_path(version: Optional[int] = None) -> Optional[str]:
     reg_paths_map = {
         3: [
             r"HKCU\Software\Tencent\WeChat",
@@ -195,7 +195,7 @@ def get_wechat_install_path(version=None):
     return None
 
 
-def get_wechat_wxocr_path():
+def get_wechat_wxocr_path() -> Optional[str]:
     appdata_path = os.getenv('APPDATA')
 
     ocr_dir = os.path.join(appdata_path, r"Tencent\xwechat\XPlugin\Plugins\WeChatOcr")
@@ -209,10 +209,10 @@ def get_wechat_wxocr_path():
     return os.path.join(os.path.dirname(result[0]), "wxocr.dll")
 
 
-def find_window_by_name(name_pattern) -> list[int]:
+def find_window_by_name(name_pattern: str) -> list[int]:
     result = []
 
-    def callback(hwnd, _):
+    def callback(hwnd, _) -> None:
         if win32gui.IsWindowVisible(hwnd):
             title = win32gui.GetWindowText(hwnd)
             # 忽略大小写匹配
@@ -235,7 +235,7 @@ _VK_MAP = {
 }
 
 
-def send_shortcut(combo: str):
+def send_shortcut(combo: str) -> None:
     """
     模拟键盘快捷键。
 
@@ -268,15 +268,15 @@ def send_shortcut(combo: str):
         win32api.keybd_event(vk, 0, win32con.KEYEVENTF_KEYUP, 0)
 
 
-def select_all():
+def select_all() -> None:
     send_shortcut("Ctrl+A")
 
 
-def copy():
+def copy() -> None:
     send_shortcut("Ctrl+C")
 
 
-def get_clipboard():
+def get_clipboard() -> str:
     win32clipboard.OpenClipboard()
     try:
         if win32clipboard.IsClipboardFormatAvailable(win32con.CF_UNICODETEXT):
@@ -287,7 +287,7 @@ def get_clipboard():
         win32clipboard.CloseClipboard()
 
 
-def set_clipboard(fmt, data):
+def set_clipboard(fmt, data) -> None:
     win32clipboard.OpenClipboard()
     try:
         win32clipboard.EmptyClipboard()
@@ -296,24 +296,24 @@ def set_clipboard(fmt, data):
         win32clipboard.CloseClipboard()
 
 
-def simulate_paste():
+def simulate_paste() -> None:
     send_shortcut("Ctrl+V")
 
 
-def copy_text(text):
+def copy_text(text) -> None:
     if text.isdigit():
         text += "\0"
     set_clipboard(win32con.CF_UNICODETEXT, text)
 
 
-def copy_files(file_paths):
+def copy_files(file_paths) -> None:
     header = struct.pack(_DROPFILES_FORMAT, _DROPFILES_SIZE, 0, 0, 0, True)
     files = "\0".join(p.replace("/", "\\") for p in file_paths)
     payload = files.encode("utf-16-le") + b"\0\0\0\0"
     set_clipboard(win32con.CF_HDROP, header + payload)
 
 
-def paste(content, interval=0):
+def paste(content, interval=0) -> None:
     if isinstance(content, str):
         copy_text(content)
     elif isinstance(content, list):
@@ -325,7 +325,7 @@ def paste(content, interval=0):
     simulate_paste()
 
 
-def capture_window(hwnd, offset_left=0, offset_top=0, offset_right=0, offset_bottom=0):
+def capture_window(hwnd: int, offset_left: int = 0, offset_top: int = 0, offset_right: int = 0, offset_bottom: int = 0) -> bytes:
     """
     获取窗口截图，支持四边偏移裁剪。
 
@@ -380,7 +380,7 @@ def capture_window(hwnd, offset_left=0, offset_top=0, offset_right=0, offset_bot
     return buffer.getvalue()
 
 
-def capture_window2(hwnd):
+def capture_window2(hwnd: int) -> bytes:
     """
     获取窗口截图（使用 PrintWindow，支持被遮挡/最小化的窗口）。
 
@@ -778,13 +778,13 @@ class WeixinWindow:
         """窗口是否已最大化"""
         return self._window.IsMaximize()
 
-    def activate(self):
+    def activate(self) -> None:
         """激活窗口（置前并聚焦）"""
         self._window.SetActive()
         self._window.SetFocus()
         time.sleep(0.2)
 
-    def pin(self, event: bool = True, simulate_move: bool = True):
+    def pin(self, event: bool = True, simulate_move: bool = True) -> None:
         """置顶窗口"""
         if event:
             self._window.SetTopmost(True)
@@ -796,7 +796,7 @@ class WeixinWindow:
             if btn.Exists(0, 0):
                 btn.Click(simulateMove=simulate_move)
 
-    def unpin(self, event: bool = True, simulate_move: bool = True):
+    def unpin(self, event: bool = True, simulate_move: bool = True) -> None:
         """取消置顶窗口"""
         if event:
             self._window.SetTopmost(False)
@@ -808,7 +808,7 @@ class WeixinWindow:
             if btn.Exists(0, 0):
                 btn.Click(simulateMove=simulate_move)
 
-    def minimize(self, event: bool = True, simulate_move: bool = True):
+    def minimize(self, event: bool = True, simulate_move: bool = True) -> None:
         """最小化窗口"""
         if event:
             self._window.Minimize()
@@ -822,7 +822,7 @@ class WeixinWindow:
             btn.Click(ratioX=_rand_ratio(), ratioY=_rand_ratio(),
                       simulateMove=simulate_move)
 
-    def maximize(self, event: bool = True, simulate_move: bool = True):
+    def maximize(self, event: bool = True, simulate_move: bool = True) -> None:
         """最大化/还原窗口"""
         if event:
             if self.is_maximized:
@@ -841,11 +841,11 @@ class WeixinWindow:
                     return
             raise RuntimeError("未找到最大化/还原按钮")
 
-    def restore(self):
+    def restore(self) -> None:
         """还原窗口"""
         self._window.Restore()
 
-    def close(self, event: bool = True, simulate_move: bool = True):
+    def close(self, event: bool = True, simulate_move: bool = True) -> None:
         """关闭窗口"""
         if event:
             wp = self._window.GetWindowPattern()
@@ -907,7 +907,7 @@ class Login(WeixinWindow):
         """登录窗口是否存在"""
         return self._win.Exists(maxSearchSeconds=3)
 
-    def _ensure_exists(self):
+    def _ensure_exists(self) -> None:
         if not self._win.Exists(maxSearchSeconds=3):
             raise RuntimeError("微信登录窗口未找到")
 
@@ -968,7 +968,7 @@ class Login(WeixinWindow):
 
         raise RuntimeError("登录超时，登录窗口未关闭")
 
-    def switch_account(self):
+    def switch_account(self) -> None:
         """
         点击"切换账号"按钮。
 
@@ -985,7 +985,7 @@ class Login(WeixinWindow):
         btn.Click(ratioX=_rand_ratio(), ratioY=_rand_ratio())
         time.sleep(0.5)
 
-    def transfer_only(self):
+    def transfer_only(self) -> None:
         """
         点击"仅传输文件"按钮。
 
@@ -1038,12 +1038,12 @@ class Login(WeixinWindow):
         )
         return back_btn.Exists(0, 0)
 
-    def _ensure_proxy_page(self):
+    def _ensure_proxy_page(self) -> None:
         """确保当前在代理设置页面，如果不在则打开"""
         if not self._is_proxy_page_open():
             self.open_proxy_settings()
 
-    def open_proxy_settings(self):
+    def open_proxy_settings(self) -> None:
         """
         点击"网络代理设置"按钮，进入代理配置页面。
 
@@ -1069,7 +1069,7 @@ class Login(WeixinWindow):
         if not back_btn.Exists(maxSearchSeconds=3):
             raise RuntimeError("代理设置页面未打开")
 
-    def close_proxy_settings(self):
+    def close_proxy_settings(self) -> None:
         """
         点击"返回"按钮，从代理设置页面返回登录页面。
         """
@@ -1107,7 +1107,7 @@ class Login(WeixinWindow):
             return toggle.ToggleState == 1
         return False
 
-    def enable_proxy(self):
+    def enable_proxy(self) -> None:
         """
         开启代理。
 
@@ -1126,7 +1126,7 @@ class Login(WeixinWindow):
         sw.Click(ratioX=_rand_ratio(), ratioY=_rand_ratio())
         time.sleep(0.5)
 
-    def disable_proxy(self):
+    def disable_proxy(self) -> None:
         """
         关闭代理。
 
@@ -1170,7 +1170,7 @@ class Login(WeixinWindow):
             raise RuntimeError(f"未找到'{name}'输入框")
         return edit
 
-    def _set_proxy_field(self, name: str, value: str):
+    def _set_proxy_field(self, name: str, value: str) -> None:
         """设置代理表单字段的值"""
         edit = self._find_proxy_edit(name)
         edit.Click(ratioX=0.5, ratioY=0.5)
@@ -1193,7 +1193,7 @@ class Login(WeixinWindow):
         return ""
 
     def set_proxy(self, address: str = "", port: str = "",
-                  username: str = "", password: str = ""):
+                  username: str = "", password: str = "") -> None:
         """
         设置代理参数。
 
@@ -1251,7 +1251,7 @@ class Login(WeixinWindow):
             result["password"] = self._get_proxy_field(self.PROXY_PASS_NAME)
         return result
 
-    def save_proxy(self):
+    def save_proxy(self) -> None:
         """
         点击"保存"按钮保存代理设置。
 
@@ -1268,7 +1268,7 @@ class Login(WeixinWindow):
         btn.Click(ratioX=_rand_ratio(), ratioY=_rand_ratio())
         time.sleep(0.5)
 
-    def close(self, event: bool = True, simulate_move: bool = True):
+    def close(self, event: bool = True, simulate_move: bool = True) -> None:
         """
         关闭登录窗口。
 
@@ -1327,31 +1327,31 @@ class SessionItem:
             raise RuntimeError("此 SessionItem 未关联 Session，无法执行操作")
         return self._session
 
-    def pin(self):
+    def pin(self) -> None:
         """置顶会话"""
         self._require_session()._session_context_action(self.name, "置顶")
 
-    def unpin(self):
+    def unpin(self) -> None:
         """取消置顶会话"""
         self._require_session()._session_context_action(self.name, "取消置顶")
 
-    def mark_as_unread(self):
+    def mark_as_unread(self) -> None:
         """标为未读"""
         self._require_session()._session_context_action(self.name, "标为未读")
 
-    def mark_as_read(self):
+    def mark_as_read(self) -> None:
         """标为已读"""
         self._require_session()._session_context_action(self.name, "标为已读")
 
-    def mute(self):
+    def mute(self) -> None:
         """消息免打扰"""
         self._require_session()._session_context_action(self.name, "消息免打扰")
 
-    def unmute(self):
+    def unmute(self) -> None:
         """允许消息通知"""
         self._require_session()._session_context_action(self.name, "允许消息通知")
 
-    def separate(self):
+    def separate(self) -> None:
         """独立窗口显示"""
         self._require_session()._session_context_action(self.name, "独立窗口显示")
 
@@ -1365,11 +1365,11 @@ class SessionItem:
         time.sleep(0.5)
         return SeparateChat(self.name)
 
-    def hide(self):
+    def hide(self) -> None:
         """不显示该会话"""
         self._require_session()._session_context_action(self.name, "不显示")
 
-    def delete(self):
+    def delete(self) -> None:
         """删除会话（危险操作，会清除聊天记录）"""
         session = self._require_session()
         session._session_context_action(self.name, "删除")
@@ -1379,11 +1379,11 @@ class SessionItem:
             raise RuntimeError("未找到删除确认弹窗")
         confirm_btn.Click(ratioX=_rand_ratio(), ratioY=_rand_ratio())
 
-    def open(self):
+    def open(self) -> None:
         """打开该会话"""
         self._require_session().open(self.name)
 
-    def close(self):
+    def close(self) -> None:
         """关闭该会话（如果处于激活状态则取消选中）"""
         self._require_session().close(self.name)
 
@@ -1472,7 +1472,7 @@ class Moment(WeixinWindow):
         """朋友圈窗口是否存在"""
         return self._win.Exists(maxSearchSeconds=1)
 
-    def _open_sns_window(self):
+    def _open_sns_window(self) -> None:
         """
         打开朋友圈独立窗口。
 
@@ -1887,7 +1887,7 @@ class Moment(WeixinWindow):
 
         raise RuntimeError("发布超时，发布面板未关闭")
 
-    def cancel_publish(self):
+    def cancel_publish(self) -> None:
         """
         取消当前发布操作。
 
@@ -1940,7 +1940,7 @@ class Moment(WeixinWindow):
             raise RuntimeError(f"未找到工具栏'{name}'按钮")
         return btn
 
-    def refresh(self):
+    def refresh(self) -> None:
         """
         刷新朋友圈。
 
@@ -2048,12 +2048,12 @@ class VoipCallWindow:
         """通话窗口是否存在"""
         return self._win.Exists(maxSearchSeconds=2)
 
-    def _ensure_exists(self):
+    def _ensure_exists(self) -> None:
         if not self._win.Exists(maxSearchSeconds=3):
             raise RuntimeError("通话窗口未找到")
 
     @property
-    def _toolbar(self):
+    def _toolbar(self) -> auto.GroupControl:
         return self._win.GroupControl(ClassName="mmui::P2PVOIPToolBarView")
 
     def _find_toolbar_button(self, *names: str) -> auto.ButtonControl:
@@ -2122,37 +2122,37 @@ class VoipCallWindow:
         except RuntimeError:
             return True
 
-    def toggle_mic(self):
+    def toggle_mic(self) -> None:
         """切换麦克风开关"""
         btn = self._find_toolbar_button("麦克风已开", "麦克风已关")
         btn.Click(ratioX=_rand_ratio(), ratioY=_rand_ratio())
         time.sleep(0.3)
 
-    def toggle_speaker(self):
+    def toggle_speaker(self) -> None:
         """切换扬声器开关"""
         btn = self._find_toolbar_button("扬声器已开", "扬声器已关")
         btn.Click(ratioX=_rand_ratio(), ratioY=_rand_ratio())
         time.sleep(0.3)
 
-    def toggle_camera(self):
+    def toggle_camera(self) -> None:
         """切换摄像头开关（仅视频通话）"""
         btn = self._find_toolbar_button("摄像头已开", "摄像头已关", "无摄像头")
         btn.Click(ratioX=_rand_ratio(), ratioY=_rand_ratio())
         time.sleep(0.3)
 
-    def cancel(self):
+    def cancel(self) -> None:
         """取消通话（呼叫中未接通时）"""
         btn = self._find_toolbar_button("取消")
         btn.Click(ratioX=_rand_ratio(), ratioY=_rand_ratio())
         time.sleep(0.3)
 
-    def hangup(self):
+    def hangup(self) -> None:
         """挂断通话（通话中）"""
         btn = self._find_toolbar_button("挂断")
         btn.Click(ratioX=_rand_ratio(), ratioY=_rand_ratio())
         time.sleep(0.3)
 
-    def end_call(self):
+    def end_call(self) -> None:
         """结束通话（自动识别取消/挂断）"""
         try:
             btn = self._find_toolbar_button("取消", "挂断")
@@ -2161,13 +2161,13 @@ class VoipCallWindow:
         btn.Click(ratioX=_rand_ratio(), ratioY=_rand_ratio())
         time.sleep(0.3)
 
-    def switch_to_video(self):
+    def switch_to_video(self) -> None:
         """切换到视频通话（通话中可用）"""
         btn = self._find_toolbar_button("切换到视频通话")
         btn.Click(ratioX=_rand_ratio(), ratioY=_rand_ratio())
         time.sleep(0.3)
 
-    def pin(self):
+    def pin(self) -> None:
         """置顶窗口"""
         self._ensure_exists()
         btn = self._win.ButtonControl(
@@ -2177,7 +2177,7 @@ class VoipCallWindow:
             btn.Click(ratioX=_rand_ratio(), ratioY=_rand_ratio())
             time.sleep(0.2)
 
-    def minimize(self):
+    def minimize(self) -> None:
         """最小化通话窗口"""
         self._ensure_exists()
         btn = self._win.ButtonControl(
@@ -2187,7 +2187,7 @@ class VoipCallWindow:
             btn.Click(ratioX=_rand_ratio(), ratioY=_rand_ratio())
             time.sleep(0.2)
 
-    def maximize(self):
+    def maximize(self) -> None:
         """最大化通话窗口"""
         self._ensure_exists()
         btn = self._win.ButtonControl(
@@ -2197,7 +2197,7 @@ class VoipCallWindow:
             btn.Click(ratioX=_rand_ratio(), ratioY=_rand_ratio())
             time.sleep(0.2)
 
-    def close(self):
+    def close(self) -> None:
         """关闭通话窗口"""
         self._ensure_exists()
         btn = self._win.ButtonControl(
@@ -2254,7 +2254,7 @@ class NoteEditorWindow(WeixinWindow):
             self._handle = win.NativeWindowHandle
             self._win = win
 
-    def _refresh_win(self):
+    def _refresh_win(self) -> None:
         """通过句柄刷新窗口引用（防止窗口对象失效）"""
         if self._handle:
             try:
@@ -2270,18 +2270,18 @@ class NoteEditorWindow(WeixinWindow):
         except Exception:
             return False
 
-    def _ensure_exists(self):
+    def _ensure_exists(self) -> None:
         self._refresh_win()
         if not self._win.Exists(maxSearchSeconds=3):
             raise RuntimeError("笔记编辑窗口未找到")
 
-    def activate(self):
+    def activate(self) -> None:
         self._ensure_exists()
         super().activate()
 
     # -- 笔记窗口特有的 pin/unpin（Chrome WebView 按钮无 ClassName 区分） --
 
-    def pin(self, **kwargs):
+    def pin(self, **kwargs) -> None:
         """置顶窗口（通过标题栏按钮）"""
         self._ensure_exists()
         btn = self._win.ButtonControl(Name="置顶")
@@ -2289,7 +2289,7 @@ class NoteEditorWindow(WeixinWindow):
             btn.Click(ratioX=_rand_ratio(), ratioY=_rand_ratio())
             time.sleep(0.2)
 
-    def unpin(self, **kwargs):
+    def unpin(self, **kwargs) -> None:
         """取消置顶窗口"""
         self._ensure_exists()
         btn = self._win.ButtonControl(Name="取消置顶")
@@ -2303,13 +2303,13 @@ class NoteEditorWindow(WeixinWindow):
         btn = self._win.ButtonControl(Name="取消置顶")
         return btn.Exists(0, 0)
 
-    def minimize(self, **kwargs):
+    def minimize(self, **kwargs) -> None:
         """最小化窗口（Chrome WebView 优先用窗口 API）"""
         self._ensure_exists()
         self._win.Minimize()
         time.sleep(0.2)
 
-    def maximize(self, **kwargs):
+    def maximize(self, **kwargs) -> None:
         """最大化/还原窗口"""
         self._ensure_exists()
         if self._win.IsMaximize():
@@ -2318,7 +2318,7 @@ class NoteEditorWindow(WeixinWindow):
             self._win.Maximize()
         time.sleep(0.2)
 
-    def close(self, **kwargs):
+    def close(self, **kwargs) -> None:
         """关闭笔记窗口（窗口有两个关闭按钮，取可见的）"""
         self._ensure_exists()
         btns = self._win.GetChildren()
@@ -2351,7 +2351,7 @@ class NoteEditorWindow(WeixinWindow):
         )
         return doc.GroupControl(AutomationId=self.MAIN_CONTAINER_ID)
 
-    def focus_editor(self, force_click: bool = True):
+    def focus_editor(self, force_click: bool = True) -> None:
         """
         使编辑器获得焦点。
 
@@ -2390,7 +2390,7 @@ class NoteEditorWindow(WeixinWindow):
                 return text if text else ""
         return ""
 
-    def set_content(self, text: str):
+    def set_content(self, text: str) -> None:
         """
         设置编辑器内容（覆盖现有内容）。
 
@@ -2408,7 +2408,7 @@ class NoteEditorWindow(WeixinWindow):
         else:
             raise RuntimeError("编辑器不支持 ValuePattern")
 
-    def type_text(self, text: str):
+    def type_text(self, text: str) -> None:
         """
         在编辑器中输入文本（追加到当前光标位置）。
 
@@ -2421,7 +2421,7 @@ class NoteEditorWindow(WeixinWindow):
         editor.SendKeys(text)
         time.sleep(0.2)
 
-    def clear(self):
+    def clear(self) -> None:
         """清空编辑器内容"""
         self.focus_editor()
         editor = self._editor
@@ -2429,7 +2429,7 @@ class NoteEditorWindow(WeixinWindow):
             editor.SendKeys("{Ctrl}a{Del}")
             time.sleep(0.2)
 
-    def select_all(self):
+    def select_all(self) -> None:
         """全选编辑器内容"""
         self.focus_editor()
         self._editor.SendKeys("{Ctrl}a")
@@ -2439,7 +2439,7 @@ class NoteEditorWindow(WeixinWindow):
     # 底部工具栏渲染在 WebView 内部，不暴露为 UI Automation 控件，
     # 因此通过键盘快捷键操作格式。
 
-    def begin_voice_input(self):
+    def begin_voice_input(self) -> None:
         """
         开始语音输入：按下 Ctrl+Win 不松开。
 
@@ -2454,7 +2454,7 @@ class NoteEditorWindow(WeixinWindow):
         ctypes.windll.user32.keybd_event(VK_LWIN, 0, KEYEVENTF_KEYDOWN, 0)
         time.sleep(0.1)
 
-    def end_voice_input(self):
+    def end_voice_input(self) -> None:
         """
         结束语音输入：释放 Ctrl+Win 按键。
 
@@ -2467,7 +2467,7 @@ class NoteEditorWindow(WeixinWindow):
         ctypes.windll.user32.keybd_event(VK_CONTROL, 0, KEYEVENTF_KEYUP, 0)
         time.sleep(0.1)
 
-    def add_file(self, file_path: str):
+    def add_file(self, file_path: str) -> None:
         """
         通过 Ctrl+O 打开文件选择对话框，输入路径并确认添加文件。
 
@@ -2494,55 +2494,55 @@ class NoteEditorWindow(WeixinWindow):
         dlg.SendKeys("{Alt}O")
         time.sleep(0.5)
 
-    def bold(self):
+    def bold(self) -> None:
         """加粗（Ctrl+B）"""
         self.focus_editor(force_click=False)
         self._editor.SendKeys("{Ctrl}B")
         time.sleep(0.1)
 
-    def italic(self):
+    def italic(self) -> None:
         """斜体（Ctrl+I）"""
         self.focus_editor(force_click=False)
         self._editor.SendKeys("{Ctrl}I")
         time.sleep(0.1)
 
-    def underline(self):
+    def underline(self) -> None:
         """下划线（Ctrl+U）"""
         self.focus_editor(force_click=False)
         self._editor.SendKeys("{Ctrl}U")
         time.sleep(0.1)
 
-    def highlight(self):
+    def highlight(self) -> None:
         """高亮（Ctrl+Shift+H）"""
         self.focus_editor(force_click=False)
         self._editor.SendKeys("{Ctrl}{Shift}H")
         time.sleep(0.1)
 
-    def undo(self):
+    def undo(self) -> None:
         """撤销（Ctrl+Z）"""
         self.focus_editor(force_click=False)
         self._editor.SendKeys("{Ctrl}z")
         time.sleep(0.1)
 
-    def redo(self):
+    def redo(self) -> None:
         """重做（Ctrl+Y）"""
         self.focus_editor(force_click=False)
         self._editor.SendKeys("{Ctrl}y")
         time.sleep(0.1)
 
-    def new_line(self):
+    def new_line(self) -> None:
         """换行（Enter）"""
         self.focus_editor()
         self._editor.SendKeys("{Enter}")
         time.sleep(0.1)
 
-    def save(self):
+    def save(self) -> None:
         """保存笔记（Ctrl+S）"""
         self.focus_editor(force_click=False)
         self._editor.SendKeys("{Ctrl}s")
         time.sleep(0.3)
 
-    def add_tags(self, *tags: str):
+    def add_tags(self, *tags: str) -> None:
         """
         添加标签。
 
@@ -2573,13 +2573,13 @@ class NoteEditorWindow(WeixinWindow):
         auto.SendKeys("{Esc}")
         time.sleep(0.2)
 
-    def paste(self):
+    def paste(self) -> None:
         """粘贴剪贴板内容（Ctrl+V）"""
         self.focus_editor()
         self._editor.SendKeys("{Ctrl}v")
         time.sleep(0.2)
 
-    def paste_file(self, file_path: str):
+    def paste_file(self, file_path: str) -> None:
         """
         通过剪贴板粘贴文件到笔记中。
 
@@ -2692,7 +2692,7 @@ class FileManager:
         time.sleep(0.5)
         return True
 
-    def close(self, method: str = "event"):
+    def close(self, method: str = "event") -> None:
         """
         关闭聊天文件管理器窗口。
 
@@ -3188,7 +3188,7 @@ class Navigator:
         self._win = wx.window
         self._tabbar = self._win.ToolBarControl(ClassName="mmui::MainTabBar", searchDepth=5)
 
-    def switch_to(self, tab_name: str):
+    def switch_to(self, tab_name: str) -> None:
         if tab_name not in self.TABS:
             raise ValueError(f"未知标签页: {tab_name}，可选: {list(self.TABS.keys())}")
 
@@ -3271,7 +3271,7 @@ class Session:
                 continue
         return None
 
-    def click(self, name: str):
+    def click(self, name: str) -> None:
         """通过 AutomationId 精确点击指定会话"""
         item = self._win.ListItemControl(
             ClassName="mmui::ChatSessionCell",
@@ -3288,13 +3288,13 @@ class Session:
             Name="搜索",
         )
 
-    def search(self, keyword: str, chat_type: Optional[list[str]] = None):
+    def search(self, keyword: str, chat_type: Optional[list[str]] = None) -> None:
         """搜索并打开会话（search_and_select 的别名，失败时抛异常）"""
         if not self.search_and_select(keyword, chat_type):
             raise RuntimeError(f"搜索未找到结果: {keyword}")
 
     def open_by_search(self, name: str, chat_type: Optional[list[str]] = None,
-                       force_search: bool = False):
+                       force_search: bool = False) -> None:
         """
         打开指定名称的会话。
 
@@ -3337,7 +3337,7 @@ class Session:
         # 列表中没有（或强制搜索），走搜索
         self.search(name, chat_type)
 
-    def scroll(self, direction: str = "down", clicks: int = 3):
+    def scroll(self, direction: str = "down", clicks: int = 3) -> None:
         """
         滚动会话列表。
         direction: "up" 或 "down"
@@ -3500,12 +3500,12 @@ class Session:
 
         raise RuntimeError(f"会话列表中未找到: {name}")
 
-    def _right_click_session(self, name: str):
+    def _right_click_session(self, name: str) -> None:
         """右键点击指定会话，弹出上下文菜单"""
         item = self._ensure_session_visible(name)
         item.RightClick(ratioX=_rand_ratio(), ratioY=_rand_ratio())
 
-    def _click_context_menu_item(self, menu_name: str):
+    def _click_context_menu_item(self, menu_name: str) -> None:
         """
         点击当前已弹出的右键菜单中的指定项。
         菜单窗口: mmui::XMenu
@@ -3526,45 +3526,45 @@ class Session:
         menu_item.Click(ratioX=_rand_ratio(), ratioY=_rand_ratio())
         time.sleep(0.3)
 
-    def _session_context_action(self, name: str, menu_name: str):
+    def _session_context_action(self, name: str, menu_name: str) -> None:
         """对指定会话执行右键菜单操作"""
         self._wx.activate()
         self._right_click_session(name)
         self._click_context_menu_item(menu_name)
 
-    def pin(self, name: str):
+    def pin(self, name: str) -> None:
         """置顶会话"""
         self._session_context_action(name, "置顶")
 
-    def unpin(self, name: str):
+    def unpin(self, name: str) -> None:
         """取消置顶会话"""
         self._session_context_action(name, "取消置顶")
 
-    def mark_as_unread(self, name: str):
+    def mark_as_unread(self, name: str) -> None:
         """标为未读"""
         self._session_context_action(name, "标为未读")
 
-    def mark_as_read(self, name: str):
+    def mark_as_read(self, name: str) -> None:
         """标为已读"""
         self._session_context_action(name, "标为已读")
 
-    def mute(self, name: str):
+    def mute(self, name: str) -> None:
         """消息免打扰"""
         self._session_context_action(name, "消息免打扰")
 
-    def unmute(self, name: str):
+    def unmute(self, name: str) -> None:
         """允许消息通知"""
         self._session_context_action(name, "允许消息通知")
 
-    def separate(self, name: str):
+    def separate(self, name: str) -> None:
         """独立窗口显示"""
         self._session_context_action(name, "独立窗口显示")
 
-    def hide(self, name: str):
+    def hide(self, name: str) -> None:
         """不显示该会话"""
         self._session_context_action(name, "不显示")
 
-    def close(self, name: str):
+    def close(self, name: str) -> None:
         """关闭指定会话：如果该会话处于激活状态，点击一下取消选中"""
         self._wx.activate()
         item = self._ensure_session_visible(name)
@@ -3576,7 +3576,7 @@ class Session:
             return
         item.Click(ratioX=_rand_ratio(), ratioY=_rand_ratio())
 
-    def open(self, name: str):
+    def open(self, name: str) -> None:
         """通过在会话列表中查找并点击来打开指定会话，如果已激活则不操作"""
         self._wx.activate()
         item = self._ensure_session_visible(name)
@@ -3588,7 +3588,7 @@ class Session:
             pass
         item.Click(ratioX=_rand_ratio(), ratioY=_rand_ratio())
 
-    def delete(self, name: str):
+    def delete(self, name: str) -> None:
         """删除会话（危险操作，会清除聊天记录）"""
         self._session_context_action(name, "删除")
         confirm_btn = self._win.ButtonControl(
@@ -3627,7 +3627,7 @@ class Session:
                     return True
         return False
 
-    def cancel_search(self):
+    def cancel_search(self) -> None:
         """取消搜索（按 Esc 退出搜索模式）"""
         self._win.SendKeys("{Esc}")
         time.sleep(0.2)
@@ -3640,7 +3640,7 @@ class Session:
         """搜索群聊并打开会话"""
         return self.search_and_select(keyword, chat_type=["群聊"])
 
-    def _click_quick_action_button(self):
+    def _click_quick_action_button(self) -> None:
         """点击快捷操作按钮"""
         self._wx.activate()
         btn = self._win.ButtonControl(
@@ -3652,7 +3652,7 @@ class Session:
         btn.Click(ratioX=_rand_ratio(), ratioY=_rand_ratio())
         time.sleep(0.3)
 
-    def _click_quick_action_item(self, item_name: str):
+    def _click_quick_action_item(self, item_name: str) -> None:
         """
         点击快捷操作菜单中的指定项。
         菜单列表: AutomationId="chat_more_entry"
@@ -3675,12 +3675,12 @@ class Session:
         item.Click()
         time.sleep(0.3)
 
-    def _quick_action(self, item_name: str):
+    def _quick_action(self, item_name: str) -> None:
         """执行快捷操作"""
         self._click_quick_action_button()
         self._click_quick_action_item(item_name)
 
-    def create_room(self, nickname_list: list[str]):
+    def create_room(self, nickname_list: list[str]) -> None:
         """
         发起群聊。
 
@@ -3807,7 +3807,7 @@ class Session:
 
     def add_friend(self, keyword: str, message: Optional[str] = None, remark: Optional[str] = None,
                    permission: Optional[str] = None, hide_my_posts: bool = False,
-                   hide_their_posts: bool = False):
+                   hide_their_posts: bool = False) -> None:
         """
         添加朋友完整流程。
 
@@ -4073,7 +4073,7 @@ class Chat:
             AutomationId="chat_input_field",
         )
 
-    def clear_input(self):
+    def clear_input(self) -> None:
         """清空输入框"""
         field = self._input_field
         if field.Exists(maxSearchSeconds=2):
@@ -4354,7 +4354,7 @@ class Chat:
     FAV_CANCEL_NAME = "取消"
     FAV_CANCEL_CLASS = "mmui::XOutlineButton"
 
-    def _open_collection_panel(self):
+    def _open_collection_panel(self) -> auto.ListControl:
         """
         打开收藏选择面板。
 
@@ -4400,7 +4400,7 @@ class Chat:
 
         return detail_list
 
-    def _close_collection_panel(self):
+    def _close_collection_panel(self) -> None:
         """
         关闭收藏选择面板。
 
@@ -4689,7 +4689,7 @@ class Chat:
             raise RuntimeError("未找到表情弹窗")
         return popover
 
-    def _open_emoji_panel(self):
+    def _open_emoji_panel(self) -> None:
         """
         打开表情选择面板。
 
@@ -4727,7 +4727,7 @@ class Chat:
         if not emoji_popover.Exists(maxSearchSeconds=5):
             raise RuntimeError("表情选择面板未打开")
 
-    def _close_emoji_panel(self):
+    def _close_emoji_panel(self) -> None:
         """
         关闭表情面板。
 
@@ -4746,7 +4746,7 @@ class Chat:
             self._win.SendKeys("{Esc}")
             time.sleep(0.3)
 
-    def _click_emoji_search_tab(self, popover: auto.WindowControl):
+    def _click_emoji_search_tab(self, popover: auto.WindowControl) -> None:
         """
         在表情面板工具栏中点击"搜索表情"标签。
         """
@@ -4788,7 +4788,7 @@ class Chat:
 
     def _click_emoji_search_result(
         self, popover: auto.WindowControl, index: int,
-    ):
+    ) -> None:
         """
         在表情搜索结果中点击第 index 个表情（从 1 开始）。
 
@@ -4834,7 +4834,7 @@ class Chat:
                     f"第 {index} 个表情不可见（offscreen），无法点击"
                 )
 
-    def _collect_emotion_items(self, control, result: list):
+    def _collect_emotion_items(self, control, result: list) -> None:
         """递归收集 ListItemControl 表情项。"""
         if control.ControlType == auto.ControlType.ListItemControl:
             name = control.Name or ""
@@ -4844,7 +4844,7 @@ class Chat:
         for child in control.GetChildren():
             self._collect_emotion_items(child, result)
 
-    def _click_custom_emoji_tab(self, popover: auto.WindowControl):
+    def _click_custom_emoji_tab(self, popover: auto.WindowControl) -> None:
         """
         在表情面板工具栏中点击"自定义表情"标签。
         """
@@ -4869,7 +4869,7 @@ class Chat:
 
     def _click_custom_emoji_item(
         self, popover: auto.WindowControl, index: int,
-    ):
+    ) -> None:
         """
         在自定义表情列表中点击第 index 个表情（从 1 开始）。
 
@@ -4992,7 +4992,7 @@ class Chat:
             self._cleanup_send_card()
             raise
 
-    def _click_chat_info_button(self):
+    def _click_chat_info_button(self) -> None:
         """点击聊天标题栏右上角的"聊天信息"按钮"""
         btn = self._win.ButtonControl(
             ClassName="mmui::XButton",
@@ -5002,7 +5002,7 @@ class Chat:
             raise RuntimeError("未找到'聊天信息'按钮")
         btn.Click(ratioX=_rand_ratio(), ratioY=_rand_ratio())
 
-    def _click_contact_avatar(self):
+    def _click_contact_avatar(self) -> None:
         """点击聊天信息面板中的联系人头像"""
         avatar = self._win.ButtonControl(
             ClassName="mmui::ChatMemberCell",
@@ -5012,7 +5012,7 @@ class Chat:
             raise RuntimeError("未找到联系人头像")
         avatar.Click(ratioX=_rand_ratio(), ratioY=_rand_ratio())
 
-    def _click_profile_more_button(self):
+    def _click_profile_more_button(self) -> None:
         """点击资料面板右上角的"更多"按钮（排除导航栏的同名按钮）"""
         # 资料面板的"更多"按钮 ClassName 为 mmui::XButton，
         # 位于窗口右侧区域；导航栏的同名按钮位于左下角。
@@ -5031,7 +5031,7 @@ class Chat:
 
         raise RuntimeError("未找到资料面板'更多'按钮")
 
-    def _click_recommend_contact(self):
+    def _click_recommend_contact(self) -> None:
         """点击弹出菜单中的"把他推荐给朋友" """
         menu_item = self._win.MenuItemControl(
             ClassName="mmui::XMenuView",
@@ -5041,7 +5041,7 @@ class Chat:
             raise RuntimeError("未找到'把他推荐给朋友'菜单项")
         menu_item.Click(ratioX=_rand_ratio(), ratioY=_rand_ratio())
 
-    def _search_and_select_receiver(self, receiver_nickname: str):
+    def _search_and_select_receiver(self, receiver_nickname: str) -> None:
         """在"微信发送给"弹窗中搜索并勾选接收者"""
         # SessionPickerWindow 是微信主窗口的子控件，从 self._win 查找
         picker_win = self._win.WindowControl(
@@ -5119,7 +5119,7 @@ class Chat:
         send_btn.Click(ratioX=_rand_ratio(), ratioY=_rand_ratio())
         time.sleep(0.5)
 
-    def _cleanup_send_card(self):
+    def _cleanup_send_card(self) -> None:
         """清理 send_card 过程中可能残留的弹窗和面板"""
         try:
             picker_win = self._win.WindowControl(
@@ -5144,7 +5144,7 @@ class Chat:
             pass
 
     def _add_at_members(self, chat_input: auto.EditControl,
-                        at_members: list[str]):
+                        at_members: list[str]) -> None:
         """
         在输入框中 @指定群成员。
 
@@ -5196,7 +5196,7 @@ class Chat:
             else:
                 raise RuntimeError(f"@群成员失败，未找到: {member}")
 
-    def _click_voip_menu(self, menu_name: str):
+    def _click_voip_menu(self, menu_name: str) -> None:
         """
         点击通话按钮弹出菜单，再选择指定项。
 
@@ -5547,7 +5547,7 @@ class Chat:
 
     # ---- 聊天信息面板操作 ----
 
-    def clear_chat_history(self):
+    def clear_chat_history(self) -> None:
         """
         清空当前会话的聊天记录（私聊）。
 
@@ -5590,7 +5590,7 @@ class Chat:
             # 4. 收回聊天信息面板
             self._close_chat_info_panel()
 
-    def clear_room_chat_history(self):
+    def clear_room_chat_history(self) -> None:
         """
         清空当前群聊会话的聊天记录。
 
@@ -5678,7 +5678,7 @@ class Chat:
             # 6. 收回聊天信息面板
             self._close_chat_info_panel()
 
-    def exit_room(self):
+    def exit_room(self) -> None:
         """
         退出当前群聊。
 
@@ -5759,7 +5759,7 @@ class Chat:
             # 退出群聊后面板可能已自动关闭，尝试收回
             self._close_chat_info_panel()
 
-    def add_room_members(self, members: list[str]):
+    def add_room_members(self, members: list[str]) -> None:
         """
         添加群成员。
 
@@ -5917,7 +5917,7 @@ class Chat:
         finally:
             self._close_chat_info_panel()
 
-    def remove_room_members(self, members: list[str]):
+    def remove_room_members(self, members: list[str]) -> None:
         """
         移除群成员。
 
@@ -6088,7 +6088,7 @@ class Chat:
         finally:
             self._close_chat_info_panel()
 
-    def _scroll_room_info_to_bottom(self):
+    def _scroll_room_info_to_bottom(self) -> auto.GroupControl:
         """
         在已展开的聊天信息面板中，定位 mmui::ChatRoomMemberInfoView
         区域并滚动到底部。
@@ -6134,7 +6134,7 @@ class Chat:
         png_bytes = capture_window2(hwnd)
         return self._get_image_text(png_bytes), hwnd
 
-    def _ocr_click(self, text: str):
+    def _ocr_click(self, text: str) -> None:
         """
         对微信主窗口截图 OCR 识别，点击指定文本的中心位置。
 
@@ -6153,7 +6153,7 @@ class Chat:
         click_y = int(win_top + info["center"][1])
         auto.Click(click_x, click_y)
 
-    def _set_room_ocr_switch(self, switch_name: str, enable: bool):
+    def _set_room_ocr_switch(self, switch_name: str, enable: bool) -> None:
         """
         通过 OCR 识别设置群聊信息面板中的开关。
 
@@ -6193,39 +6193,39 @@ class Chat:
         finally:
             self._close_chat_info_panel()
 
-    def pin_room_chat(self):
+    def pin_room_chat(self) -> None:
         """置顶当前群聊会话（通过 OCR 识别开关）"""
         self._set_room_ocr_switch("置顶聊天", True)
 
-    def unpin_room_chat(self):
+    def unpin_room_chat(self) -> None:
         """取消置顶当前群聊会话（通过 OCR 识别开关）"""
         self._set_room_ocr_switch("置顶聊天", False)
 
-    def mute_room_chat(self):
+    def mute_room_chat(self) -> None:
         """开启当前群聊的消息免打扰（通过 OCR 识别开关）"""
         self._set_room_ocr_switch("消息免打扰", True)
 
-    def unmute_room_chat(self):
+    def unmute_room_chat(self) -> None:
         """关闭当前群聊的消息免打扰（通过 OCR 识别开关）"""
         self._set_room_ocr_switch("消息免打扰", False)
 
-    def add_room_address_book(self):
+    def add_room_address_book(self) -> None:
         """将当前群聊保存到通讯录（通过 OCR 识别开关）"""
         self._set_room_ocr_switch("保存到通讯录", True)
 
-    def remove_room_address_book(self):
+    def remove_room_address_book(self) -> None:
         """将当前群聊从通讯录移除（通过 OCR 识别开关）"""
         self._set_room_ocr_switch("保存到通讯录", False)
 
-    def display_room_member_nickname(self):
+    def display_room_member_nickname(self) -> None:
         """显示群成员昵称（通过 OCR 识别开关）"""
         self._set_room_ocr_switch("显示群成员昵称", True)
 
-    def hidden_room_member_nickname(self):
+    def hidden_room_member_nickname(self) -> None:
         """隐藏群成员昵称（通过 OCR 识别开关）"""
         self._set_room_ocr_switch("显示群成员昵称", False)
 
-    def fold_room_chat(self):
+    def fold_room_chat(self) -> None:
         """
         折叠当前群聊会话（通过 OCR 识别开关）。
 
@@ -6264,7 +6264,7 @@ class Chat:
         finally:
             self._close_chat_info_panel()
 
-    def unfold_room_chat(self):
+    def unfold_room_chat(self) -> None:
         """
         取消折叠当前群聊会话（通过 OCR 识别开关）。
 
@@ -6374,7 +6374,7 @@ class Chat:
         return img.width - 40
 
     def _toggle_ocr_switch(self, img, ocr_data, hwnd,
-                           switch_name: str, enable: bool):
+                           switch_name: str, enable: bool) -> None:
         """
         根据已有的 OCR 数据和截图，切换指定开关。
 
@@ -6411,7 +6411,7 @@ class Chat:
                       mute: bool = None, pin: bool = None,
                       save_address_book: bool = None,
                       display_member_nickname: bool = None,
-                      fold: bool = None):
+                      fold: bool = None) -> None:
         """
         一次性设置群聊的多项信息。
 
@@ -6454,7 +6454,7 @@ class Chat:
             if not hwnd:
                 raise RuntimeError("无法获取微信窗口句柄")
 
-            def _fresh_ocr():
+            def _fresh_ocr() -> tuple[bytes, dict, int, int]:
                 """每次操作前重新截图 + OCR，确保坐标准确"""
                 _png = capture_window2(hwnd)
                 _ocr = self._get_image_text(_png)
@@ -6648,7 +6648,7 @@ class Chat:
         is_on = toggle.ToggleState == 1 if toggle else False
         return sw, is_on
 
-    def _set_chat_info_switch(self, name: str, enable: bool):
+    def _set_chat_info_switch(self, name: str, enable: bool) -> None:
         """
         设置聊天信息面板中指定开关的状态。
 
@@ -6685,22 +6685,22 @@ class Chat:
         finally:
             self._close_chat_info_panel()
 
-    def pin_contact_chat(self):
+    def pin_contact_chat(self) -> None:
         """置顶当前私聊会话（通过 UI Automation 开关）"""
         self._set_chat_info_switch("置顶聊天", True)
 
-    def unpin_contact_chat(self):
+    def unpin_contact_chat(self) -> None:
         """取消置顶当前私聊会话（通过 UI Automation 开关）"""
         self._set_chat_info_switch("置顶聊天", False)
 
-    def pin_chat(self):
+    def pin_chat(self) -> None:
         """置顶当前会话（自动区分私聊/群聊）"""
         if self.chat_type == "群聊":
             self.pin_room_chat()
         else:
             self.pin_contact_chat()
 
-    def unpin_chat(self):
+    def unpin_chat(self) -> None:
         """取消置顶当前会话（自动区分私聊/群聊）"""
         if self.chat_type == "群聊":
             self.unpin_room_chat()
@@ -6720,29 +6720,29 @@ class Chat:
         finally:
             self._close_chat_info_panel()
 
-    def mute_contact_chat(self):
+    def mute_contact_chat(self) -> None:
         """开启当前私聊的消息免打扰（通过 UI Automation 开关）"""
         self._set_chat_info_switch("消息免打扰", True)
 
-    def unmute_contact_chat(self):
+    def unmute_contact_chat(self) -> None:
         """关闭当前私聊的消息免打扰（通过 UI Automation 开关）"""
         self._set_chat_info_switch("消息免打扰", False)
 
-    def mute_chat(self):
+    def mute_chat(self) -> None:
         """开启消息免打扰（自动区分私聊/群聊）"""
         if self.chat_type == "群聊":
             self.mute_room_chat()
         else:
             self.mute_contact_chat()
 
-    def unmute_chat(self):
+    def unmute_chat(self) -> None:
         """关闭消息免打扰（自动区分私聊/群聊）"""
         if self.chat_type == "群聊":
             self.unmute_room_chat()
         else:
             self.unmute_contact_chat()
 
-    def fold_contact_chat(self):
+    def fold_contact_chat(self) -> None:
         """
         折叠当前私聊会话（通过 UI Automation 开关）。
 
@@ -6772,7 +6772,7 @@ class Chat:
         finally:
             self._close_chat_info_panel()
 
-    def unfold_contact_chat(self):
+    def unfold_contact_chat(self) -> None:
         """
         取消折叠当前私聊会话（通过 UI Automation 开关）。
 
@@ -6800,14 +6800,14 @@ class Chat:
         finally:
             self._close_chat_info_panel()
 
-    def fold_chat(self):
+    def fold_chat(self) -> None:
         """折叠当前会话（自动区分私聊/群聊）"""
         if self.chat_type == "群聊":
             self.fold_room_chat()
         else:
             self.fold_contact_chat()
 
-    def unfold_chat(self):
+    def unfold_chat(self) -> None:
         """取消折叠当前会话（自动区分私聊/群聊）"""
         if self.chat_type == "群聊":
             self.unfold_room_chat()
@@ -6816,12 +6816,12 @@ class Chat:
 
     # ---- 群聊信息面板操作（仅群聊可用） ----
 
-    def _ensure_room_chat(self):
+    def _ensure_room_chat(self) -> None:
         """确保当前是群聊会话，否则抛出异常"""
         if self.chat_type != "群聊":
             raise RuntimeError("群聊信息操作仅支持群聊会话")
 
-    def _click_room_info_item(self, item_name: str):
+    def _click_room_info_item(self, item_name: str) -> None:
         """
         在群聊信息面板中点击指定的信息项按钮。
 
@@ -6845,7 +6845,7 @@ class Chat:
         btn.Click(ratioX=_rand_ratio(), ratioY=_rand_ratio())
         time.sleep(0.5)
 
-    def set_room_name(self, name: str):
+    def set_room_name(self, name: str) -> None:
         """
         设置群聊名称。
 
@@ -6911,7 +6911,7 @@ class Chat:
         finally:
             self._close_chat_info_panel()
 
-    def set_room_announcement(self, content: str):
+    def set_room_announcement(self, content: str) -> None:
         """
         设置群公告。
 
@@ -7020,7 +7020,7 @@ class Chat:
         finally:
             self._close_chat_info_panel()
 
-    def set_room_remark(self, remark: str):
+    def set_room_remark(self, remark: str) -> None:
         """
         设置群聊备注。
 
@@ -7081,7 +7081,7 @@ class Chat:
         finally:
             self._close_chat_info_panel()
 
-    def set_room_nickname(self, nickname: str):
+    def set_room_nickname(self, nickname: str) -> None:
         """
         设置我在本群的昵称。
 
@@ -7160,12 +7160,12 @@ class Chat:
 
     # ---- 联系人资料面板操作（仅私聊可用） ----
 
-    def _ensure_contact_chat(self):
+    def _ensure_contact_chat(self) -> None:
         """确保当前是私聊会话，否则抛出异常"""
         if self.chat_type != "私聊":
             raise RuntimeError("联系人资料操作仅支持私聊会话")
 
-    def _open_contact_profile(self):
+    def _open_contact_profile(self) -> None:
         """
         打开当前私聊联系人的资料面板。
 
@@ -7183,7 +7183,7 @@ class Chat:
         self._click_contact_avatar()
         time.sleep(0.5)
 
-    def _click_profile_menu_item(self, menu_name: str):
+    def _click_profile_menu_item(self, menu_name: str) -> None:
         """
         点击资料面板"更多"菜单中的指定菜单项。
 
@@ -7202,7 +7202,7 @@ class Chat:
             raise RuntimeError(f"未找到'{menu_name}'菜单项")
         menu_item.Click(ratioX=_rand_ratio(), ratioY=_rand_ratio())
 
-    def _cleanup_profile(self):
+    def _cleanup_profile(self) -> None:
         """关闭可能残留的弹窗和面板，并收回聊天信息面板"""
         try:
             self._win.SendKeys("{Esc}")
@@ -7215,7 +7215,7 @@ class Chat:
             pass
         self._close_chat_info_panel()
 
-    def _close_chat_info_panel(self):
+    def _close_chat_info_panel(self) -> None:
         """点击"聊天信息"按钮收回展开的面板"""
         try:
             btn = self._win.ButtonControl(
@@ -7390,7 +7390,7 @@ class Chat:
                          labels: list = None,
                          phones: list = None,
                          description: str = None,
-                         images: list = None):
+                         images: list = None) -> None:
         """
         一次性设置当前私聊联系人的备注、标签、电话、描述、图片。
 
@@ -7433,7 +7433,7 @@ class Chat:
                         paste(remark)
 
             # 辅助函数：将弹窗滚动区域滚动到底部
-            def _scroll_to_bottom():
+            def _scroll_to_bottom() -> None:
                 scroll_area = remark_pop.GroupControl(ClassName="QFScrollArea")
                 if not scroll_area.Exists(0, 0):
                     return
@@ -7627,7 +7627,7 @@ class Chat:
         finally:
             self._close_chat_info_panel()
 
-    def set_contact_remark(self, remark: str):
+    def set_contact_remark(self, remark: str) -> None:
         """
         设置当前私聊联系人的备注名。
 
@@ -7687,7 +7687,7 @@ class Chat:
         finally:
             self._close_chat_info_panel()
 
-    def add_contact_label(self, labels: list):
+    def add_contact_label(self, labels: list) -> None:
         """
         为当前私聊联系人添加标签。
 
@@ -7781,7 +7781,7 @@ class Chat:
         finally:
             self._close_chat_info_panel()
 
-    def remove_contact_label(self, labels: list):
+    def remove_contact_label(self, labels: list) -> None:
         """
         移除当前私聊联系人的标签。
 
@@ -7857,7 +7857,7 @@ class Chat:
         finally:
             self._close_chat_info_panel()
 
-    def add_contact_phone(self, phones: list):
+    def add_contact_phone(self, phones: list) -> None:
         """
         为当前私聊联系人添加电话号码（增量添加，不删除已有号码）。
 
@@ -7963,7 +7963,7 @@ class Chat:
         finally:
             self._close_chat_info_panel()
 
-    def add_contact_image(self, images: list):
+    def add_contact_image(self, images: list) -> None:
         """
         为当前私聊联系人添加备注图片（增量添加，不删除已有图片）。
 
@@ -8048,7 +8048,7 @@ class Chat:
         finally:
             self._close_chat_info_panel()
 
-    def remove_contact_phone(self, phones: list[str]):
+    def remove_contact_phone(self, phones: list[str]) -> None:
         """
         移除当前私聊联系人的电话号码。
 
@@ -8134,7 +8134,7 @@ class Chat:
         finally:
             self._close_chat_info_panel()
 
-    def remove_contact_image(self, indexes: list[int]):
+    def remove_contact_image(self, indexes: list[int]) -> None:
         """
         删除当前私聊联系人的备注图片（按序号）。
 
@@ -8247,7 +8247,7 @@ class Chat:
         finally:
             self._close_chat_info_panel()
 
-    def set_contact_star(self):
+    def set_contact_star(self) -> None:
         """将当前私聊联系人设为星标朋友"""
         if self._wx:
             self._wx.activate()
@@ -8262,7 +8262,7 @@ class Chat:
         finally:
             self._close_chat_info_panel()
 
-    def cancel_contact_star(self):
+    def cancel_contact_star(self) -> None:
         """取消当前私聊联系人的星标朋友"""
         if self._wx:
             self._wx.activate()
@@ -8277,7 +8277,7 @@ class Chat:
         finally:
             self._close_chat_info_panel()
 
-    def black_contact(self):
+    def black_contact(self) -> None:
         """将当前私聊联系人加入黑名单"""
         if self._wx:
             self._wx.activate()
@@ -8300,7 +8300,7 @@ class Chat:
         finally:
             self._close_chat_info_panel()
 
-    def unblack_contact(self):
+    def unblack_contact(self) -> None:
         """将当前私聊联系人移出黑名单"""
         if self._wx:
             self._wx.activate()
@@ -8315,7 +8315,7 @@ class Chat:
         finally:
             self._close_chat_info_panel()
 
-    def delete_contact(self):
+    def delete_contact(self) -> None:
         """删除当前私聊联系人（不可逆）"""
         if self._wx:
             self._wx.activate()
@@ -8417,7 +8417,7 @@ class Chat:
 
     def set_friend_permission(self, permission: str = "all",
                               hide_my_posts: bool = False,
-                              hide_their_posts: bool = False):
+                              hide_their_posts: bool = False) -> None:
         """
         设置当前私聊联系人的朋友权限。
 
@@ -8848,7 +8848,7 @@ class SeparateChat(Chat, WeixinWindow):
         self.activate()
         return super().video_call()
 
-    def move_offscreen(self):
+    def move_offscreen(self) -> None:
         """将窗口移到屏幕外（不可见但仍处于正常状态）。"""
         hwnd = self._win.NativeWindowHandle
         rect = self._win.BoundingRectangle
@@ -8857,7 +8857,7 @@ class SeparateChat(Chat, WeixinWindow):
         ctypes.windll.user32.MoveWindow(hwnd, -9999, 0,
                                         rect.width(), rect.height(), True)
 
-    def move_back(self):
+    def move_back(self) -> None:
         """将窗口从屏幕外移回原始位置"""
         if not hasattr(self, '_offscreen_rect') or not self._offscreen_rect:
             return
@@ -8942,7 +8942,7 @@ class Weixin(WeixinWindow):
     def find_wechat_window() -> list[int]:
         result = []
 
-        def callback(hwnd, _):
+        def callback(hwnd, _) -> None:
             if win32gui.IsWindowVisible(hwnd):
                 title = win32gui.GetWindowText(hwnd)
                 # 关键：微信窗口标题通常包含“微信”
@@ -8953,7 +8953,7 @@ class Weixin(WeixinWindow):
         return result
 
     @staticmethod
-    def wakeup_window():
+    def wakeup_window() -> None:
         """按下ctrl+alt+w唤醒微信窗口"""
         send_shortcut("Ctrl+Alt+W")
 
@@ -8976,7 +8976,7 @@ class Weixin(WeixinWindow):
         return False
 
     @staticmethod
-    def _ensure_running():
+    def _ensure_running() -> None:
         # 用 find_wechat_window 判断窗口是否存在
         if Weixin.find_wechat_window():
             return
@@ -9075,7 +9075,7 @@ class Weixin(WeixinWindow):
             time.sleep(0.3)
         raise RuntimeError(f"打开会话失败: {nickname}")
 
-    def close_session(self, nickname: str):
+    def close_session(self, nickname: str) -> None:
         self.session.close(nickname)
 
     def send_text(self, nickname: str, content: str) -> MessageStatus:
@@ -9117,7 +9117,7 @@ class Weixin(WeixinWindow):
         chat = self.open_session_by_search(share)
         return chat.send_card(nickname)
 
-    def create_note(self, content: str):
+    def create_note(self, content: str) -> None:
         """
         创建笔记并写入内容，完成后关闭笔记窗口。
 
@@ -9130,7 +9130,7 @@ class Weixin(WeixinWindow):
         note.save()
         note.close()
 
-    def create_room(self, nickname_list: list[str]):
+    def create_room(self, nickname_list: list[str]) -> None:
         """
         发起群聊。
 
@@ -9163,63 +9163,63 @@ class Weixin(WeixinWindow):
                          labels: list = None,
                          phones: list = None,
                          description: str = None,
-                         images: list = None):
+                         images: list = None) -> None:
         """一次性设置联系人的备注、标签、电话、描述、图片，委托给 Chat.set_contact_info"""
         chat = self.open_session_by_search(nickname)
         chat.set_contact_info(remark=remark, labels=labels, phones=phones,
                               description=description, images=images)
 
-    def set_contact_remark(self, nickname: str, remark: str):
+    def set_contact_remark(self, nickname: str, remark: str) -> None:
         """设置联系人的备注名，委托给 Chat.set_contact_remark"""
         chat = self.open_session_by_search(nickname)
         chat.set_contact_remark(remark)
 
-    def set_contact_label(self, nickname: str, labels: list[str]):
+    def set_contact_label(self, nickname: str, labels: list[str]) -> None:
         """为联系人设置标签，委托给 Chat.set_contact_info"""
         chat = self.open_session_by_search(nickname)
         chat.set_contact_info(labels=labels)
 
-    def set_contact_phone(self, nickname: str, phones: list[str]):
+    def set_contact_phone(self, nickname: str, phones: list[str]) -> None:
         """为联系人设置电话号码，委托给 Chat.set_contact_info"""
         chat = self.open_session_by_search(nickname)
         chat.set_contact_info(phones=phones)
 
-    def set_contact_description(self, nickname: str, description: str):
+    def set_contact_description(self, nickname: str, description: str) -> None:
         """设置联系人的描述信息，委托给 Chat.set_contact_info"""
         chat = self.open_session_by_search(nickname)
         chat.set_contact_info(description=description)
 
-    def set_contact_image(self, nickname: str, images: list[str]):
+    def set_contact_image(self, nickname: str, images: list[str]) -> None:
         """设置联系人的备注图片（覆盖式），委托给 Chat.set_contact_info"""
         chat = self.open_session_by_search(nickname)
         chat.set_contact_info(images=images)
 
-    def add_contact_label(self, nickname: str, labels: list[str]):
+    def add_contact_label(self, nickname: str, labels: list[str]) -> None:
         """为联系人添加标签，委托给 Chat.add_contact_label"""
         chat = self.open_session_by_search(nickname)
         chat.add_contact_label(labels)
 
-    def add_contact_phone(self, nickname: str, phones: list[str]):
+    def add_contact_phone(self, nickname: str, phones: list[str]) -> None:
         """为联系人添加电话号码，委托给 Chat.add_contact_phone"""
         chat = self.open_session_by_search(nickname)
         chat.add_contact_phone(phones)
 
-    def add_contact_image(self, nickname: str, images: list[str]):
+    def add_contact_image(self, nickname: str, images: list[str]) -> None:
         """为联系人添加备注图片，委托给 Chat.add_contact_image"""
         chat = self.open_session_by_search(nickname)
         chat.add_contact_image(images)
 
-    def remove_contact_label(self, nickname: str, labels: list[str]):
+    def remove_contact_label(self, nickname: str, labels: list[str]) -> None:
         """移除联系人的标签，委托给 Chat.remove_contact_label"""
         chat = self.open_session_by_search(nickname)
         chat.remove_contact_label(labels)
 
-    def remove_contact_phone(self, nickname: str, phones: list[str]):
+    def remove_contact_phone(self, nickname: str, phones: list[str]) -> None:
         """移除联系人的电话号码，委托给 Chat.remove_contact_phone"""
         chat = self.open_session_by_search(nickname)
         chat.remove_contact_phone(phones)
 
-    def remove_contact_image(self, nickname: str, images: list[int]):
+    def remove_contact_image(self, nickname: str, images: list[int]) -> None:
         """删除联系人的备注图片（按序号），委托给 Chat.remove_contact_image"""
         chat = self.open_session_by_search(nickname)
         chat.remove_contact_image(images)
@@ -9234,12 +9234,12 @@ class Weixin(WeixinWindow):
         chat = self.open_session_by_search(nickname)
         return chat.save_contact_image(images, save_path)
 
-    def set_contact_star(self, nickname: str):
+    def set_contact_star(self, nickname: str) -> None:
         """将联系人设为星标朋友，委托给 Chat.set_contact_star"""
         chat = self.open_session_by_search(nickname)
         chat.set_contact_star()
 
-    def cancel_contact_star(self, nickname: str):
+    def cancel_contact_star(self, nickname: str) -> None:
         """取消联系人的星标朋友，委托给 Chat.cancel_contact_star"""
         chat = self.open_session_by_search(nickname)
         chat.cancel_contact_star()
@@ -9251,22 +9251,22 @@ class Weixin(WeixinWindow):
 
     def set_friend_permission(self, nickname: str, permission: str = "all",
                               hide_my_posts: bool = False,
-                              hide_their_posts: bool = False):
+                              hide_their_posts: bool = False) -> None:
         """设置联系人的朋友权限，委托给 Chat.set_friend_permission"""
         chat = self.open_session_by_search(nickname)
         chat.set_friend_permission(permission, hide_my_posts, hide_their_posts)
 
-    def black_contact(self, nickname: str):
+    def black_contact(self, nickname: str) -> None:
         """将联系人加入黑名单，委托给 Chat.black_contact"""
         chat = self.open_session_by_search(nickname)
         chat.black_contact()
 
-    def unblack_contact(self, nickname: str):
+    def unblack_contact(self, nickname: str) -> None:
         """将联系人移出黑名单，委托给 Chat.unblack_contact"""
         chat = self.open_session_by_search(nickname)
         chat.unblack_contact()
 
-    def delete_contact(self, nickname: str):
+    def delete_contact(self, nickname: str) -> None:
         """删除联系人，委托给 Chat.delete_contact"""
         chat = self.open_session_by_search(nickname)
         chat.delete_contact()
@@ -9276,67 +9276,67 @@ class Weixin(WeixinWindow):
         chat = self.open_session_by_search(nickname)
         return chat.recommend_contact(receiver_nickname)
 
-    def clear_chat_history(self, nickname: str):
+    def clear_chat_history(self, nickname: str) -> None:
         """清空指定会话的聊天记录，委托给 Chat.clear_chat_history"""
         chat = self.open_session_by_search(nickname)
         chat.clear_chat_history()
 
-    def clear_room_chat_history(self, nickname: str):
+    def clear_room_chat_history(self, nickname: str) -> None:
         """清空指定群聊会话的聊天记录，委托给 Chat.clear_room_chat_history"""
         chat = self.open_session_by_search(nickname)
         chat.clear_room_chat_history()
 
-    def exit_room(self, nickname: str):
+    def exit_room(self, nickname: str) -> None:
         """退出指定群聊，委托给 Chat.exit_room"""
         chat = self.open_session_by_search(nickname)
         chat.exit_room()
 
-    def add_room_members(self, nickname: str, members: list[str]):
+    def add_room_members(self, nickname: str, members: list[str]) -> None:
         """添加指定群聊的成员，委托给 Chat.add_room_members"""
         chat = self.open_session_by_search(nickname)
         chat.add_room_members(members)
 
-    def remove_room_members(self, nickname: str, members: list[str]):
+    def remove_room_members(self, nickname: str, members: list[str]) -> None:
         """移除指定群聊的成员，委托给 Chat.remove_room_members"""
         chat = self.open_session_by_search(nickname)
         chat.remove_room_members(members)
 
-    def pin_room_chat(self, nickname: str):
+    def pin_room_chat(self, nickname: str) -> None:
         """置顶指定群聊会话，委托给 Chat.pin_room_chat"""
         chat = self.open_session_by_search(nickname)
         chat.pin_room_chat()
 
-    def unpin_room_chat(self, nickname: str):
+    def unpin_room_chat(self, nickname: str) -> None:
         """取消置顶指定群聊会话，委托给 Chat.unpin_room_chat"""
         chat = self.open_session_by_search(nickname)
         chat.unpin_room_chat()
 
-    def mute_room_chat(self, nickname: str):
+    def mute_room_chat(self, nickname: str) -> None:
         """开启指定群聊的消息免打扰，委托给 Chat.mute_room_chat"""
         chat = self.open_session_by_search(nickname)
         chat.mute_room_chat()
 
-    def unmute_room_chat(self, nickname: str):
+    def unmute_room_chat(self, nickname: str) -> None:
         """关闭指定群聊的消息免打扰，委托给 Chat.unmute_room_chat"""
         chat = self.open_session_by_search(nickname)
         chat.unmute_room_chat()
 
-    def add_room_address_book(self, nickname: str):
+    def add_room_address_book(self, nickname: str) -> None:
         """将指定群聊保存到通讯录，委托给 Chat.add_room_address_book"""
         chat = self.open_session_by_search(nickname)
         chat.add_room_address_book()
 
-    def remove_room_address_book(self, nickname: str):
+    def remove_room_address_book(self, nickname: str) -> None:
         """将指定群聊从通讯录移除，委托给 Chat.remove_room_address_book"""
         chat = self.open_session_by_search(nickname)
         chat.remove_room_address_book()
 
-    def display_room_member_nickname(self, nickname: str):
+    def display_room_member_nickname(self, nickname: str) -> None:
         """显示指定群聊的群成员昵称，委托给 Chat.display_room_member_nickname"""
         chat = self.open_session_by_search(nickname)
         chat.display_room_member_nickname()
 
-    def hidden_room_member_nickname(self, nickname: str):
+    def hidden_room_member_nickname(self, nickname: str) -> None:
         """隐藏指定群聊的群成员昵称，委托给 Chat.hidden_room_member_nickname"""
         chat = self.open_session_by_search(nickname)
         chat.hidden_room_member_nickname()
@@ -9346,7 +9346,7 @@ class Weixin(WeixinWindow):
                       my_nickname: str = None, mute: bool = None,
                       pin: bool = None, save_address_book: bool = None,
                       display_member_nickname: bool = None,
-                      fold: bool = None):
+                      fold: bool = None) -> None:
         """一次性设置指定群聊的多项信息，委托给 Chat.set_room_info"""
         chat = self.open_session_by_search(nickname)
         chat.set_room_info(
@@ -9357,62 +9357,62 @@ class Weixin(WeixinWindow):
             fold=fold,
         )
 
-    def fold_room_chat(self, nickname: str):
+    def fold_room_chat(self, nickname: str) -> None:
         """折叠指定群聊会话，委托给 Chat.fold_room_chat"""
         chat = self.open_session_by_search(nickname)
         chat.fold_room_chat()
 
-    def unfold_room_chat(self, nickname: str):
+    def unfold_room_chat(self, nickname: str) -> None:
         """取消折叠指定群聊会话，委托给 Chat.unfold_room_chat"""
         chat = self.open_session_by_search(nickname)
         chat.unfold_room_chat()
 
-    def pin_chat(self, nickname: str):
+    def pin_chat(self, nickname: str) -> None:
         """置顶指定会话，委托给 Chat.pin_chat"""
         chat = self.open_session_by_search(nickname)
         chat.pin_chat()
 
-    def unpin_chat(self, nickname: str):
+    def unpin_chat(self, nickname: str) -> None:
         """取消置顶指定会话，委托给 Chat.unpin_chat"""
         chat = self.open_session_by_search(nickname)
         chat.unpin_chat()
 
-    def mute_chat(self, nickname: str):
+    def mute_chat(self, nickname: str) -> None:
         """开启指定会话的消息免打扰，委托给 Chat.mute"""
         chat = self.open_session_by_search(nickname)
         chat.mute_chat()
 
-    def unmute_chat(self, nickname: str):
+    def unmute_chat(self, nickname: str) -> None:
         """关闭指定会话的消息免打扰，委托给 Chat.unmute"""
         chat = self.open_session_by_search(nickname)
         chat.unmute_chat()
 
-    def fold_chat(self, nickname: str):
+    def fold_chat(self, nickname: str) -> None:
         """折叠指定会话，委托给 Chat.fold_chat"""
         chat = self.open_session_by_search(nickname)
         chat.fold_chat()
 
-    def unfold_chat(self, nickname: str):
+    def unfold_chat(self, nickname: str) -> None:
         """取消折叠指定会话，委托给 Chat.unfold_chat"""
         chat = self.open_session_by_search(nickname)
         chat.unfold_chat()
 
-    def set_room_name(self, nickname: str, name: str):
+    def set_room_name(self, nickname: str, name: str) -> None:
         """设置指定群聊的名称，委托给 Chat.set_room_name"""
         chat = self.open_session_by_search(nickname)
         chat.set_room_name(name)
 
-    def set_room_announcement(self, nickname: str, content: str):
+    def set_room_announcement(self, nickname: str, content: str) -> None:
         """设置指定群聊的群公告，委托给 Chat.set_room_announcement"""
         chat = self.open_session_by_search(nickname)
         chat.set_room_announcement(content)
 
-    def set_room_remark(self, nickname: str, remark: str):
+    def set_room_remark(self, nickname: str, remark: str) -> None:
         """设置指定群聊的备注，委托给 Chat.set_room_remark"""
         chat = self.open_session_by_search(nickname)
         chat.set_room_remark(remark)
 
-    def set_room_nickname(self, nickname: str, my_nickname: str):
+    def set_room_nickname(self, nickname: str, my_nickname: str) -> None:
         """设置我在指定群聊中的昵称，委托给 Chat.set_room_nickname"""
         chat = self.open_session_by_search(nickname)
         chat.set_room_nickname(my_nickname)
@@ -9428,7 +9428,7 @@ class Weixin(WeixinWindow):
             raise RuntimeError("无法获取微信窗口句柄")
         return capture_window(hwnd)
 
-    def screenshot(self, save_path: str):
+    def screenshot(self, save_path: str) -> None:
         """
         对微信主窗口截图并保存到指定路径。
 
@@ -9451,7 +9451,7 @@ class Weixin(WeixinWindow):
         with open(save_path, "wb") as f:
             f.write(png_bytes)
 
-    def lock(self):
+    def lock(self) -> None:
         self.activate()
         more_btn = self.navigator._win.ButtonControl(Name="更多")
         if not more_btn.Exists(maxSearchSeconds=2):
@@ -9465,7 +9465,7 @@ class Weixin(WeixinWindow):
             raise RuntimeError("弹出菜单中未找到锁定按钮")
         lock_btn.Click(ratioX=_rand_ratio(), ratioY=_rand_ratio())
 
-    def shortcut(self, name: str):
+    def shortcut(self, name: str) -> None:
         """
         通过快捷键名称执行对应的键盘快捷键。
 
@@ -9594,7 +9594,7 @@ class Weixin(WeixinWindow):
         idle_interval: float = 0.1,
         history: int = 5,
         scan_interval: float = 5.0,
-    ):
+    ) -> None:
         """
         多线程监听所有独立聊天窗口（SeparateChat）的新消息。
 
@@ -9630,7 +9630,7 @@ class Weixin(WeixinWindow):
             """对签名列表做 hash，用于快速判断是否有变化"""
             return hashlib.md5("\n".join(sigs).encode()).hexdigest()
 
-        def _watch_chat(chat: SeparateChat, name: str):
+        def _watch_chat(chat: SeparateChat, name: str) -> None:
             """
             单个窗口的监听线程。
 
@@ -9725,7 +9725,7 @@ class Weixin(WeixinWindow):
                         pass
             return found
 
-        def _scan_loop():
+        def _scan_loop() -> None:
             """扫描线程：定期发现新窗口、清理已关闭窗口"""
             while not stop_event.is_set():
                 current = _discover_chats()
