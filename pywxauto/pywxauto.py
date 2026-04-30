@@ -9124,12 +9124,12 @@ class Weixin(WeixinWindow):
             time.sleep(0.3)
         raise RuntimeError(f"打开会话失败: {nickname}")
 
-    def open_session_by_search(self, nickname: str, force_search: bool = False) -> Chat:
+    def open_session_by_search(self, nickname: str, chat_type: Optional[list[str]] = None, force_search: bool = False) -> Chat:
         """通过搜索打开指定会话，返回 Chat 对象"""
         self.activate()
         if not self.has_session:
             self.navigator.switch_to("微信")
-        self.session.open_by_search(nickname, force_search)
+        self.session.open_by_search(nickname, chat_type, force_search)
         # 等待聊天界面加载完成（搜索点击后界面切换需要时间）
         for _ in range(10):
             chat = self.chat
