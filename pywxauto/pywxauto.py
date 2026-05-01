@@ -132,6 +132,7 @@ NOTE_MESSAGE = "note_message"
 VOIP_MESSAGE = "voip_message"
 RED_PACKET_MESSAGE = "red_packet_message"
 TRANSFER_MESSAGE = "transfer_message"
+MUSIC_MESSAGE = "music_message"
 SYSTEM_MESSAGE = "system_message"
 OTHER_MESSAGE = "other_message"
 
@@ -1020,20 +1021,46 @@ class LocationMessage(Message):
 class LinkMessage(Message):
     """链接消息"""
 
-    def __init__(self, *, title="", **kw):
+    def __init__(self, *, title="", source="", **kw):
         super().__init__(**kw)
         self.title: str = title
+        self.source: str = source
 
     @property
     def type_label(self) -> str:
         return "链接消息"
 
     @staticmethod
-    def parse(raw_name: str) -> tuple[str, str]:
-        """解析链接 Name -> (content, title)"""
+    def parse(raw_name: str) -> tuple[str, str, str]:
+        """
+        解析链接 Name -> (content, title, source)
+
+        已知格式：
+        - "[链接]{标题}\\n{来源}"  如 "[链接]大模型工程路线图\\nAI技术立文"
+        - "链接\\n{标题}\\n{来源}"
+        - 含 http(s):// 的文本
+        """
+        # [链接] 前缀格式
+        if raw_name.startswith("[链接]"):
+            body = raw_name[len("[链接]"):]
+            parts = [p.strip() for p in body.split("\n") if p.strip()]
+            title = parts[0] if parts else body
+            source = parts[1] if len(parts) > 1 else ""
+            return title, title, source
+
+        # "链接\n" 前缀格式
+        if raw_name.startswith("链接\n") or raw_name.startswith("链接\r"):
+            parts = [p.strip() for p in raw_name.split("\n") if p.strip()]
+            # parts[0] = "链接", parts[1] = 标题, parts[2] = 来源
+            title = parts[1] if len(parts) > 1 else raw_name
+            source = parts[2] if len(parts) > 2 else ""
+            return title, title, source
+
+        # 其他格式
         parts = [p.strip() for p in raw_name.split("\n") if p.strip()]
-        title = parts[1] if len(parts) > 1 else raw_name
-        return title, title
+        title = parts[0] if parts else raw_name
+        source = parts[1] if len(parts) > 1 else ""
+        return title, title, source
 
 
 class EmotionMessage(Message):
@@ -1075,8 +1102,51 @@ class NoteMessage(Message):
         return "笔记消息"
 
 
+class MusicMessage(Message):
+    """音乐分享消息"""
+
+    # 已知的音乐平台前缀
+    _MUSIC_SOURCES = (
+        "QQ音乐", "网易云音乐", "酷狗音乐", "酷我音乐",
+        "虾米音乐", "咪咕音乐", "Apple Music", "Spotify",
+    )
+
+    def __init__(self, *, source="", song_name="", artist="", **kw):
+        super().__init__(**kw)
+        self.source: str = source
+        self.song_name: str = song_name
+        self.artist: str = artist
+
+    @property
+    def type_label(self) -> str:
+        return "音乐消息"
+
+    @staticmethod
+    def match(raw_name: str) -> bool:
+        """判断 Name 是否为音乐分享消息"""
+        return any(raw_name.startswith(src) for src in MusicMessage._MUSIC_SOURCES)
+
+    @staticmethod
+    def parse(raw_name: str) -> tuple[str, str, str, str]:
+        """
+        解析音乐 Name -> (content, source, song_name, artist)
+
+        Name 格式: "{来源}{歌曲名}{歌手名}"
+        如: "QQ音乐喜欢上海的理由 (广告版)孔佳"
+        来源为已知前缀，去掉前缀后剩余部分为歌曲名+歌手名（无明确分隔符）。
+        """
+        source = ""
+        rest = raw_name
+        for src in MusicMessage._MUSIC_SOURCES:
+            if raw_name.startswith(src):
+                source = src
+                rest = raw_name[len(src):]
+                break
+        return rest, source, rest, ""
+
+
 class CardMessage(Message):
-    """卡片消息（音乐分享、公众号文章、小程序卡片等）"""
+    """卡片消息（公众号文章、小程序卡片等）"""
 
     def __init__(self, *, title="", description="", **kw):
         super().__init__(**kw)
@@ -1102,6 +1172,7 @@ class SystemMessage(Message):
 
     def __init__(self, *, timestamp="", **kw):
         kw.setdefault("sender_type", SenderType.SYSTEM)
+        kw.setdefault("sender", "系统")
         super().__init__(**kw)
         self.timestamp: str = timestamp
 
@@ -1212,6 +1283,7 @@ _MSG_CLASS_TO_EVENT.update({
     VoipMessage: VOIP_MESSAGE,
     RedPacketMessage: RED_PACKET_MESSAGE,
     TransferMessage: TRANSFER_MESSAGE,
+    MusicMessage: MUSIC_MESSAGE,
     SystemMessage: SYSTEM_MESSAGE,
     OtherMessage: OTHER_MESSAGE,
 })
@@ -5896,7 +5968,7 @@ class Chat:
             "mmui::ChatPersonalCardItemView": PersonalCardMessage,
             "mmui::ChatBubbleReferItemView": QuoteMessage,
             "mmui::ChatEmojiItemView": EmotionMessage,
-            "mmui::ChatMusicItemView": LinkMessage,
+            "mmui::ChatMusicItemView": MusicMessage,
             "mmui::ChatMiniProgramItemView": LinkMessage,
             "mmui::ChatItemView": SystemMessage,
         }
@@ -5970,6 +6042,8 @@ class Chat:
             return FileMessage
         if name.startswith("链接\n") or name.startswith("链接\r"):
             return LinkMessage
+        if name.startswith("[链接]"):
+            return LinkMessage
         if re.search(r"https?://", name):
             return LinkMessage
         if name.startswith("语音通话") or name.startswith("视频通话"):
@@ -5982,8 +6056,10 @@ class Chat:
             return RedPacketMessage
         if name.endswith("微信转账") and name.startswith("￥"):
             return TransferMessage
+        if MusicMessage.match(name):
+            return MusicMessage
         # ChatBubbleItemView 中未匹配的通常是卡片消息
-        # （音乐分享、公众号文章、小程序卡片等）
+        # （公众号文章、小程序卡片等）
         return CardMessage
 
     # 动画表情 Name 格式: "动画表情 [xxx]"
@@ -6011,10 +6087,8 @@ class Chat:
         判断消息发送者和来源类型。
 
         策略1: 通过头像控件 (mmui::ContactHeadView) 位置判断
-        策略2: 若头像不可见（微信4.x虚拟化列表限制），
-               则通过截图像素分析判断气泡在左侧还是右侧：
-               - 自己发的消息气泡靠右
-               - 对方发的消息气泡靠左
+        策略2: 截图后从左右两侧向内扫描非白色像素，判断头像在哪侧
+        策略3: 通过气泡颜色（绿色/灰色）判断
         """
         # 策略1: 头像控件检测
         head = ctrl.ButtonControl(
@@ -6028,7 +6102,7 @@ class Chat:
                 return "我", SenderType.SELF
             return chat_name, SenderType.FRIEND
 
-        # 策略2: 截图像素分析
+        # 策略2 + 策略3: 截图像素分析
         return Chat._detect_sender_by_pixel(ctrl, chat_name, hwnd)
 
     @staticmethod
@@ -6036,15 +6110,20 @@ class Chat:
         ctrl, chat_name: str, hwnd: int = 0,
     ) -> tuple[str, SenderType]:
         """
-        通过扫描气泡区域的颜色判断消息发送者。
+        通过截图像素分析判断消息发送者。
 
-        微信气泡颜色规则：
-        - 绿色气泡：自己发的消息 (G > 180, G-R > 50, G-B > 80)
-        - 灰色/白色气泡：对方发的消息 (R,G,B 接近且 > 200)
-        采样中间几行像素，统计绿色和灰色像素数量来判断。
+        先尝试策略2（边缘扫描），失败再降级到策略3（气泡颜色）。
 
-        优先使用 capture_control（PrintWindow API）截取控件区域，
-        支持被遮挡/最小化的窗口；若无 hwnd 则回退到 CaptureToImage。
+        策略2 - 边缘扫描:
+        在控件截图上 1/3 高度处（头像所在区域），分别从左侧和右侧
+        向内扫描，找到第一个非白色像素的 x 坐标。
+        非白色像素离左边近 → 头像在左 → 对方发的消息
+        非白色像素离右边近 → 头像在右 → 自己发的消息
+
+        策略3 - 气泡颜色:
+        采样中间几行像素，统计绿色和灰色像素数量：
+        - 绿色气泡 → 自己发的消息
+        - 灰色/白色气泡 → 对方发的消息
         """
         try:
             if hwnd:
@@ -6065,6 +6144,89 @@ class Chat:
             return "", SenderType.OTHER
 
         w, h = img.size
+
+        # ---- 策略2: 边缘扫描 ----
+        result = Chat._detect_sender_by_edge_scan(img, w, h, chat_name)
+        if result is not None:
+            return result
+
+        # ---- 策略3: 气泡颜色 ----
+        return Chat._detect_sender_by_bubble_color(img, w, h, chat_name)
+
+    @staticmethod
+    def _is_non_white(r: int, g: int, b: int) -> bool:
+        """判断像素是否为非白色背景（排除纯白和接近纯白的背景色）"""
+        return not (r > 245 and g > 245 and b > 245)
+
+    @staticmethod
+    def _detect_sender_by_edge_scan(
+        img: "Image.Image", w: int, h: int, chat_name: str,
+    ) -> tuple[str, SenderType] | None:
+        """
+        策略2: 从左右两侧向内扫描，通过头像位置判断发送者。
+
+        在截图上部区域（头像所在区域）多行扫描，
+        从左侧向右找第一个非白色像素，从右侧向左找第一个非白色像素，
+        取所有扫描行中最靠边的结果（最小距离）。
+
+        头像是圆形实心区域，一定紧贴某一侧边缘；
+        而气泡/表情/图片等内容区域居中偏向一侧，不会紧贴边缘。
+        因此最靠边的非白色像素一定来自头像侧。
+
+        Returns:
+            (sender, sender_type) 或 None（无法判断时）
+        """
+        # 扫描上部 1/5 ~ 1/3 区域的多行（头像所在区域）
+        scan_rows = [h // 5, h // 4, h // 3]
+
+        best_left = w   # 左侧最靠边的非白色像素到左边缘的距离（越小越靠边）
+        best_right = w  # 右侧最靠边的非白色像素到右边缘的距离
+
+        for scan_y in scan_rows:
+            if scan_y >= h:
+                continue
+
+            # 从左侧向右扫描
+            for x in range(w):
+                r, g, b = img.getpixel((x, scan_y))[:3]
+                if Chat._is_non_white(r, g, b):
+                    if x < best_left:
+                        best_left = x
+                    break
+
+            # 从右侧向左扫描
+            for x in range(w - 1, -1, -1):
+                r, g, b = img.getpixel((x, scan_y))[:3]
+                if Chat._is_non_white(r, g, b):
+                    dist = w - 1 - x
+                    if dist < best_right:
+                        best_right = dist
+                    break
+
+        # 两侧都没找到非白色像素
+        if best_left >= w and best_right >= w:
+            return None
+
+        # 距离差太小（< 图片宽度的 5%），无法可靠判断
+        if abs(best_left - best_right) < w * 0.05:
+            return None
+
+        if best_left < best_right:
+            return chat_name, SenderType.FRIEND
+        else:
+            return "我", SenderType.SELF
+
+    @staticmethod
+    def _detect_sender_by_bubble_color(
+        img: "Image.Image", w: int, h: int, chat_name: str,
+    ) -> tuple[str, SenderType]:
+        """
+        策略3: 通过气泡颜色判断发送者。
+
+        微信气泡颜色规则：
+        - 绿色气泡：自己发的消息 (G > 180, G-R > 50, G-B > 80)
+        - 灰色/白色气泡：对方发的消息 (R,G,B 接近且 > 200)
+        """
         green_count = 0
         gray_count = 0
 
@@ -6072,10 +6234,8 @@ class Chat:
         for y in sample_rows:
             for x in range(w):
                 r, g, b = img.getpixel((x, y))[:3]
-                # 绿色气泡：G 通道明显高于 R 和 B
                 if g > 180 and g - r > 50 and g - b > 80:
                     green_count += 1
-                # 灰色/白色气泡：三通道接近且偏亮，排除背景纯白
                 elif r > 200 and g > 200 and b > 200 \
                         and abs(r - g) < 15 and abs(r - b) < 15 \
                         and not (r > 250 and g > 250 and b > 250):
@@ -6175,8 +6335,8 @@ class Chat:
             return LocationMessage(**base, content=content, address=address)
 
         if msg_cls is LinkMessage:
-            content, title = LinkMessage.parse(actual_name)
-            return LinkMessage(**base, content=content, title=title)
+            content, title, source = LinkMessage.parse(actual_name)
+            return LinkMessage(**base, content=content, title=title, source=source)
 
         if msg_cls is PersonalCardMessage:
             content, card_name = PersonalCardMessage.parse(actual_name)
@@ -6189,6 +6349,11 @@ class Chat:
         if msg_cls is CardMessage:
             content, title, description = CardMessage.parse(actual_name)
             return CardMessage(**base, content=content, title=title, description=description)
+
+        if msg_cls is MusicMessage:
+            content, source, song_name, artist = MusicMessage.parse(actual_name)
+            return MusicMessage(**base, content=content, source=source,
+                                song_name=song_name, artist=artist)
 
         if msg_cls is RedPacketMessage:
             content, greeting = RedPacketMessage.parse(actual_name)
