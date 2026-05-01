@@ -73,7 +73,6 @@ import ctypes
 import ctypes.wintypes
 import fnmatch
 import glob
-import hashlib
 import io
 import json
 import logging
@@ -907,12 +906,14 @@ class Message:
 
     def __init__(self, *, sender="", sender_type=SenderType.OTHER,
                  content="", raw_name="",
-                 status=MessageStatus.UNKNOWN):
+                 status=MessageStatus.UNKNOWN,
+                 runtime_id: tuple = ()):
         self.sender = sender
         self.sender_type = sender_type
         self.content = content
         self.raw_name = raw_name
         self.status = status
+        self.runtime_id: tuple = runtime_id  # UI Automation RuntimeId，控件的唯一标识
 
     @property
     def type_label(self) -> str:
@@ -5806,6 +5807,8 @@ class Chat:
 
         消息项为 ListItemControl，通过 ClassName 区分类型，
         通过头像控件位置判断 SenderType。
+        每条消息携带 runtime_id（UI Automation RuntimeId），
+        作为控件的唯一标识，用于消息监听时的精确去重。
         """
         lc = self._message_list
         if not lc.Exists(maxSearchSeconds=2):
@@ -5843,6 +5846,13 @@ class Chat:
 
             ui_cls = ctrl.ClassName or ""
             raw_name = ctrl.Name
+
+            # 提取 RuntimeId 作为控件唯一标识
+            try:
+                rid = tuple(ctrl.GetRuntimeId())
+            except Exception:
+                rid = ()
+
             msg_cls = cls_map.get(ui_cls)
 
             # ChatBubbleItemView 是通用气泡，需要二次分类
@@ -5858,6 +5868,7 @@ class Chat:
                     content=raw_name,
                     timestamp=raw_name,
                     raw_name=raw_name,
+                    runtime_id=rid,
                 ))
                 continue
 
@@ -5867,7 +5878,8 @@ class Chat:
             )
 
             # 构造具体消息对象
-            msg = self._build_message(msg_cls, raw_name, sender, sender_type)
+            msg = self._build_message(msg_cls, raw_name, sender, sender_type,
+                                      runtime_id=rid)
             messages.append(msg)
         return messages
 
@@ -6043,6 +6055,7 @@ class Chat:
         raw_name: str,
         sender: str,
         sender_type: SenderType,
+        runtime_id: tuple = (),
     ) -> Message:
         """根据消息子类构造具体消息对象，调用各子类的 parse 方法提取字段"""
         msg_status, actual_name = Chat._detect_message_status(
@@ -6050,7 +6063,8 @@ class Chat:
         )
 
         base = dict(sender=sender, sender_type=sender_type,
-                    raw_name=raw_name, status=msg_status)
+                    raw_name=raw_name, status=msg_status,
+                    runtime_id=runtime_id)
 
         if msg_cls is VoiceMessage:
             content, duration, played = VoiceMessage.parse(actual_name)
@@ -10343,6 +10357,9 @@ class Weixin(WeixinWindow):
         每个独立窗口一个线程轮询消息，新消息逐条放入队列，
         主线程从队列中取出并逐条回调。
 
+        通过 RuntimeId（UI Automation 为每个控件分配的唯一标识）进行差异比对，
+        精确识别新增消息，不受重复内容、同名消息等干扰。
+
         callback: 回调函数，签名为 callback(chat: SeparateChat, message: Message)
                   每次回调传入一条新消息，在主线程中执行。
         interval:      有新消息时的轮询间隔（秒）
@@ -10364,27 +10381,24 @@ class Weixin(WeixinWindow):
         threads: dict[str, threading.Thread] = {}
         threads_lock = threading.Lock()
 
-        def _msg_sig(msg: Message) -> str:
-            """消息签名：类型+发送者类型+内容"""
-            return f"{msg.__class__.__name__}|{msg.sender_type.value}|{msg.content}"
-
-        def _snapshot_hash(sigs: list[str]) -> str:
-            """对签名列表做 hash，用于快速判断是否有变化"""
-            return hashlib.md5("\n".join(sigs).encode()).hexdigest()
-
         def _watch_chat(chat: SeparateChat, name: str) -> None:
             """
             单个窗口的监听线程。
 
-            算法：
-            1. 首次获取可见消息作为快照（不触发回调）
-            2. 持续获取可见消息，先用 hash 快速判断是否有变化
-            3. hash 变了则逐条对比快照，从第一条不一样的位置开始就是新消息
-            4. 新消息逐条推送到队列，更新快照
+            基于 RuntimeId 差异比对算法：
+            1. 首次获取可见消息，记录所有 RuntimeId 到已知集合（不触发回调）
+            2. 每次轮询获取可见消息，提取所有 RuntimeId
+            3. 用集合差集找出新增的 RuntimeId（不在已知集合中的）
+            4. 按消息在列表中的顺序，将新消息逐条推送到队列
+            5. 将新 RuntimeId 加入已知集合
+
+            RuntimeId 是 UI Automation 为每个控件分配的唯一整数元组，
+            同一控件在生命周期内 RuntimeId 不变，不同控件的 RuntimeId 不同。
+            即使两条消息内容完全相同，它们的 RuntimeId 也不同，
+            从根本上解决了内容签名去重的误判问题。
             """
-            # 快照：(签名列表, hash)
-            snap_sigs: list[str] = []
-            snap_hash: str = ""
+            # 已知消息的 RuntimeId 集合
+            known_rids: set[tuple] = set()
             first_scan = True
 
             # 移到屏幕外，窗口仍处于正常状态，UI Automation 正常工作
@@ -10402,49 +10416,37 @@ class Weixin(WeixinWindow):
                         break
                     continue
 
-                curr_sigs = [_msg_sig(m) for m in visible]
-                curr_hash = _snapshot_hash(curr_sigs)
+                # 提取当前可见消息的 RuntimeId 集合
+                curr_rids = {msg.runtime_id for msg in visible if msg.runtime_id}
 
                 if first_scan:
-                    snap_sigs = curr_sigs
-                    snap_hash = curr_hash
+                    # 首次扫描：记录所有已有消息的 RuntimeId，不触发回调
+                    known_rids = curr_rids
                     first_scan = False
                     if stop_event.wait(interval):
                         break
                     continue
 
-                # hash 相同，无变化
-                if curr_hash == snap_hash:
+                # 集合差集：找出新增的 RuntimeId
+                new_rids = curr_rids - known_rids
+
+                if not new_rids:
+                    # 无新消息
+                    # 更新已知集合：移除已滚出视口的旧 RuntimeId，防止无限膨胀
+                    known_rids = (known_rids & curr_rids) | curr_rids
                     if stop_event.wait(idle_interval):
                         break
                     continue
 
-                # 锚定序列匹配：取快照后半部分作为锚定序列
-                # 在当前列表中查找该序列，锚定序列之后的就是新消息
-                # 锚定越长，重复消息导致误匹配的概率越低
-                anchor_len = max(1, len(snap_sigs) // 2)
-                anchor = snap_sigs[-anchor_len:]
+                # 按消息在列表中的原始顺序推送新消息
+                for msg in visible:
+                    if msg.runtime_id and msg.runtime_id in new_rids:
+                        msg_queue.put((chat, msg))
 
-                new_msgs: list[Message] = []
-                # 在 curr_sigs 中从后往前找 anchor 序列
-                found = -1
-                for i in range(len(curr_sigs) - anchor_len, -1, -1):
-                    if curr_sigs[i:i + anchor_len] == anchor:
-                        found = i + anchor_len
-                        break
-                if found >= 0:
-                    new_msgs = visible[found:]
-                # 找不到说明快照消息已完全滚出可见区域，不推送避免重复
+                # 更新已知集合
+                known_rids |= new_rids
 
-                # 更新快照
-                snap_sigs = curr_sigs
-                snap_hash = curr_hash
-
-                for msg in new_msgs:
-                    msg_queue.put((chat, msg))
-
-                wait_time = interval if new_msgs else idle_interval
-                if stop_event.wait(wait_time):
+                if stop_event.wait(interval):
                     break
 
             # 线程退出，移回窗口并从跟踪表移除
@@ -10578,6 +10580,9 @@ class Weixin(WeixinWindow):
         仅监听通过 add_listener 注册的聊天窗口。
         消息通过 handle/on/once 装饰器注册的事件处理器分发。
 
+        通过 RuntimeId（UI Automation 为每个控件分配的唯一标识）进行差异比对，
+        精确识别新增消息。
+
         Args:
             interval:      有新消息时的轮询间隔（秒）
             idle_interval: 无新消息时的轮询间隔（秒）
@@ -10593,15 +10598,9 @@ class Weixin(WeixinWindow):
         msg_queue: Queue[tuple[SeparateChat, Message]] = Queue()
         threads: dict[str, threading.Thread] = {}
 
-        def _msg_sig(msg: Message) -> str:
-            return f"{msg.__class__.__name__}|{msg.sender_type.value}|{msg.content}"
-
-        def _snapshot_hash(sigs: list[str]) -> str:
-            return hashlib.md5("\n".join(sigs).encode()).hexdigest()
-
         def _watch_chat(chat: SeparateChat, name: str) -> None:
-            snap_sigs: list[str] = []
-            snap_hash: str = ""
+            # 已知消息的 RuntimeId 集合
+            known_rids: set[tuple] = set()
             first_scan = True
 
             if self._offscreen:
@@ -10619,42 +10618,35 @@ class Weixin(WeixinWindow):
                         break
                     continue
 
-                curr_sigs = [_msg_sig(m) for m in visible]
-                curr_hash = _snapshot_hash(curr_sigs)
+                # 提取当前可见消息的 RuntimeId 集合
+                curr_rids = {msg.runtime_id for msg in visible if msg.runtime_id}
 
                 if first_scan:
-                    snap_sigs = curr_sigs
-                    snap_hash = curr_hash
+                    known_rids = curr_rids
                     first_scan = False
                     if stop_event.wait(interval):
                         break
                     continue
 
-                if curr_hash == snap_hash:
+                # 集合差集：找出新增的 RuntimeId
+                new_rids = curr_rids - known_rids
+
+                if not new_rids:
+                    # 更新已知集合：移除已滚出视口的旧 RuntimeId，防止无限膨胀
+                    known_rids = (known_rids & curr_rids) | curr_rids
                     if stop_event.wait(idle_interval):
                         break
                     continue
 
-                anchor_len = max(1, len(snap_sigs) // 2)
-                anchor = snap_sigs[-anchor_len:]
+                # 按消息在列表中的原始顺序推送新消息
+                for msg in visible:
+                    if msg.runtime_id and msg.runtime_id in new_rids:
+                        msg_queue.put((chat, msg))
 
-                new_msgs: list[Message] = []
-                found = -1
-                for i in range(len(curr_sigs) - anchor_len, -1, -1):
-                    if curr_sigs[i:i + anchor_len] == anchor:
-                        found = i + anchor_len
-                        break
-                if found >= 0:
-                    new_msgs = visible[found:]
+                # 更新已知集合
+                known_rids |= new_rids
 
-                snap_sigs = curr_sigs
-                snap_hash = curr_hash
-
-                for msg in new_msgs:
-                    msg_queue.put((chat, msg))
-
-                wait_time = interval if new_msgs else idle_interval
-                if stop_event.wait(wait_time):
+                if stop_event.wait(interval):
                     break
 
             if chat.exists and self._offscreen:
