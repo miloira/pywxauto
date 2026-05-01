@@ -1995,8 +1995,8 @@ class SessionItem:
     def separate_by_click(self) -> "SeparateChat":
         """双击打开独立窗口，返回 SeparateChat 实例"""
         session = self._require_session()
-        if session._wx:
-            session._wx.activate()
+        if session.wx:
+            session.wx.activate()
         item = session._ensure_session_visible(self.name)
         item.DoubleClick(ratioX=_rand_ratio(), ratioY=_rand_ratio())
         time.sleep(0.5)
@@ -2098,7 +2098,7 @@ class Moment(WeixinWindow):
     }
 
     def __init__(self, wx: "Weixin"):
-        self._wx = wx
+        self.wx = wx
         self._win = auto.WindowControl(
             ClassName=self.SNS_WINDOW_CLASS,
             AutomationId=self.SNS_WINDOW_ID,
@@ -2123,8 +2123,8 @@ class Moment(WeixinWindow):
             return
 
         # 窗口不存在，通过导航栏打开
-        self._wx.activate()
-        self._wx.navigator.switch_to(self.MOMENT_TAB_NAME)
+        self.wx.activate()
+        self.wx.navigator.switch_to(self.MOMENT_TAB_NAME)
         time.sleep(1)
 
         # 等待独立窗口出现
@@ -3294,7 +3294,7 @@ class FileManager:
     DELETE_MENU_ITEM_NAME = "删除"
 
     def __init__(self, wx: "Weixin"):
-        self._wx = wx
+        self.wx = wx
         self._file_manager_window: Optional[auto.WindowControl] = None
 
     def _find_window(self) -> Optional[auto.WindowControl]:
@@ -3317,16 +3317,16 @@ class FileManager:
                 - "全部"、"文档"、"表格"、"图片"、"视频"等
                 - "": 不筛选（默认）
         """
-        self._wx.activate()
+        self.wx.activate()
 
         # 先关闭已有的文件管理器窗口
         self.close()
 
         # 通过导航栏 TabBar 缩小搜索范围，点击"更多"按钮
-        self._wx.navigator.switch_to("更多")
+        self.wx.navigator.switch_to("更多")
 
         # 点击"聊天文件"按钮
-        chat_file_btn = self._wx.window.ButtonControl(
+        chat_file_btn = self.wx.window.ButtonControl(
             Name="聊天文件", searchDepth=10
         )
         if not chat_file_btn.Exists(maxSearchSeconds=3):
@@ -3861,7 +3861,7 @@ class Navigator:
     }
 
     def __init__(self, wx: "Weixin"):
-        self._wx = wx
+        self.wx = wx
         self._win = wx.window
         self._tabbar = self._win.ToolBarControl(ClassName="mmui::MainTabBar", searchDepth=5)
 
@@ -3893,7 +3893,7 @@ class Session:
     """
 
     def __init__(self, wx: "Weixin"):
-        self._wx = wx
+        self.wx = wx
         self._win = wx.window
 
     @property
@@ -4055,7 +4055,7 @@ class Session:
         Returns:
             按出现顺序排列的完整会话列表
         """
-        self._wx.activate()
+        self.wx.activate()
         lc = self._list_control
         if not lc.Exists(maxSearchSeconds=3):
             raise RuntimeError("未找到会话列表控件")
@@ -4209,7 +4209,7 @@ class Session:
 
     def _session_context_action(self, name: str, menu_name: str) -> None:
         """对指定会话执行右键菜单操作"""
-        self._wx.activate()
+        self.wx.activate()
         self._right_click_session(name)
         self._click_context_menu_item(menu_name)
 
@@ -4256,7 +4256,7 @@ class Session:
     @PIM.wait_idle
     def close(self, name: str) -> None:
         """关闭指定会话：如果该会话处于激活状态，点击一下取消选中"""
-        self._wx.activate()
+        self.wx.activate()
         item = self._ensure_session_visible(name)
         try:
             pattern = item.GetSelectionItemPattern()
@@ -4269,7 +4269,7 @@ class Session:
     @PIM.wait_idle
     def open(self, name: str) -> None:
         """通过在会话列表中查找并点击来打开指定会话，如果已激活则不操作"""
-        self._wx.activate()
+        self.wx.activate()
         item = self._ensure_session_visible(name)
         try:
             pattern = item.GetSelectionItemPattern()
@@ -4338,7 +4338,7 @@ class Session:
 
     def _click_quick_action_button(self) -> None:
         """点击快捷操作按钮"""
-        self._wx.activate()
+        self.wx.activate()
         btn = self._win.ButtonControl(
             ClassName="mmui::XButton",
             Name="快捷操作",
@@ -4704,16 +4704,16 @@ class Chat:
     ]
 
     def __init__(self, wx: "Weixin"):
-        self._wx = wx
+        self.wx = wx
         self._win = wx.window
 
     def _get_image_text(self, image: bytes) -> dict:
         """
         识别图片中的文本内容。
         """
-        if self._wx is None:
+        if self.wx is None:
             raise RuntimeError("未关联 Weixin 实例，无法执行 OCR")
-        return self._wx.get_image_text(image)
+        return self.wx.get_image_text(image)
 
     def __str__(self) -> str:
         try:
@@ -4928,8 +4928,8 @@ class Chat:
 
         通过剪贴板粘贴输入文本，避免 SendKeys 丢字或特殊字符问题。
         """
-        if self._wx:
-            self._wx.activate()
+        if self.wx:
+            self.wx.activate()
         self.clear_input()
         field = self._input_field
         if not field.Exists(maxSearchSeconds=2):
@@ -5005,8 +5005,8 @@ class Chat:
         Returns:
             最后一个文件的发送状态
         """
-        if self._wx:
-            self._wx.activate()
+        if self.wx:
+            self.wx.activate()
 
         paths = [file_path] if isinstance(file_path, str) else list(file_path)
         if not paths:
@@ -5261,8 +5261,8 @@ class Chat:
         if not keyword:
             raise ValueError("keyword 不能为空")
 
-        if self._wx:
-            self._wx.activate()
+        if self.wx:
+            self.wx.activate()
 
         # 1. 打开收藏选择面板
         self._open_collection_panel()
@@ -5383,8 +5383,8 @@ class Chat:
         if index < 1:
             raise ValueError("index 必须 >= 1")
 
-        if self._wx:
-            self._wx.activate()
+        if self.wx:
+            self.wx.activate()
 
         try:
             # 1. 打开表情面板
@@ -5726,8 +5726,8 @@ class Chat:
         if not contact_name:
             raise RuntimeError("无法获取当前聊天联系人名称")
 
-        if self._wx:
-            self._wx.activate()
+        if self.wx:
+            self.wx.activate()
 
         try:
             # 1. 点击"聊天信息"按钮
@@ -6007,8 +6007,8 @@ class Chat:
         通过双击会话列表中的对应 SessionItem 打开独立窗口。
         等待独立窗口出现后返回 SeparateChat 对象。
         """
-        if self._wx:
-            self._wx.activate()
+        if self.wx:
+            self.wx.activate()
         
         contact_name = self.current_name
         if not contact_name:
@@ -6494,8 +6494,8 @@ class Chat:
         3. 在确认弹窗中点击"清空"按钮
         4. 收回聊天信息面板
         """
-        if self._wx:
-            self._wx.activate()
+        if self.wx:
+            self.wx.activate()
 
         # 1. 展开聊天信息面板
         self._click_chat_info_button()
@@ -6549,8 +6549,8 @@ class Chat:
             RuntimeError: 当前非群聊、控件未找到或操作失败时抛出
         """
         self._ensure_room_chat()
-        if self._wx:
-            self._wx.activate()
+        if self.wx:
+            self.wx.activate()
 
         # 1. 展开聊天信息面板
         self._click_chat_info_button()
@@ -6637,8 +6637,8 @@ class Chat:
             RuntimeError: 当前非群聊、控件未找到或操作失败时抛出
         """
         self._ensure_room_chat()
-        if self._wx:
-            self._wx.activate()
+        if self.wx:
+            self.wx.activate()
 
         # 1. 展开聊天信息面板
         self._click_chat_info_button()
@@ -6722,8 +6722,8 @@ class Chat:
             raise ValueError("members 不能为空")
 
         self._ensure_room_chat()
-        if self._wx:
-            self._wx.activate()
+        if self.wx:
+            self.wx.activate()
 
         self._click_chat_info_button()
 
@@ -6888,8 +6888,8 @@ class Chat:
             raise ValueError("members 不能为空")
 
         self._ensure_room_chat()
-        if self._wx:
-            self._wx.activate()
+        if self.wx:
+            self.wx.activate()
 
         self._click_chat_info_button()
         time.sleep(0.5)
@@ -7103,8 +7103,8 @@ class Chat:
             enable: True 开启，False 关闭
         """
         self._ensure_room_chat()
-        if self._wx:
-            self._wx.activate()
+        if self.wx:
+            self.wx.activate()
 
         self._click_chat_info_button()
         time.sleep(0.5)
@@ -7184,8 +7184,8 @@ class Chat:
         如果消息免打扰未开启，会先自动开启。
         """
         self._ensure_room_chat()
-        if self._wx:
-            self._wx.activate()
+        if self.wx:
+            self.wx.activate()
 
         self._click_chat_info_button()
         time.sleep(0.5)
@@ -7223,8 +7223,8 @@ class Chat:
         只有在消息免打扰开启时才会出现。
         """
         self._ensure_room_chat()
-        if self._wx:
-            self._wx.activate()
+        if self.wx:
+            self.wx.activate()
 
         self._click_chat_info_button()
         time.sleep(0.5)
@@ -7395,8 +7395,8 @@ class Chat:
             return
 
         self._ensure_room_chat()
-        if self._wx:
-            self._wx.activate()
+        if self.wx:
+            self.wx.activate()
 
         self._click_chat_info_button()
         time.sleep(0.5)
@@ -7608,8 +7608,8 @@ class Chat:
             name: 开关名称（"消息免打扰" 或 "置顶聊天"）
             enable: True 开启，False 关闭
         """
-        if self._wx:
-            self._wx.activate()
+        if self.wx:
+            self.wx.activate()
 
         self._click_chat_info_button()
         time.sleep(0.5)
@@ -7627,8 +7627,8 @@ class Chat:
     @property
     def is_pinned(self) -> bool:
         """当前会话是否已置顶"""
-        if self._wx:
-            self._wx.activate()
+        if self.wx:
+            self.wx.activate()
         self._click_chat_info_button()
         time.sleep(0.5)
         try:
@@ -7664,8 +7664,8 @@ class Chat:
     @property
     def is_muted(self) -> bool:
         """当前会话是否已开启消息免打扰"""
-        if self._wx:
-            self._wx.activate()
+        if self.wx:
+            self.wx.activate()
         self._click_chat_info_button()
         time.sleep(0.5)
         try:
@@ -7707,8 +7707,8 @@ class Chat:
         只有在消息免打扰开启时才会出现。
         如果消息免打扰未开启，会先自动开启。
         """
-        if self._wx:
-            self._wx.activate()
+        if self.wx:
+            self.wx.activate()
 
         self._click_chat_info_button()
         time.sleep(0.5)
@@ -7737,8 +7737,8 @@ class Chat:
         "折叠该聊天"是"消息免打扰"的子选项，
         只有在消息免打扰开启时才会出现。
         """
-        if self._wx:
-            self._wx.activate()
+        if self.wx:
+            self.wx.activate()
 
         self._click_chat_info_button()
         time.sleep(0.5)
@@ -7828,8 +7828,8 @@ class Chat:
             raise ValueError("群聊名称不能为空")
 
         self._ensure_room_chat()
-        if self._wx:
-            self._wx.activate()
+        if self.wx:
+            self.wx.activate()
 
         self._click_chat_info_button()
 
@@ -7895,8 +7895,8 @@ class Chat:
             raise ValueError("群公告内容不能为空")
 
         self._ensure_room_chat()
-        if self._wx:
-            self._wx.activate()
+        if self.wx:
+            self.wx.activate()
 
         self._click_chat_info_button()
 
@@ -8005,8 +8005,8 @@ class Chat:
             raise ValueError("备注不能为空")
 
         self._ensure_room_chat()
-        if self._wx:
-            self._wx.activate()
+        if self.wx:
+            self.wx.activate()
 
         self._click_chat_info_button()
 
@@ -8067,8 +8067,8 @@ class Chat:
             raise ValueError("群内昵称不能为空")
 
         self._ensure_room_chat()
-        if self._wx:
-            self._wx.activate()
+        if self.wx:
+            self.wx.activate()
 
         self._click_chat_info_button()
 
@@ -8136,8 +8136,8 @@ class Chat:
         2. 点击联系人头像，打开资料面板
         """
         self._ensure_contact_chat()
-        if self._wx:
-            self._wx.activate()
+        if self.wx:
+            self.wx.activate()
 
         self._click_chat_info_button()
         time.sleep(0.5)
@@ -8214,8 +8214,8 @@ class Chat:
                 "finder_name": str,
             }
         """
-        if self._wx:
-            self._wx.activate()
+        if self.wx:
+            self.wx.activate()
         try:
             self._open_contact_profile()
             time.sleep(0.5)
@@ -8371,8 +8371,8 @@ class Chat:
         if all(v is None for v in (remark, labels, phones, description, images)):
             return
 
-        if self._wx:
-            self._wx.activate()
+        if self.wx:
+            self.wx.activate()
         try:
             self._open_contact_profile()
             self._click_profile_menu_item("设置备注和标签")
@@ -8606,8 +8606,8 @@ class Chat:
         if not remark:
             raise ValueError("remark 不能为空")
 
-        if self._wx:
-            self._wx.activate()
+        if self.wx:
+            self.wx.activate()
         try:
             self._open_contact_profile()
             self._click_profile_menu_item("设置备注和标签")
@@ -8663,8 +8663,8 @@ class Chat:
         if not labels:
             raise ValueError("labels 不能为空")
 
-        if self._wx:
-            self._wx.activate()
+        if self.wx:
+            self.wx.activate()
         try:
             self._open_contact_profile()
             self._click_profile_menu_item("设置备注和标签")
@@ -8758,8 +8758,8 @@ class Chat:
         if not labels:
             raise ValueError("labels 不能为空")
 
-        if self._wx:
-            self._wx.activate()
+        if self.wx:
+            self.wx.activate()
         try:
             self._open_contact_profile()
             self._click_profile_menu_item("设置备注和标签")
@@ -8835,8 +8835,8 @@ class Chat:
         if not phones:
             raise ValueError("phones 不能为空")
 
-        if self._wx:
-            self._wx.activate()
+        if self.wx:
+            self.wx.activate()
         try:
             self._open_contact_profile()
             self._click_profile_menu_item("设置备注和标签")
@@ -8942,8 +8942,8 @@ class Chat:
         if not images:
             raise ValueError("images 不能为空")
 
-        if self._wx:
-            self._wx.activate()
+        if self.wx:
+            self.wx.activate()
         try:
             self._open_contact_profile()
             self._click_profile_menu_item("设置备注和标签")
@@ -9028,8 +9028,8 @@ class Chat:
         if not phones:
             raise ValueError("phones 不能为空")
 
-        if self._wx:
-            self._wx.activate()
+        if self.wx:
+            self.wx.activate()
         try:
             self._open_contact_profile()
             self._click_profile_menu_item("设置备注和标签")
@@ -9116,8 +9116,8 @@ class Chat:
         if not indexes:
             raise ValueError("indexes 不能为空")
 
-        if self._wx:
-            self._wx.activate()
+        if self.wx:
+            self.wx.activate()
         try:
             self._open_contact_profile()
             self._click_profile_menu_item("设置备注和标签")
@@ -9221,8 +9221,8 @@ class Chat:
     @PIM.wait_idle
     def set_contact_star(self) -> None:
         """将当前私聊联系人设为星标朋友"""
-        if self._wx:
-            self._wx.activate()
+        if self.wx:
+            self.wx.activate()
         try:
             self._open_contact_profile()
             self._click_profile_menu_item("设为星标朋友")
@@ -9237,8 +9237,8 @@ class Chat:
     @PIM.wait_idle
     def cancel_contact_star(self) -> None:
         """取消当前私聊联系人的星标朋友"""
-        if self._wx:
-            self._wx.activate()
+        if self.wx:
+            self.wx.activate()
         try:
             self._open_contact_profile()
             self._click_profile_menu_item("不再设为星标朋友")
@@ -9253,8 +9253,8 @@ class Chat:
     @PIM.wait_idle
     def black_contact(self) -> None:
         """将当前私聊联系人加入黑名单"""
-        if self._wx:
-            self._wx.activate()
+        if self.wx:
+            self.wx.activate()
         try:
             self._open_contact_profile()
             self._click_profile_menu_item("加入黑名单")
@@ -9277,8 +9277,8 @@ class Chat:
     @PIM.wait_idle
     def unblack_contact(self) -> None:
         """将当前私聊联系人移出黑名单"""
-        if self._wx:
-            self._wx.activate()
+        if self.wx:
+            self.wx.activate()
         try:
             self._open_contact_profile()
             self._click_profile_menu_item("移出黑名单")
@@ -9293,8 +9293,8 @@ class Chat:
     @PIM.wait_idle
     def delete_contact(self) -> None:
         """删除当前私聊联系人（不可逆）"""
-        if self._wx:
-            self._wx.activate()
+        if self.wx:
+            self.wx.activate()
         try:
             self._open_contact_profile()
             self._click_profile_menu_item("删除联系人")
@@ -9326,8 +9326,8 @@ class Chat:
                 "hide_their_posts": bool,
             }
         """
-        if self._wx:
-            self._wx.activate()
+        if self.wx:
+            self.wx.activate()
         try:
             self._open_contact_profile()
             self._click_profile_menu_item("设置朋友权限")
@@ -9407,8 +9407,8 @@ class Chat:
         if permission not in ("all", "chatonly"):
             raise ValueError(f"permission 必须为 'all' 或 'chatonly'，当前: {permission}")
 
-        if self._wx:
-            self._wx.activate()
+        if self.wx:
+            self.wx.activate()
         try:
             self._open_contact_profile()
             self._click_profile_menu_item("设置朋友权限")
@@ -9511,8 +9511,8 @@ class Chat:
         if not indexes:
             raise ValueError("indexes 不能为空")
 
-        if self._wx:
-            self._wx.activate()
+        if self.wx:
+            self.wx.activate()
         try:
             self._open_contact_profile()
             self._click_profile_menu_item("设置备注和标签")
@@ -9628,8 +9628,8 @@ class Chat:
         save_dir = os.path.abspath(save_path)
         os.makedirs(save_dir, exist_ok=True)
 
-        if self._wx:
-            self._wx.activate()
+        if self.wx:
+            self.wx.activate()
         try:
             self._open_contact_profile()
             self._click_profile_menu_item("设置备注和标签")
@@ -9784,7 +9784,7 @@ class SeparateChat(Chat, WeixinWindow):
         )
         if not self._win.Exists(0, 0):
             raise RuntimeError(f"独立聊天窗口未找到: {contact_name}")
-        self._wx = None
+        self.wx = None
 
     @property
     def exists(self) -> bool:
