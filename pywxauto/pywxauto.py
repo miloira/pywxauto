@@ -113,31 +113,56 @@ logging.basicConfig(level=logging.INFO, format="%(asctime)s [%(levelname)s] %(me
 logger = logging.getLogger(__name__)
 
 
-# ---- 消息事件类型常量 ----
+# ---- 消息事件类型 ----
 # 用于 handle 装饰器注册事件处理器
-ALL_MESSAGE = "all_message"
-TEXT_MESSAGE = "text_message"
-IMAGE_MESSAGE = "image_message"
-VIDEO_MESSAGE = "video_message"
-FILE_MESSAGE = "file_message"
-VOICE_MESSAGE = "voice_message"
-QUOTE_MESSAGE = "quote_message"
-EMOTION_MESSAGE = "emotion_message"
-LOCATION_MESSAGE = "location_message"
-LINK_MESSAGE = "link_message"
-CARD_MESSAGE = "card_message"
-PERSONAL_CARD_MESSAGE = "personal_card_message"
-MERGE_MESSAGE = "merge_message"
-NOTE_MESSAGE = "note_message"
-VOIP_MESSAGE = "voip_message"
-RED_PACKET_MESSAGE = "red_packet_message"
-TRANSFER_MESSAGE = "transfer_message"
-MUSIC_MESSAGE = "music_message"
-SYSTEM_MESSAGE = "system_message"
-OTHER_MESSAGE = "other_message"
 
-# 消息类 -> 事件类型常量映射
-_MSG_CLASS_TO_EVENT: dict[type, str] = {}  # 延迟填充，在类定义之后
+class Event(str, Enum):
+    """消息事件类型枚举"""
+    ALL = "all_message"
+    TEXT = "text_message"
+    IMAGE = "image_message"
+    VIDEO = "video_message"
+    FILE = "file_message"
+    VOICE = "voice_message"
+    QUOTE = "quote_message"
+    EMOTION = "emotion_message"
+    LOCATION = "location_message"
+    LINK = "link_message"
+    CARD = "card_message"
+    PERSONAL_CARD = "personal_card_message"
+    MERGE = "merge_message"
+    NOTE = "note_message"
+    VOIP = "voip_message"
+    RED_PACKET = "red_packet_message"
+    TRANSFER = "transfer_message"
+    MUSIC = "music_message"
+    SYSTEM = "system_message"
+    OTHER = "other_message"
+
+# 向后兼容：保留旧的常量名
+ALL_MESSAGE = Event.ALL
+TEXT_MESSAGE = Event.TEXT
+IMAGE_MESSAGE = Event.IMAGE
+VIDEO_MESSAGE = Event.VIDEO
+FILE_MESSAGE = Event.FILE
+VOICE_MESSAGE = Event.VOICE
+QUOTE_MESSAGE = Event.QUOTE
+EMOTION_MESSAGE = Event.EMOTION
+LOCATION_MESSAGE = Event.LOCATION
+LINK_MESSAGE = Event.LINK
+CARD_MESSAGE = Event.CARD
+PERSONAL_CARD_MESSAGE = Event.PERSONAL_CARD
+MERGE_MESSAGE = Event.MERGE
+NOTE_MESSAGE = Event.NOTE
+VOIP_MESSAGE = Event.VOIP
+RED_PACKET_MESSAGE = Event.RED_PACKET
+TRANSFER_MESSAGE = Event.TRANSFER
+MUSIC_MESSAGE = Event.MUSIC
+SYSTEM_MESSAGE = Event.SYSTEM
+OTHER_MESSAGE = Event.OTHER
+
+# 消息类 -> 事件类型映射
+_MSG_CLASS_TO_EVENT: dict[type, Event] = {}  # 延迟填充，在类定义之后
 
 # 让拥有 to_dict() 方法的对象支持 json.dumps 直接序列化
 _original_json_default = json.JSONEncoder().default
@@ -10846,26 +10871,44 @@ class Weixin(WeixinWindow):
                     t.join(timeout=3)
             logger.info("监听已停止")
 
-    def add_chat_listen(self, names: str | list[str], offscreen: bool = True) -> list[SeparateChat]:
+    def add_chat_listen(self, names: "str | list[str] | None" = None,
+                       offscreen: bool = True) -> list[SeparateChat]:
         """
         注册要监听的聊天窗口。
 
-        如果独立聊天窗口已打开则直接加入监听列表，
-        未打开则通过搜索打开会话后双击打开独立窗口。
-
         Args:
-            names: 联系人/群聊名称，支持单个字符串或列表
+            names: 联系人/群聊名称，支持单个字符串或列表。
+                   为 None 时自动发现所有已打开的独立聊天窗口并注册监听。
             offscreen: 是否将窗口移到屏幕外监听，默认 True
 
         Returns:
-            成功打开的 SeparateChat 实例列表
+            成功注册的 SeparateChat 实例列表
         """
-        if isinstance(names, str):
-            names = [names]
-
         if not hasattr(self, '_listeners'):
             self._listeners: dict[str, SeparateChat] = {}
         self._offscreen = offscreen
+
+        # names 为 None 时，自动发现所有已打开的独立聊天窗口
+        if names is None:
+            skip_names = {"微信", "Weixin"}
+            for ctrl in auto.GetRootControl().GetChildren():
+                try:
+                    cls_name = ctrl.ClassName
+                    name = ctrl.Name
+                except Exception:
+                    continue
+                if cls_name == SeparateChat.WINDOW_CLASS and name and name not in skip_names:
+                    if name not in self._listeners or not self._listeners[name].exists:
+                        try:
+                            chat = SeparateChat(name)
+                            self._listeners[name] = chat
+                            logger.info("已注册监听: [%s] %s", chat.chat_type, name)
+                        except (RuntimeError, ValueError):
+                            pass
+            return list(self._listeners.values())
+
+        if isinstance(names, str):
+            names = [names]
 
         result: list[SeparateChat] = []
         for name in names:
