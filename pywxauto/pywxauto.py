@@ -4951,16 +4951,76 @@ class Chat:
         return self.check_text_message_status(content)
 
     @PIM.wait_idle
-    def send_file(self, file_path: str) -> MessageStatus:
+    def send_file(self, file_path: "str | list[str]") -> MessageStatus:
         """
-        在当前会话中发送文件，返回发送状态。
+        在当前会话中发送文件，返回最后一个文件的发送状态。
 
-        支持本地文件路径和网络 URL（http/https），
-        网络资源会先下载到临时目录再发送。
+        Args:
+            file_path: 文件路径或路径列表，支持本地路径和网络 URL
 
-        粘贴后通过 TextPattern.DocumentRange 的长度校验文件是否已粘贴，
-        发送后校验文档长度是否已归零。
+        Returns:
+            最后一个文件的发送状态
         """
+        return self._send_media(file_path, "文件", self.check_file_message_status)
+
+    @PIM.wait_idle
+    def send_image(self, file_path: "str | list[str]") -> MessageStatus:
+        """
+        在当前会话中发送图片，返回最后一张图片的发送状态。
+
+        Args:
+            file_path: 图片路径或路径列表，支持本地路径和网络 URL
+
+        Returns:
+            最后一张图片的发送状态
+        """
+        return self._send_media(file_path, "图片", self.check_image_message_status)
+
+    @PIM.wait_idle
+    def send_video(self, file_path: "str | list[str]") -> MessageStatus:
+        """
+        在当前会话中发送视频，返回最后一个视频的发送状态。
+
+        Args:
+            file_path: 视频路径或路径列表，支持本地路径和网络 URL
+
+        Returns:
+            最后一个视频的发送状态
+        """
+        return self._send_media(file_path, "视频", self.check_video_message_status)
+
+    def _send_media(self, file_path: "str | list[str]", label: str,
+                    check_status: callable) -> MessageStatus:
+        """
+        发送文件/图片/视频的通用实现。
+
+        逐个发送文件，每个文件独立粘贴、发送、校验。
+        支持本地路径和网络 URL（自动下载到临时目录）。
+
+        Args:
+            file_path:    单个路径或路径列表
+            label:        类型标签（"文件"/"图片"/"视频"），用于错误提示
+            check_status: 发送后的状态检测方法
+
+        Returns:
+            最后一个文件的发送状态
+        """
+        if self._wx:
+            self._wx.activate()
+
+        paths = [file_path] if isinstance(file_path, str) else list(file_path)
+        if not paths:
+            raise ValueError(f"{label}路径不能为空")
+
+        last_status = MessageStatus.UNKNOWN
+        for path in paths:
+            last_status = self._send_single_media(path, label, check_status)
+
+        return last_status
+
+    def _send_single_media(self, file_path: str, label: str,
+                           check_status: callable) -> MessageStatus:
+        """发送单个文件/图片/视频"""
         tmp_file = None
         if _is_url(file_path):
             tmp_file = _download_to_temp(file_path)
@@ -4970,23 +5030,22 @@ class Chat:
             self.clear_input()
             paste([file_path])
 
-            # 发送前校验：文档长度应大于 0（说明文件已粘贴）
             doc_len = self._get_input_doc_length()
             if doc_len == 0:
-                raise RuntimeError("文件粘贴校验失败: 输入框文档长度为 0，文件可能未粘贴成功")
+                raise RuntimeError(
+                    f"{label}粘贴校验失败: 输入框文档长度为 0，{label}可能未粘贴成功"
+                )
 
             self._win.SendKeys("{Enter}")
 
-            # 发送后校验：文档长度应归零
             remaining_len = self._get_input_doc_length()
             if remaining_len > 0:
                 raise RuntimeError(
-                    f"发送后输入框未清空: 文档长度={remaining_len}，文件可能未发出"
+                    f"发送后输入框未清空: 文档长度={remaining_len}，{label}可能未发出"
                 )
 
-            return self.check_file_message_status()
+            return check_status()
         finally:
-            # 清理临时文件
             if tmp_file and os.path.exists(tmp_file):
                 try:
                     os.remove(tmp_file)
@@ -9743,9 +9802,19 @@ class SeparateChat(Chat, WeixinWindow):
         return super().send_text(content)
 
     @PIM.wait_idle
-    def send_file(self, file_path: str) -> MessageStatus:
+    def send_file(self, file_path: "str | list[str]") -> MessageStatus:
         self.activate()
         return super().send_file(file_path)
+
+    @PIM.wait_idle
+    def send_image(self, file_path: "str | list[str]") -> MessageStatus:
+        self.activate()
+        return super().send_image(file_path)
+
+    @PIM.wait_idle
+    def send_video(self, file_path: "str | list[str]") -> MessageStatus:
+        self.activate()
+        return super().send_video(file_path)
 
     @PIM.wait_idle
     def send_at(self, content: str, at_members: list[str]) -> MessageStatus:
@@ -10024,9 +10093,17 @@ class Weixin(WeixinWindow):
         """发送文本消息"""
         return self.chat_with(nickname).send_text(content)
 
-    def send_file(self, nickname: str, file_path: str) -> MessageStatus:
-        """发送文件，支持本地路径和网络 URL"""
+    def send_file(self, nickname: str, file_path: "str | list[str]") -> MessageStatus:
+        """发送文件，支持单个或多个路径，支持网络 URL"""
         return self.chat_with(nickname).send_file(file_path)
+
+    def send_image(self, nickname: str, file_path: "str | list[str]") -> MessageStatus:
+        """发送图片，支持单个或多个路径，支持网络 URL"""
+        return self.chat_with(nickname).send_image(file_path)
+
+    def send_video(self, nickname: str, file_path: "str | list[str]") -> MessageStatus:
+        """发送视频，支持单个或多个路径，支持网络 URL"""
+        return self.chat_with(nickname).send_video(file_path)
 
     def send_at(self, nickname: str, content: str, at_members: list[str]) -> MessageStatus:
         """在群聊中 @指定成员发送消息"""
