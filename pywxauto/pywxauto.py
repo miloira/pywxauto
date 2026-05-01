@@ -917,6 +917,7 @@ class Message:
         self.raw_name = raw_name
         self.status = status
         self.runtime_id: tuple = runtime_id  # UI Automation RuntimeId，控件的唯一标识
+        self.chat: object = None  # 关联的聊天窗口对象（Chat 或 SeparateChat）
 
     @property
     def type_label(self) -> str:
@@ -1065,9 +1066,31 @@ class LinkMessage(Message):
 
 class EmotionMessage(Message):
     """表情消息"""
+
+    # 匹配 [xxx] 格式的表情名称
+    _EMOJI_NAME_RE = re.compile(r"\[(.+?)\]")
+
+    def __init__(self, *, emoji_name="", **kw):
+        super().__init__(**kw)
+        self.emoji_name: str = emoji_name
+
     @property
     def type_label(self) -> str:
         return "表情消息"
+
+    @staticmethod
+    def parse(raw_name: str) -> tuple[str, str]:
+        """
+        解析表情 Name -> (content, emoji_name)
+
+        已知格式：
+        - "动画表情 [嗅嗅]" → emoji_name="嗅嗅"
+        - "[微笑]"          → emoji_name="微笑"
+        - 无方括号的表情     → emoji_name=""
+        """
+        m = EmotionMessage._EMOJI_NAME_RE.search(raw_name)
+        emoji_name = m.group(1) if m else ""
+        return raw_name, emoji_name
 
 
 class MergeMessage(Message):
@@ -6006,12 +6029,14 @@ class Chat:
 
             # 系统消息
             if msg_cls is SystemMessage:
-                messages.append(SystemMessage(
+                sys_msg = SystemMessage(
                     content=raw_name,
                     timestamp=raw_name,
                     raw_name=raw_name,
                     runtime_id=rid,
-                ))
+                )
+                sys_msg.chat = self
+                messages.append(sys_msg)
                 continue
 
             # 判断发送者：优先从缓存读取，避免重复截图
@@ -6028,6 +6053,7 @@ class Chat:
             # 构造具体消息对象
             msg = self._build_message(msg_cls, raw_name, sender, sender_type,
                                       runtime_id=rid)
+            msg.chat = self
             messages.append(msg)
         return messages
 
@@ -6363,8 +6389,12 @@ class Chat:
             content, amount, remark = TransferMessage.parse(actual_name)
             return TransferMessage(**base, content=content, amount=amount, remark=remark)
 
+        if msg_cls is EmotionMessage:
+            content, emoji_name = EmotionMessage.parse(actual_name)
+            return EmotionMessage(**base, content=content, emoji_name=emoji_name)
+
         # TextMessage, QuoteMessage, ImageMessage, VideoMessage,
-        # EmotionMessage, MergeMessage, NoteMessage, OtherMessage
+        # MergeMessage, NoteMessage, OtherMessage
         return msg_cls(**base, content=actual_name)
 
     # ---- 聊天信息面板操作 ----
@@ -9966,29 +9996,24 @@ class Weixin(WeixinWindow):
         self.session.close(nickname)
 
     def send_text(self, nickname: str, content: str) -> MessageStatus:
-        """打开指定会话并发送文本消息"""
-        chat = self.open_session_by_search(nickname)
-        return chat.send_text(content)
+        """发送文本消息"""
+        return self.chat_with(nickname).send_text(content)
 
     def send_file(self, nickname: str, file_path: str) -> MessageStatus:
-        """打开指定会话并发送文件，支持本地路径和网络 URL"""
-        chat = self.open_session_by_search(nickname)
-        return chat.send_file(file_path)
+        """发送文件，支持本地路径和网络 URL"""
+        return self.chat_with(nickname).send_file(file_path)
 
     def send_at(self, nickname: str, content: str, at_members: list[str]) -> MessageStatus:
-        """打开指定群聊会话并 @指定成员发送消息"""
-        chat = self.open_session_by_search(nickname)
-        return chat.send_at(content, at_members)
+        """在群聊中 @指定成员发送消息"""
+        return self.chat_with(nickname).send_at(content, at_members)
 
     def send_collection(self, nickname: str, keyword: str) -> bool:
-        """打开指定会话并发送收藏内容"""
-        chat = self.open_session_by_search(nickname)
-        return chat.send_collection(keyword)
+        """发送收藏内容"""
+        return self.chat_with(nickname).send_collection(keyword)
 
     def send_emotion(self, nickname: str, keyword: str = None, index: int = 1) -> bool:
-        """打开指定会话并发送表情，keyword 为 None 时发送自定义表情"""
-        chat = self.open_session_by_search(nickname)
-        return chat.send_emotion(keyword, index)
+        """发送表情，keyword 为 None 时发送自定义表情"""
+        return self.chat_with(nickname).send_emotion(keyword, index)
 
     def send_card(self, nickname: str, share: str) -> bool:
         """
@@ -10001,8 +10026,7 @@ class Weixin(WeixinWindow):
         Returns:
             True 发送成功
         """
-        chat = self.open_session_by_search(share)
-        return chat.send_card(nickname)
+        return self.chat_with(share).send_card(nickname)
 
     @PIM.wait_idle
     def create_note(self, content: str) -> None:
@@ -10042,9 +10066,30 @@ class Weixin(WeixinWindow):
         except (RuntimeError, ValueError):
             return None
 
+    def chat_with(self, nickname: str, chat_type: Optional[list[str]] = None,
+                  force_search: bool = False) -> "Chat | SeparateChat":
+        """
+        获取与指定联系人/群聊的聊天窗口对象。
+
+        优先查找已打开的独立聊天窗口（SeparateChat），
+        找不到则通过主窗口搜索打开会话。
+
+        Args:
+            nickname:     联系人或群聊名称
+            chat_type:    搜索时优先匹配的分类，如 ["联系人", "群聊"]
+            force_search: 是否强制走搜索流程
+
+        Returns:
+            Chat 或 SeparateChat 实例
+        """
+        separate = self.get_separate_chat(nickname)
+        if separate is not None:
+            return separate
+        return self.open_session_by_search(nickname, chat_type, force_search)
+
     def get_contact_profile(self, nickname: str) -> dict:
         """获取联系人的资料信息"""
-        chat = self.open_session_by_search(nickname)
+        chat = self.chat_with(nickname)
         return chat.get_contact_profile()
 
     def set_contact_info(self, nickname: str, *,
@@ -10054,180 +10099,180 @@ class Weixin(WeixinWindow):
                          description: str = None,
                          images: list = None) -> None:
         """一次性设置联系人的备注、标签、电话、描述、图片"""
-        chat = self.open_session_by_search(nickname)
+        chat = self.chat_with(nickname)
         chat.set_contact_info(remark=remark, labels=labels, phones=phones,
                               description=description, images=images)
 
     def set_contact_remark(self, nickname: str, remark: str) -> None:
         """设置联系人的备注名"""
-        chat = self.open_session_by_search(nickname)
+        chat = self.chat_with(nickname)
         chat.set_contact_remark(remark)
 
     def set_contact_label(self, nickname: str, labels: list[str]) -> None:
         """为联系人设置标签"""
-        chat = self.open_session_by_search(nickname)
+        chat = self.chat_with(nickname)
         chat.set_contact_info(labels=labels)
 
     def set_contact_phone(self, nickname: str, phones: list[str]) -> None:
         """为联系人设置电话号码"""
-        chat = self.open_session_by_search(nickname)
+        chat = self.chat_with(nickname)
         chat.set_contact_info(phones=phones)
 
     def set_contact_description(self, nickname: str, description: str) -> None:
         """设置联系人的描述信息"""
-        chat = self.open_session_by_search(nickname)
+        chat = self.chat_with(nickname)
         chat.set_contact_info(description=description)
 
     def set_contact_image(self, nickname: str, images: list[str]) -> None:
         """设置联系人的备注图片（覆盖式）"""
-        chat = self.open_session_by_search(nickname)
+        chat = self.chat_with(nickname)
         chat.set_contact_info(images=images)
 
     def add_contact_label(self, nickname: str, labels: list[str]) -> None:
         """为联系人添加标签"""
-        chat = self.open_session_by_search(nickname)
+        chat = self.chat_with(nickname)
         chat.add_contact_label(labels)
 
     def add_contact_phone(self, nickname: str, phones: list[str]) -> None:
         """为联系人添加电话号码"""
-        chat = self.open_session_by_search(nickname)
+        chat = self.chat_with(nickname)
         chat.add_contact_phone(phones)
 
     def add_contact_image(self, nickname: str, images: list[str]) -> None:
         """为联系人添加备注图片"""
-        chat = self.open_session_by_search(nickname)
+        chat = self.chat_with(nickname)
         chat.add_contact_image(images)
 
     def remove_contact_label(self, nickname: str, labels: list[str]) -> None:
         """移除联系人的标签"""
-        chat = self.open_session_by_search(nickname)
+        chat = self.chat_with(nickname)
         chat.remove_contact_label(labels)
 
     def remove_contact_phone(self, nickname: str, phones: list[str]) -> None:
         """移除联系人的电话号码"""
-        chat = self.open_session_by_search(nickname)
+        chat = self.chat_with(nickname)
         chat.remove_contact_phone(phones)
 
     def remove_contact_image(self, nickname: str, images: list[int]) -> None:
         """删除联系人的备注图片（按序号）"""
-        chat = self.open_session_by_search(nickname)
+        chat = self.chat_with(nickname)
         chat.remove_contact_image(images)
 
     def collect_contact_image(self, nickname: str, images: list[int]) -> int:
         """收藏联系人的指定备注图片"""
-        chat = self.open_session_by_search(nickname)
+        chat = self.chat_with(nickname)
         return chat.collect_contact_image(images)
 
     def save_contact_image(self, nickname: str, images: list[int], save_path: str) -> int:
         """保存联系人的指定备注图片到指定目录"""
-        chat = self.open_session_by_search(nickname)
+        chat = self.chat_with(nickname)
         return chat.save_contact_image(images, save_path)
 
     def set_contact_star(self, nickname: str) -> None:
         """将联系人设为星标朋友"""
-        chat = self.open_session_by_search(nickname)
+        chat = self.chat_with(nickname)
         chat.set_contact_star()
 
     def cancel_contact_star(self, nickname: str) -> None:
         """取消联系人的星标朋友"""
-        chat = self.open_session_by_search(nickname)
+        chat = self.chat_with(nickname)
         chat.cancel_contact_star()
 
     def get_friend_permission(self, nickname: str) -> dict:
         """获取联系人的朋友权限设置"""
-        chat = self.open_session_by_search(nickname)
+        chat = self.chat_with(nickname)
         return chat.get_friend_permission()
 
     def set_friend_permission(self, nickname: str, permission: str = "all",
                               hide_my_posts: bool = False,
                               hide_their_posts: bool = False) -> None:
         """设置联系人的朋友权限"""
-        chat = self.open_session_by_search(nickname)
+        chat = self.chat_with(nickname)
         chat.set_friend_permission(permission, hide_my_posts, hide_their_posts)
 
     def black_contact(self, nickname: str) -> None:
         """将联系人加入黑名单"""
-        chat = self.open_session_by_search(nickname)
+        chat = self.chat_with(nickname)
         chat.black_contact()
 
     def unblack_contact(self, nickname: str) -> None:
         """将联系人移出黑名单"""
-        chat = self.open_session_by_search(nickname)
+        chat = self.chat_with(nickname)
         chat.unblack_contact()
 
     def delete_contact(self, nickname: str) -> None:
         """删除联系人"""
-        chat = self.open_session_by_search(nickname)
+        chat = self.chat_with(nickname)
         chat.delete_contact()
 
     def recommend_contact(self, nickname: str, receiver_nickname: str) -> bool:
         """将指定联系人推荐给另一个朋友（发送名片）"""
-        chat = self.open_session_by_search(nickname)
+        chat = self.chat_with(nickname)
         return chat.recommend_contact(receiver_nickname)
 
     def clear_chat_history(self, nickname: str) -> None:
         """清空指定会话的聊天记录"""
-        chat = self.open_session_by_search(nickname)
+        chat = self.chat_with(nickname)
         chat.clear_chat_history()
 
     def clear_room_chat_history(self, nickname: str) -> None:
         """清空指定群聊会话的聊天记录"""
-        chat = self.open_session_by_search(nickname)
+        chat = self.chat_with(nickname)
         chat.clear_room_chat_history()
 
     def exit_room(self, nickname: str) -> None:
         """退出指定群聊"""
-        chat = self.open_session_by_search(nickname)
+        chat = self.chat_with(nickname)
         chat.exit_room()
 
     def add_room_members(self, nickname: str, members: list[str]) -> None:
         """添加指定群聊的成员"""
-        chat = self.open_session_by_search(nickname)
+        chat = self.chat_with(nickname)
         chat.add_room_members(members)
 
     def remove_room_members(self, nickname: str, members: list[str]) -> None:
         """移除指定群聊的成员"""
-        chat = self.open_session_by_search(nickname)
+        chat = self.chat_with(nickname)
         chat.remove_room_members(members)
 
     def pin_room_chat(self, nickname: str) -> None:
         """置顶指定群聊会话"""
-        chat = self.open_session_by_search(nickname)
+        chat = self.chat_with(nickname)
         chat.pin_room_chat()
 
     def unpin_room_chat(self, nickname: str) -> None:
         """取消置顶指定群聊会话"""
-        chat = self.open_session_by_search(nickname)
+        chat = self.chat_with(nickname)
         chat.unpin_room_chat()
 
     def mute_room_chat(self, nickname: str) -> None:
         """开启指定群聊的消息免打扰"""
-        chat = self.open_session_by_search(nickname)
+        chat = self.chat_with(nickname)
         chat.mute_room_chat()
 
     def unmute_room_chat(self, nickname: str) -> None:
         """关闭指定群聊的消息免打扰"""
-        chat = self.open_session_by_search(nickname)
+        chat = self.chat_with(nickname)
         chat.unmute_room_chat()
 
     def add_room_address_book(self, nickname: str) -> None:
         """将指定群聊保存到通讯录"""
-        chat = self.open_session_by_search(nickname)
+        chat = self.chat_with(nickname)
         chat.add_room_address_book()
 
     def remove_room_address_book(self, nickname: str) -> None:
         """将指定群聊从通讯录移除"""
-        chat = self.open_session_by_search(nickname)
+        chat = self.chat_with(nickname)
         chat.remove_room_address_book()
 
     def display_room_member_nickname(self, nickname: str) -> None:
         """显示指定群聊的群成员昵称"""
-        chat = self.open_session_by_search(nickname)
+        chat = self.chat_with(nickname)
         chat.display_room_member_nickname()
 
     def hidden_room_member_nickname(self, nickname: str) -> None:
         """隐藏指定群聊的群成员昵称"""
-        chat = self.open_session_by_search(nickname)
+        chat = self.chat_with(nickname)
         chat.hidden_room_member_nickname()
 
     def set_room_info(self, nickname: str, name: str = None,
@@ -10237,7 +10282,7 @@ class Weixin(WeixinWindow):
                       display_member_nickname: bool = None,
                       fold: bool = None) -> None:
         """一次性设置指定群聊的多项信息"""
-        chat = self.open_session_by_search(nickname)
+        chat = self.chat_with(nickname)
         chat.set_room_info(
             name=name, announcement=announcement, remark=remark,
             my_nickname=my_nickname, mute=mute, pin=pin,
@@ -10248,62 +10293,62 @@ class Weixin(WeixinWindow):
 
     def fold_room_chat(self, nickname: str) -> None:
         """折叠指定群聊会话"""
-        chat = self.open_session_by_search(nickname)
+        chat = self.chat_with(nickname)
         chat.fold_room_chat()
 
     def unfold_room_chat(self, nickname: str) -> None:
         """取消折叠指定群聊会话"""
-        chat = self.open_session_by_search(nickname)
+        chat = self.chat_with(nickname)
         chat.unfold_room_chat()
 
     def pin_chat(self, nickname: str) -> None:
         """置顶指定会话"""
-        chat = self.open_session_by_search(nickname)
+        chat = self.chat_with(nickname)
         chat.pin_chat()
 
     def unpin_chat(self, nickname: str) -> None:
         """取消置顶指定会话"""
-        chat = self.open_session_by_search(nickname)
+        chat = self.chat_with(nickname)
         chat.unpin_chat()
 
     def mute_chat(self, nickname: str) -> None:
         """开启指定会话的消息免打扰"""
-        chat = self.open_session_by_search(nickname)
+        chat = self.chat_with(nickname)
         chat.mute_chat()
 
     def unmute_chat(self, nickname: str) -> None:
         """关闭指定会话的消息免打扰"""
-        chat = self.open_session_by_search(nickname)
+        chat = self.chat_with(nickname)
         chat.unmute_chat()
 
     def fold_chat(self, nickname: str) -> None:
         """折叠指定会话"""
-        chat = self.open_session_by_search(nickname)
+        chat = self.chat_with(nickname)
         chat.fold_chat()
 
     def unfold_chat(self, nickname: str) -> None:
         """取消折叠指定会话"""
-        chat = self.open_session_by_search(nickname)
+        chat = self.chat_with(nickname)
         chat.unfold_chat()
 
     def set_room_name(self, nickname: str, name: str) -> None:
         """设置指定群聊的名称"""
-        chat = self.open_session_by_search(nickname)
+        chat = self.chat_with(nickname)
         chat.set_room_name(name)
 
     def set_room_announcement(self, nickname: str, content: str) -> None:
         """设置指定群聊的群公告"""
-        chat = self.open_session_by_search(nickname)
+        chat = self.chat_with(nickname)
         chat.set_room_announcement(content)
 
     def set_room_remark(self, nickname: str, remark: str) -> None:
         """设置指定群聊的备注"""
-        chat = self.open_session_by_search(nickname)
+        chat = self.chat_with(nickname)
         chat.set_room_remark(remark)
 
     def set_room_nickname(self, nickname: str, my_nickname: str) -> None:
         """设置我在指定群聊中的昵称"""
-        chat = self.open_session_by_search(nickname)
+        chat = self.chat_with(nickname)
         chat.set_room_nickname(my_nickname)
 
     def get_screenshot(self) -> bytes:
@@ -10492,19 +10537,19 @@ class Weixin(WeixinWindow):
         用法::
 
             @wx.handle(TEXT_MESSAGE)
-            def on_text(chat, message):
+            def on_text(wx, message):
                 print(message.content)
 
             @wx.handle([TEXT_MESSAGE, IMAGE_MESSAGE])
-            def on_text_or_image(chat, message):
+            def on_text_or_image(wx, message):
                 print(message.type_label)
 
             @wx.handle()  # 监听所有消息
-            def on_all(chat, message):
+            def on_all(wx, message):
                 print(message)
 
             @wx.handle(TEXT_MESSAGE, once=True)  # 只触发一次
-            def on_first_text(chat, message):
+            def on_first_text(wx, message):
                 print("第一条文本消息:", message.content)
 
         Args:
@@ -10541,7 +10586,7 @@ class Weixin(WeixinWindow):
         用法::
 
             @wx.on(TEXT_MESSAGE)
-            def on_text(chat, message):
+            def on_text(wx, message):
                 print(message.content)
         """
         return self.handle(events, once=False)
@@ -10558,7 +10603,7 @@ class Weixin(WeixinWindow):
         用法::
 
             @wx.once(TEXT_MESSAGE)
-            def on_first_text(chat, message):
+            def on_first_text(wx, message):
                 print("第一条文本消息:", message.content)
         """
         return self.handle(events, once=True)
@@ -10590,7 +10635,7 @@ class Weixin(WeixinWindow):
             else:
                 self._ee.remove_listener(event, func)
 
-    def _emit(self, chat: "SeparateChat", message: "Message") -> None:
+    def _emit(self, message: "Message") -> None:
         """
         触发消息事件，通过 pyee EventEmitter 分发到所有匹配的处理器。
 
@@ -10599,13 +10644,12 @@ class Weixin(WeixinWindow):
         2. emit 该事件类型（触发具体类型的处理器）
         3. emit ALL_MESSAGE（触发全局处理器）
 
-        Args:
-            chat:    聊天窗口对象
-            message: 消息对象
+        回调签名: callback(wx: Weixin, message: Message)
+        消息关联的聊天窗口通过 message.chat 获取。
         """
         event_type = _MSG_CLASS_TO_EVENT.get(type(message), OTHER_MESSAGE)
-        self._ee.emit(event_type, chat, message)
-        self._ee.emit(ALL_MESSAGE, chat, message)
+        self._ee.emit(event_type, self, message)
+        self._ee.emit(ALL_MESSAGE, self, message)
 
     @property
     def has_handlers(self) -> bool:
@@ -10629,8 +10673,9 @@ class Weixin(WeixinWindow):
         通过 RuntimeId（UI Automation 为每个控件分配的唯一标识）进行差异比对，
         精确识别新增消息，不受重复内容、同名消息等干扰。
 
-        callback: 回调函数，签名为 callback(chat: SeparateChat, message: Message)
+        callback: 回调函数，签名为 callback(wx: Weixin, message: Message)
                   每次回调传入一条新消息，在主线程中执行。
+                  消息关联的聊天窗口通过 message.chat 获取。
         interval:      有新消息时的轮询间隔（秒）
         idle_interval: 无新消息时的轮询间隔（秒），降低 CPU 占用
         history:       每个窗口初始记录的历史消息条数（用于去重基线，不触发回调）
@@ -10638,8 +10683,8 @@ class Weixin(WeixinWindow):
 
         用法:
             wx = Weixin()
-            def on_msg(chat, message):
-                print(f"[{chat.current_name}] {message}")
+            def on_msg(wx, message):
+                print(f"[{message.chat.current_name}] {message}")
             wx.listen(on_msg)  # 阻塞运行，Ctrl+C 退出
         """
 
@@ -10789,7 +10834,7 @@ class Weixin(WeixinWindow):
                 except Empty:
                     continue
                 try:
-                    callback(chat, msg)
+                    callback(self, msg)
                 except Exception as e:
                     logger.exception("回调异常 [%s]", chat.current_name)
         except KeyboardInterrupt:
@@ -10801,7 +10846,7 @@ class Weixin(WeixinWindow):
                     t.join(timeout=3)
             logger.info("监听已停止")
 
-    def add_listener(self, names: str | list[str], offscreen: bool = True) -> list[SeparateChat]:
+    def add_chat_listen(self, names: str | list[str], offscreen: bool = True) -> list[SeparateChat]:
         """
         注册要监听的聊天窗口。
 
@@ -10855,7 +10900,7 @@ class Weixin(WeixinWindow):
         """
         启动消息监听（阻塞运行，Ctrl+C 退出）。
 
-        仅监听通过 add_listener 注册的聊天窗口。
+        仅监听通过 add_chat_listen 注册的聊天窗口。
         消息通过 handle/on/once 装饰器注册的事件处理器分发。
 
         通过 RuntimeId（UI Automation 为每个控件分配的唯一标识）进行差异比对，
@@ -10870,7 +10915,7 @@ class Weixin(WeixinWindow):
                 "未注册任何事件处理器，请使用 @wx.handle(EVENT) 装饰器注册"
             )
         if not hasattr(self, '_listeners') or not self._listeners:
-            raise RuntimeError("未注册任何监听，请先调用 add_listener")
+            raise RuntimeError("未注册任何监听，请先调用 add_chat_listen")
 
         stop_event = threading.Event()
         msg_queue: Queue[tuple[SeparateChat, Message]] = Queue()
@@ -11001,7 +11046,7 @@ class Weixin(WeixinWindow):
                 except Empty:
                     continue
                 try:
-                    self._emit(chat, msg)
+                    self._emit(msg)
                 except Exception:
                     logger.exception("事件分发异常 [%s]", chat.current_name)
         except KeyboardInterrupt:
