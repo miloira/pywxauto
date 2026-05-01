@@ -130,6 +130,8 @@ PERSONAL_CARD_MESSAGE = "personal_card_message"
 MERGE_MESSAGE = "merge_message"
 NOTE_MESSAGE = "note_message"
 VOIP_MESSAGE = "voip_message"
+RED_PACKET_MESSAGE = "red_packet_message"
+TRANSFER_MESSAGE = "transfer_message"
 SYSTEM_MESSAGE = "system_message"
 OTHER_MESSAGE = "other_message"
 
@@ -755,7 +757,7 @@ def capture_window(hwnd: int, offset_left: int = 0, offset_top: int = 0,
     return buffer.getvalue()
 
 
-def c(hwnd, control) -> bytes:
+def capture_control(hwnd, control) -> bytes:
     """
     通过 PrintWindow API 截取微信窗口，然后裁剪出指定控件区域的图像。
 
@@ -1130,6 +1132,61 @@ class VoipMessage(Message):
         return raw_name, "", raw_name
 
 
+class TransferMessage(Message):
+    """微信转账消息"""
+
+    # Name 格式: "￥{金额} {备注} 微信转账" 或 "￥{金额} 微信转账"（无备注）
+    _TRANSFER_RE = re.compile(r"^￥([\d.]+)\s+(.+?)\s+微信转账$")
+    _TRANSFER_NO_REMARK_RE = re.compile(r"^￥([\d.]+)\s+微信转账$")
+
+    def __init__(self, *, amount="", remark="", **kw):
+        super().__init__(**kw)
+        self.amount: str = amount
+        self.remark: str = remark
+
+    @property
+    def type_label(self) -> str:
+        return "转账消息"
+
+    @staticmethod
+    def parse(raw_name: str) -> tuple[str, str, str]:
+        """解析转账 Name -> (content, amount, remark)"""
+        m = TransferMessage._TRANSFER_RE.match(raw_name)
+        if m:
+            amount = m.group(1)
+            remark = m.group(2).strip()
+            return f"￥{amount}", amount, remark
+        m = TransferMessage._TRANSFER_NO_REMARK_RE.match(raw_name)
+        if m:
+            amount = m.group(1)
+            return f"￥{amount}", amount, ""
+        return raw_name, "", ""
+
+
+class RedPacketMessage(Message):
+    """微信红包消息"""
+
+    # Name 格式: "{祝福语}  微信红包"（祝福语与"微信红包"之间有两个空格）
+    _RED_PACKET_RE = re.compile(r"^(.+?)\s{2,}微信红包$")
+
+    def __init__(self, *, greeting="", **kw):
+        super().__init__(**kw)
+        self.greeting: str = greeting
+
+    @property
+    def type_label(self) -> str:
+        return "红包消息"
+
+    @staticmethod
+    def parse(raw_name: str) -> tuple[str, str]:
+        """解析红包 Name -> (content, greeting)"""
+        m = RedPacketMessage._RED_PACKET_RE.match(raw_name)
+        if m:
+            greeting = m.group(1).strip()
+            return greeting, greeting
+        return raw_name, raw_name
+
+
 class OtherMessage(Message):
     """其他/未识别消息"""
     @property
@@ -1153,6 +1210,8 @@ _MSG_CLASS_TO_EVENT.update({
     MergeMessage: MERGE_MESSAGE,
     NoteMessage: NOTE_MESSAGE,
     VoipMessage: VOIP_MESSAGE,
+    RedPacketMessage: RED_PACKET_MESSAGE,
+    TransferMessage: TRANSFER_MESSAGE,
     SystemMessage: SYSTEM_MESSAGE,
     OtherMessage: OTHER_MESSAGE,
 })
@@ -5801,7 +5860,7 @@ class Chat:
             AutomationId="chat_message_list",
         )
 
-    def get_visible_messages(self) -> list[Message]:
+    def get_visible_messages(self, sender_cache: dict[tuple, tuple] = None) -> list[Message]:
         """
         获取当前可见的消息列表，返回具体消息子类实例。
 
@@ -5809,6 +5868,13 @@ class Chat:
         通过头像控件位置判断 SenderType。
         每条消息携带 runtime_id（UI Automation RuntimeId），
         作为控件的唯一标识，用于消息监听时的精确去重。
+
+        Args:
+            sender_cache: 可选的发送者缓存字典，格式为
+                {runtime_id: (sender, sender_type)}。
+                传入后，已缓存的消息跳过截图检测直接使用缓存结果，
+                新消息检测后自动写入缓存。
+                用于监听场景下避免对已知消息重复截图导致窗口闪烁。
         """
         lc = self._message_list
         if not lc.Exists(maxSearchSeconds=2):
@@ -5859,6 +5925,10 @@ class Chat:
             if ui_cls == "mmui::ChatBubbleItemView":
                 msg_cls = self._classify_bubble(raw_name)
 
+            # ChatBubbleReferItemView 复用于引用消息和动画表情，需要二次分类
+            if ui_cls == "mmui::ChatBubbleReferItemView":
+                msg_cls = self._classify_bubble_refer(raw_name)
+
             if msg_cls is None:
                 msg_cls = OtherMessage
 
@@ -5872,10 +5942,16 @@ class Chat:
                 ))
                 continue
 
-            # 判断发送者
-            sender, sender_type = self._detect_sender(
-                ctrl, list_center_x, chat_name, hwnd,
-            )
+            # 判断发送者：优先从缓存读取，避免重复截图
+            if sender_cache is not None and rid and rid in sender_cache:
+                sender, sender_type = sender_cache[rid]
+            else:
+                sender, sender_type = self._detect_sender(
+                    ctrl, list_center_x, chat_name, hwnd,
+                )
+                # 写入缓存
+                if sender_cache is not None and rid:
+                    sender_cache[rid] = (sender, sender_type)
 
             # 构造具体消息对象
             msg = self._build_message(msg_cls, raw_name, sender, sender_type,
@@ -5902,9 +5978,29 @@ class Chat:
             return MergeMessage
         if "笔记" in name:
             return NoteMessage
+        if name.endswith("微信红包") and "  " in name:
+            return RedPacketMessage
+        if name.endswith("微信转账") and name.startswith("￥"):
+            return TransferMessage
         # ChatBubbleItemView 中未匹配的通常是卡片消息
         # （音乐分享、公众号文章、小程序卡片等）
         return CardMessage
+
+    # 动画表情 Name 格式: "动画表情 [xxx]"
+    _ANIMATED_EMOJI_RE = re.compile(r"^动画表情 \[.+\]$")
+
+    @staticmethod
+    def _classify_bubble_refer(name: str) -> type[Message]:
+        """
+        对 mmui::ChatBubbleReferItemView 做二次分类。
+
+        该 ClassName 复用于多种消息类型：
+        - 动画表情: Name 匹配 "动画表情 [xxx]"，如 "动画表情 [嗅嗅]"
+        - 引用消息: 其他情况
+        """
+        if Chat._ANIMATED_EMOJI_RE.match(name):
+            return EmotionMessage
+        return QuoteMessage
 
     @staticmethod
     def _detect_sender(
@@ -6093,6 +6189,14 @@ class Chat:
         if msg_cls is CardMessage:
             content, title, description = CardMessage.parse(actual_name)
             return CardMessage(**base, content=content, title=title, description=description)
+
+        if msg_cls is RedPacketMessage:
+            content, greeting = RedPacketMessage.parse(actual_name)
+            return RedPacketMessage(**base, content=content, greeting=greeting)
+
+        if msg_cls is TransferMessage:
+            content, amount, remark = TransferMessage.parse(actual_name)
+            return TransferMessage(**base, content=content, amount=amount, remark=remark)
 
         # TextMessage, QuoteMessage, ImageMessage, VideoMessage,
         # EmotionMessage, MergeMessage, NoteMessage, OtherMessage
@@ -10396,9 +10500,14 @@ class Weixin(WeixinWindow):
             同一控件在生命周期内 RuntimeId 不变，不同控件的 RuntimeId 不同。
             即使两条消息内容完全相同，它们的 RuntimeId 也不同，
             从根本上解决了内容签名去重的误判问题。
+
+            sender_cache 缓存已知消息的发送者检测结果，
+            避免对已知消息重复执行 PrintWindow 截图导致窗口闪烁。
             """
             # 已知消息的 RuntimeId 集合
             known_rids: set[tuple] = set()
+            # 发送者缓存：{runtime_id: (sender, sender_type)}
+            sender_cache: dict[tuple, tuple] = {}
             first_scan = True
 
             # 移到屏幕外，窗口仍处于正常状态，UI Automation 正常工作
@@ -10410,7 +10519,7 @@ class Weixin(WeixinWindow):
                     break
 
                 try:
-                    visible = chat.get_visible_messages()
+                    visible = chat.get_visible_messages(sender_cache=sender_cache)
                 except Exception:
                     if stop_event.wait(interval):
                         break
@@ -10434,6 +10543,10 @@ class Weixin(WeixinWindow):
                     # 无新消息
                     # 更新已知集合：移除已滚出视口的旧 RuntimeId，防止无限膨胀
                     known_rids = (known_rids & curr_rids) | curr_rids
+                    # 清理 sender_cache 中已滚出视口的条目
+                    for rid in list(sender_cache):
+                        if rid not in curr_rids:
+                            del sender_cache[rid]
                     if stop_event.wait(idle_interval):
                         break
                     continue
@@ -10601,6 +10714,8 @@ class Weixin(WeixinWindow):
         def _watch_chat(chat: SeparateChat, name: str) -> None:
             # 已知消息的 RuntimeId 集合
             known_rids: set[tuple] = set()
+            # 发送者缓存：{runtime_id: (sender, sender_type)}
+            sender_cache: dict[tuple, tuple] = {}
             first_scan = True
 
             if self._offscreen:
@@ -10612,7 +10727,7 @@ class Weixin(WeixinWindow):
                     break
 
                 try:
-                    visible = chat.get_visible_messages()
+                    visible = chat.get_visible_messages(sender_cache=sender_cache)
                 except Exception:
                     if stop_event.wait(interval):
                         break
@@ -10634,6 +10749,10 @@ class Weixin(WeixinWindow):
                 if not new_rids:
                     # 更新已知集合：移除已滚出视口的旧 RuntimeId，防止无限膨胀
                     known_rids = (known_rids & curr_rids) | curr_rids
+                    # 清理 sender_cache 中已滚出视口的条目
+                    for rid in list(sender_cache):
+                        if rid not in curr_rids:
+                            del sender_cache[rid]
                     if stop_event.wait(idle_interval):
                         break
                     continue
