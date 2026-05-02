@@ -1980,6 +1980,7 @@ class SessionItem:
 
     def __init__(self, *, name="", last_msg="", msg_time="",
                  muted=False, unread="", active=False,
+                 runtime_id: tuple = (),
                  _session: "Session | None" = None):
         self.name = name
         self.last_msg = last_msg
@@ -1987,6 +1988,7 @@ class SessionItem:
         self.muted = muted
         self.unread = unread       # 未读条数文本，如 "[9条]"
         self.active = active       # 是否为当前选中（激活）的会话
+        self.runtime_id: tuple = runtime_id  # UI Automation RuntimeId
         self._session = _session   # 关联的 Session 实例（用于执行操作）
 
     def __repr__(self):
@@ -2065,14 +2067,15 @@ class MomentItem:
 
     def __init__(self, *, type="", sender="", content="",
                  raw_text="", timestamp="", image_count=0,
-                 cell_type=""):
-        self.type = type              # 动态类型（文本/图片/视频/分享/文本图片/文本视频/文本分享/其他）
+                 cell_type="", runtime_id: tuple = ()):
+        self.type = type              # 动态类型
         self.sender = sender          # 发送者昵称
         self.content = content        # 文本内容
         self.raw_text = raw_text      # 原始文本（控件 Name 属性）
         self.timestamp = timestamp    # 时间文本（如 "8小时前"）
         self.image_count = image_count  # 图片数量
-        self.cell_type = cell_type    # 原始 Cell ClassName（用于调试）
+        self.cell_type = cell_type    # 原始 Cell ClassName
+        self.runtime_id: tuple = runtime_id  # UI Automation RuntimeId
 
     def __repr__(self):
         return (f"MomentItem(type={self.type!r}, sender={self.sender!r}, "
@@ -2137,6 +2140,7 @@ class Moment(WeixinWindow):
         self._win = auto.WindowControl(
             ClassName=self.SNS_WINDOW_CLASS,
             AutomationId=self.SNS_WINDOW_ID,
+            searchDepth=1
         )
 
     @property
@@ -2160,7 +2164,6 @@ class Moment(WeixinWindow):
         # 窗口不存在，通过导航栏打开
         self.wx.activate()
         self.wx.navigator.switch_to(self.MOMENT_TAB_NAME)
-        time.sleep(1)
 
         # 等待独立窗口出现
         if not self._win.Exists(maxSearchSeconds=5):
@@ -2286,12 +2289,12 @@ class Moment(WeixinWindow):
             cell_type=cls_name,
         )
 
-    def _collect_moments(self, lc) -> list[tuple[str, str]]:
+    def _collect_moments(self, lc) -> list[tuple[str, str, tuple]]:
         """
-        收集当前可见的动态条目的 (raw_name, cls_name) 列表。
+        收集当前可见的动态条目的 (raw_name, cls_name, runtime_id) 列表。
         跳过评论区、辅助行等非动态 Cell。
         """
-        items: list[tuple[str, str]] = []
+        items: list[tuple[str, str, tuple]] = []
         for ctrl, _ in auto.WalkControl(lc):
             if ctrl.ControlType != auto.ControlType.ListItemControl:
                 continue
@@ -2302,59 +2305,56 @@ class Moment(WeixinWindow):
                 continue
             raw = ctrl.Name
             if raw:
-                items.append((raw, cls_name))
+                try:
+                    rid = tuple(ctrl.GetRuntimeId())
+                except Exception:
+                    rid = ()
+                items.append((raw, cls_name, rid))
         return items
 
     @PIM.guard
-    def get(self, count: int = 10, position="top") -> list[MomentItem]:
+    def get_moments(self, count: int = 10, position: str = "top") -> list[MomentItem]:
         """
-        获取指定条数的朋友圈动态列表。
+        获取朋友圈动态列表。
 
-        打开朋友圈独立窗口，从 mmui::TimeLineListView (sns_list) 中
-        遍历 ListItemControl 提取动态信息。
-        当可见条目不足时，通过 PageDown 键滚动加载更多内容，
-        直到收集到指定条数或连续多次滚动无新内容为止。
+        持续滚动采集直到收集满 count 条动态才返回，
+        如果朋友圈动态不足 count 条则返回全部。
 
         Args:
-            count:    要获取的动态条数，默认 10 条
+            count:    要获取的动态条数，默认 10 条，收集满后立即返回
             position: 起始位置
-                - "current": 从当前滚动位置开始采集（默认）
-                - "top":     先点击"刷新"回到顶部，再从头采集
+                - "top":     先点击"刷新"回到顶部，再从头采集（默认）
+                - "current": 从当前滚动位置开始采集
 
         Returns:
-            MomentItem 列表
+            MomentItem 列表，长度 <= count
         """
         self._open_sns_window()
 
         if position == "top":
-            # 点击"刷新"按钮回到顶部
             refresh_btn = self._win.ButtonControl(
                 ClassName="mmui::XTabBarItem",
                 Name="刷新",
             )
             if refresh_btn.Exists(maxSearchSeconds=2):
                 refresh_btn.Click(ratioX=_rand_ratio(), ratioY=_rand_ratio())
-                time.sleep(2)  # 等待刷新和回到顶部
+                time.sleep(2)
 
         lc = self._find_sns_list()
 
         moments: list[MomentItem] = []
-        seen_texts: set[str] = set()
-        max_scrolls = count * 3
-        no_new_count = 0
+        seen_keys: set[tuple] = set()  # (runtime_id, raw_text) 组合去重
 
-        for _ in range(max_scrolls):
-            if len(moments) >= count:
-                break
-
-            # 收集当前可见的动态
+        while len(moments) < count:
             new_found = False
-            for raw, cls_name in self._collect_moments(lc):
-                if raw in seen_texts:
+            for raw, cls_name, rid in self._collect_moments(lc):
+                key = (rid, raw) if rid else ((), raw)
+                if key in seen_keys:
                     continue
                 item = self._parse_moment_name(raw, cls_name)
                 if item:
-                    seen_texts.add(raw)
+                    item.runtime_id = rid
+                    seen_keys.add(key)
                     moments.append(item)
                     new_found = True
                 if len(moments) >= count:
@@ -2364,17 +2364,23 @@ class Moment(WeixinWindow):
                 break
 
             if not new_found:
-                no_new_count += 1
-                if no_new_count >= 5:
+                lc.SetFocus()
+                time.sleep(0.2)
+                lc.SendKeys("{PageDown}")
+                time.sleep(1)
+                found_after_scroll = False
+                for raw, _, rid in self._collect_moments(lc):
+                    key = (rid, raw) if rid else ((), raw)
+                    if key not in seen_keys:
+                        found_after_scroll = True
+                        break
+                if not found_after_scroll:
                     break
             else:
-                no_new_count = 0
-
-            # 滚动列表：先确保列表有焦点，再用 Down 键滚动
-            lc.SetFocus()
-            time.sleep(0.2)
-            lc.SendKeys("{PageDown}")
-            time.sleep(1)
+                lc.SetFocus()
+                time.sleep(0.2)
+                lc.SendKeys("{PageDown}")
+                time.sleep(0.5)
 
         return moments[:count]
 
@@ -3960,6 +3966,11 @@ class Session:
                 continue
             item = _parse_session_name(ctrl.Name, session=self)
             try:
+                rid = tuple(ctrl.GetRuntimeId())
+                item.runtime_id = rid
+            except Exception:
+                pass
+            try:
                 pattern = ctrl.GetSelectionItemPattern()
                 if pattern and pattern.IsSelected:
                     item.active = True
@@ -4075,22 +4086,14 @@ class Session:
         auto.WheelDown(cx, cy, abs(delta)) if direction == "down" else auto.WheelUp(cx, cy, abs(delta))
         time.sleep(0.3)
 
-    @staticmethod
-    def _session_key(s: SessionItem) -> tuple:
-        """会话的唯一标识，用 (name, last_msg, msg_time) 组合"""
-        return (s.name, s.last_msg, s.msg_time)
-
     def all(self, step: int = 5, max_scrolls: int = 500) -> list[SessionItem]:
         """
-        通过滚动获取完整的会话列表（支持重名会话）。
+        通过滚动获取完整的会话列表。
 
-        去重策略：通过相邻批次的重叠区域判断新会话。
-        每次按固定次数 Down 键滚动，将新一屏的会话列表与上一批末尾对比，
-        找到重叠位置后只追加重叠之后的新会话。
-        使用 (name, last_msg, msg_time) 组合作为会话标识，
-        以正确处理同名会话。
+        使用 RuntimeId 集合去重，精确识别新会话，
+        支持重名会话（不同会话的 RuntimeId 不同）。
 
-        step: 每次按 Down 键的次数（固定滚动幅度，不受窗口大小影响）
+        step: 每次按 Down 键的次数（固定滚动幅度）
         max_scrolls: 最大滚动轮次
 
         Returns:
@@ -4114,13 +4117,28 @@ class Session:
             lc.SendKeys("{Home}")
             time.sleep(0.3)
 
-        # 收集第一屏
         all_sessions: list[SessionItem] = []
-        prev_visible: list[SessionItem] = self.visible()
-        all_sessions.extend(prev_visible)
+        seen_rids: set[tuple] = set()
         no_new_count = 0
 
         for _ in range(max_scrolls):
+            curr_visible = self.visible()
+
+            # 用 RuntimeId 去重，按顺序追加新会话
+            new_found = False
+            for s in curr_visible:
+                if s.runtime_id and s.runtime_id not in seen_rids:
+                    seen_rids.add(s.runtime_id)
+                    all_sessions.append(s)
+                    new_found = True
+
+            if new_found:
+                no_new_count = 0
+            else:
+                no_new_count += 1
+                if no_new_count >= 3:
+                    break
+
             # 检查是否已滚动到底部
             sp = lc.GetScrollPattern()
             if sp:
@@ -4128,38 +4146,8 @@ class Session:
                 if v_percent >= 100 or v_percent < 0:
                     break
 
-            # 按固定次数 Down 键滚动
             lc.SendKeys("{Down}" * step)
-
-            curr_visible = self.visible()
-            if not curr_visible:
-                no_new_count += 1
-                if no_new_count >= 3:
-                    break
-                continue
-
-            # 找重叠位置：在 curr_visible 中找到 prev_visible 最后一个会话的位置
-            overlap_idx = -1
-            if prev_visible:
-                last_key = self._session_key(prev_visible[-1])
-                for i, s in enumerate(curr_visible):
-                    if self._session_key(s) == last_key:
-                        overlap_idx = i
-
-            if overlap_idx >= 0:
-                new_sessions = curr_visible[overlap_idx + 1:]
-            else:
-                new_sessions = curr_visible
-
-            if new_sessions:
-                all_sessions.extend(new_sessions)
-                no_new_count = 0
-            else:
-                no_new_count += 1
-                if no_new_count >= 3:
-                    break
-
-            prev_visible = curr_visible
+            time.sleep(0.1)
 
         return all_sessions
 
@@ -9791,7 +9779,7 @@ class SeparateChat(Chat, WeixinWindow):
         self._win = auto.WindowControl(
             ClassName=self.WINDOW_CLASS,
             Name=contact_name,
-            Depth=1
+            searchDepth=1
         )
         if not self._win.Exists(0, 0):
             raise RuntimeError(f"独立聊天窗口未找到: {contact_name}")
@@ -9956,7 +9944,7 @@ class Weixin(WeixinWindow):
         self._win: auto.WindowControl = auto.WindowControl(
             ClassName=self.WINDOW_CLASS,
             RegexName=self.WINDOW_REGEX,
-            Depth=1,
+            searchDepth=1
         )
 
         # 窗口功能
