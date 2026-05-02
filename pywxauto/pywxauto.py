@@ -936,13 +936,14 @@ class Message:
     def __init__(self, *, sender: str = "", sender_type: SenderType = SenderType.OTHER,
                  content: str = "", raw_name: str = "",
                  status: MessageStatus = MessageStatus.UNKNOWN,
-                 runtime_id: tuple = ()):
+                 runtime_id: tuple = (), bubble_x: int = 0):
         self.sender: str = sender
         self.sender_type: SenderType = sender_type
         self.content: str = content
         self.raw_name: str = raw_name
         self.status: MessageStatus = status
         self.runtime_id: tuple = runtime_id
+        self.bubble_x: int = bubble_x  # 气泡边缘的屏幕 x 坐标
         self.chat: object = None  # 关联的聊天窗口对象（Chat 或 SeparateChat）
 
     @property
@@ -985,6 +986,119 @@ class Message:
         status_tag = f", status={self.status.value}" if self.status != MessageStatus.UNKNOWN else ""
         return (f"{cls}(sender_type={self.sender_type.value}, "
                 f"sender={self.sender!r}, content={self.content!r}{status_tag})")
+
+    def _find_ctrl(self) -> "auto.Control | None":
+        """
+        通过 runtime_id 在消息列表中查找对应的控件。
+
+        Returns:
+            匹配的 ListItemControl，未找到返回 None
+        """
+        if not self.chat or not self.runtime_id:
+            return None
+        lc = self.chat._message_list
+        if not lc.Exists(maxSearchSeconds=2):
+            return None
+        for ctrl, _ in auto.WalkControl(lc):
+            if ctrl.ControlType != auto.ControlType.ListItemControl:
+                continue
+            try:
+                rid = tuple(ctrl.GetRuntimeId())
+            except Exception:
+                continue
+            if rid == self.runtime_id:
+                return ctrl
+        return None
+
+    def scroll_to_visible(self) -> bool:
+        """
+        将此消息滚动到聊天列表可见区域内。
+
+        先在当前可见区域查找控件，找不到则向上/向下滚动搜索。
+        找到后确保控件完全在列表可见范围内。
+
+        Returns:
+            True 成功滚动到可见，False 未找到控件
+        """
+        if not self.chat or not self.runtime_id:
+            return False
+
+        lc = self.chat._message_list
+        if not lc.Exists(maxSearchSeconds=2):
+            return False
+
+        # 先在当前可见区域查找
+        ctrl = self._find_ctrl()
+        if ctrl:
+            return self._ensure_visible(lc, ctrl)
+
+        # 向上滚动搜索
+        for _ in range(50):
+            lc.WheelUp(wheelTimes=5)
+            time.sleep(0.15)
+            ctrl = self._find_ctrl()
+            if ctrl:
+                return self._ensure_visible(lc, ctrl)
+
+        # 向上没找到，回到原位再向下搜索
+        for _ in range(50):
+            lc.WheelDown(wheelTimes=5)
+            time.sleep(0.15)
+        for _ in range(50):
+            lc.WheelDown(wheelTimes=5)
+            time.sleep(0.15)
+            ctrl = self._find_ctrl()
+            if ctrl:
+                return self._ensure_visible(lc, ctrl)
+
+        return False
+
+    @staticmethod
+    def _ensure_visible(lc, ctrl) -> bool:
+        """确保控件完全在列表可见区域内，必要时微调滚动"""
+        list_rect = lc.BoundingRectangle
+        for _ in range(10):
+            ctrl_rect = ctrl.BoundingRectangle
+            if ctrl_rect.top >= list_rect.top and ctrl_rect.bottom <= list_rect.bottom - 10:
+                return True
+            if ctrl_rect.top < list_rect.top:
+                lc.WheelUp(wheelTimes=2)
+            else:
+                lc.WheelDown(wheelTimes=2)
+            time.sleep(0.2)
+        return True
+
+    def hover(self) -> bool:
+        """
+        将鼠标悬浮到此消息的气泡上方。
+
+        先确保消息在可见区域，然后通过 runtime_id 定位控件，
+        利用 bubble_x（气泡边缘屏幕 x 坐标）和控件高度 1/2 计算悬浮位置。
+
+        Returns:
+            True 成功悬浮，False 未找到控件
+        """
+        if not self.scroll_to_visible():
+            return False
+
+        target = self._find_ctrl()
+        if not target:
+            return False
+
+        rect = target.BoundingRectangle
+        cy = (rect.top + rect.bottom) // 2
+
+        if self.bubble_x > 0:
+            if self.sender_type == SenderType.SELF:
+                cx = self.bubble_x - 30
+            else:
+                cx = self.bubble_x + 30
+        else:
+            cx = (rect.left + rect.right) // 2
+
+        auto.SetCursorPos(cx, cy)
+        time.sleep(0.3)
+        return True
 
 
 class TextMessage(Message):
@@ -5514,7 +5628,7 @@ class Chat:
 
         # 倒序查找自己发的
         for ctrl in reversed(candidates):
-            sender, sender_type = self._detect_sender(
+            sender, sender_type, _ = self._detect_sender(
                 ctrl, list_center_x, self.current_name or "对方", hwnd,
             )
             if sender_type == SenderType.SELF:
@@ -6783,11 +6897,13 @@ class Chat:
         for ctrl, _ in auto.WalkControl(lc):
             if ctrl.ControlType != auto.ControlType.ListItemControl:
                 continue
-            if not ctrl.Name:
-                continue
 
             ui_cls = ctrl.ClassName or ""
-            raw_name = ctrl.Name
+            raw_name = ctrl.Name or ""
+
+            # Name 为空时，仅允许已知的非文本类型通过（如图片、视频等 Name 可能为空）
+            if not raw_name and ui_cls not in cls_map:
+                continue
 
             # 提取 RuntimeId 作为控件唯一标识
             try:
@@ -6822,18 +6938,19 @@ class Chat:
 
             # 判断发送者：优先从缓存读取，避免重复截图
             if sender_cache is not None and rid and rid in sender_cache:
-                sender, sender_type = sender_cache[rid]
+                sender, sender_type, bubble_x = sender_cache[rid]
             else:
-                sender, sender_type = self._detect_sender(
+                sender, sender_type, bubble_x = self._detect_sender(
                     ctrl, list_center_x, chat_name, hwnd,
                 )
                 # 写入缓存
                 if sender_cache is not None and rid:
-                    sender_cache[rid] = (sender, sender_type)
+                    sender_cache[rid] = (sender, sender_type, bubble_x)
 
             # 构造具体消息对象
             msg = self._build_message(msg_cls, raw_name, sender, sender_type,
                                       runtime_id=rid)
+            msg.bubble_x = bubble_x
             msg.chat = self
             messages.append(msg)
         return messages
@@ -6869,8 +6986,8 @@ class Chat:
         # （公众号文章、小程序卡片等）
         return CardMessage
 
-    # 动画表情 Name 格式: "动画表情 [xxx]"
-    _ANIMATED_EMOJI_RE = re.compile(r"^动画表情 \[.+\]$")
+    # 动画表情 Name 格式: "动画表情" 或 "动画表情 [xxx]"
+    _ANIMATED_EMOJI_RE = re.compile(r"^动画表情(\s+\[.+\])?$")
 
     @staticmethod
     def _classify_bubble_refer(name: str) -> type[Message]:
@@ -6878,9 +6995,15 @@ class Chat:
         对 mmui::ChatBubbleReferItemView 做二次分类。
 
         该 ClassName 复用于多种消息类型：
+        - 图片: Name == "图片"
+        - 视频: Name == "视频"
         - 动画表情: Name 匹配 "动画表情 [xxx]"，如 "动画表情 [嗅嗅]"
         - 引用消息: 其他情况
         """
+        if name == "图片":
+            return ImageMessage
+        if name == "视频":
+            return VideoMessage
         if Chat._ANIMATED_EMOJI_RE.match(name):
             return EmotionMessage
         return QuoteMessage
@@ -6889,48 +7012,33 @@ class Chat:
     def _detect_sender(
         ctrl, list_center_x: int, chat_name: str,
         hwnd: int = 0,
-    ) -> tuple[str, SenderType]:
+    ) -> tuple[str, SenderType, int]:
         """
-        判断消息发送者和来源类型。
+        判断消息发送者、来源类型，并检测气泡边缘的屏幕 x 坐标。
 
-        策略1: 通过头像控件 (mmui::ContactHeadView) 位置判断
-        策略2: 截图后从左右两侧向内扫描非白色像素，判断头像在哪侧
-        策略3: 通过气泡颜色（绿色/灰色）判断
+        策略1: 截图后从左右两侧向内扫描非白色像素，判断头像在哪侧
+        策略2: 通过气泡颜色（绿色/灰色）判断
+
+        Returns:
+            (sender, sender_type, bubble_x)
+            bubble_x 为气泡边缘的屏幕 x 坐标，0 表示未检测到
         """
-        # 策略1: 头像控件检测
-        head = ctrl.ButtonControl(
-            ClassName="mmui::ContactHeadView",
-            searchDepth=8,
-        )
-        if head.Exists(0, 0):
-            head_rect = head.BoundingRectangle
-            head_center_x = (head_rect.left + head_rect.right) // 2
-            if head_center_x > list_center_x:
-                return "我", SenderType.SELF
-            return chat_name, SenderType.FRIEND
-
-        # 策略2 + 策略3: 截图像素分析
         return Chat._detect_sender_by_pixel(ctrl, chat_name, hwnd)
 
     @staticmethod
     def _detect_sender_by_pixel(
         ctrl, chat_name: str, hwnd: int = 0,
-    ) -> tuple[str, SenderType]:
+    ) -> tuple[str, SenderType, int]:
         """
-        通过截图像素分析判断消息发送者。
+        通过截图像素分析判断消息发送者，并检测气泡位置。
 
-        先尝试策略2（边缘扫描），失败再降级到策略3（气泡颜色）。
+        先尝试边缘扫描，失败再降级到气泡颜色。
+        确定发送者后，在 h/2 处扫描气泡边缘：
+        - 对方消息：从左侧扫描，找到连续非白色像素即为气泡左边缘
+        - 自己消息：从右侧扫描，找到连续非白色像素即为气泡右边缘
 
-        策略2 - 边缘扫描:
-        在控件截图上 1/3 高度处（头像所在区域），分别从左侧和右侧
-        向内扫描，找到第一个非白色像素的 x 坐标。
-        非白色像素离左边近 → 头像在左 → 对方发的消息
-        非白色像素离右边近 → 头像在右 → 自己发的消息
-
-        策略3 - 气泡颜色:
-        采样中间几行像素，统计绿色和灰色像素数量：
-        - 绿色气泡 → 自己发的消息
-        - 灰色/白色气泡 → 对方发的消息
+        Returns:
+            (sender, sender_type, bubble_x)
         """
         try:
             if hwnd:
@@ -6948,17 +7056,81 @@ class Chat:
                         except OSError:
                             pass
         except Exception:
-            return "", SenderType.OTHER
+            return "", SenderType.OTHER, 0
 
         w, h = img.size
 
-        # ---- 策略2: 边缘扫描 ----
+        # ---- 策略1: 边缘扫描 ----
         result = Chat._detect_sender_by_edge_scan(img, w, h, chat_name)
-        if result is not None:
-            return result
+        if result is None:
+            # ---- 策略2: 气泡颜色 ----
+            result = Chat._detect_sender_by_bubble_color(img, w, h, chat_name)
 
-        # ---- 策略3: 气泡颜色 ----
-        return Chat._detect_sender_by_bubble_color(img, w, h, chat_name)
+        sender, sender_type = result
+
+        # ---- 检测气泡边缘位置 ----
+        bubble_x = Chat._detect_bubble_x(img, w, h, sender_type)
+
+        # 转换为屏幕坐标
+        if bubble_x > 0:
+            try:
+                bubble_x += ctrl.BoundingRectangle.left
+            except Exception:
+                pass
+
+        return sender, sender_type, bubble_x
+
+    @staticmethod
+    def _detect_bubble_x(
+        img: "Image.Image", w: int, h: int,
+        sender_type: "SenderType",
+    ) -> int:
+        """
+        检测气泡边缘的 x 坐标（相对于控件截图）。
+
+        在 h/2 高度处扫描：
+        - 对方消息（FRIEND）：从左侧向右扫描，跳过头像区域（前 15% 宽度），
+          找到连续 3 个非白色像素即为气泡左边缘
+        - 自己消息（SELF）：从右侧向左扫描，跳过头像区域（后 15% 宽度），
+          找到连续 3 个非白色像素即为气泡右边缘
+
+        Returns:
+            气泡边缘的 x 坐标（相对于控件），0 表示未检测到
+        """
+        scan_y = h // 2
+        if scan_y >= h:
+            return 0
+
+        consecutive_threshold = 3  # 连续非白色像素数
+        skip_ratio = 0.15  # 跳过头像区域的比例
+
+        if sender_type == SenderType.FRIEND:
+            # 对方消息：从左侧扫描，跳过头像
+            start_x = int(w * skip_ratio)
+            count = 0
+            for x in range(start_x, w):
+                r, g, b = img.getpixel((x, scan_y))[:3]
+                if Chat._is_non_white(r, g, b):
+                    count += 1
+                    if count >= consecutive_threshold:
+                        return x - consecutive_threshold + 1
+                else:
+                    count = 0
+
+        elif sender_type == SenderType.SELF:
+            # 自己消息：从右侧扫描，跳过头像
+            start_x = int(w * (1 - skip_ratio))
+            count = 0
+            for x in range(start_x, -1, -1):
+                r, g, b = img.getpixel((x, scan_y))[:3]
+                if Chat._is_non_white(r, g, b):
+                    count += 1
+                    if count >= consecutive_threshold:
+                        return x + consecutive_threshold - 1
+                else:
+                    count = 0
+
+        return 0
 
     @staticmethod
     def _is_non_white(r: int, g: int, b: int) -> bool:
@@ -11587,9 +11759,9 @@ class Weixin(WeixinWindow):
         threads: dict[str, threading.Thread] = {}
 
         def _watch_chat(chat: SeparateChat, name: str) -> None:
-            # 已知消息的 RuntimeId 集合
+            # 已知消息的 RuntimeId 集合（仅保留当前可见的）
             known_rids: set[tuple] = set()
-            # 发送者缓存：{runtime_id: (sender, sender_type)}
+            # 发送者缓存：{runtime_id: (sender, sender_type, bubble_x)}
             sender_cache: dict[tuple, tuple] = {}
             first_scan = True
 
@@ -11608,7 +11780,7 @@ class Weixin(WeixinWindow):
                         break
                     continue
 
-                # 提取当前可见消息的 RuntimeId 集合
+                # 当前可见消息的 RuntimeId 集合
                 curr_rids = {msg.runtime_id for msg in visible if msg.runtime_id}
 
                 if first_scan:
@@ -11618,13 +11790,13 @@ class Weixin(WeixinWindow):
                         break
                     continue
 
-                # 集合差集：找出新增的 RuntimeId
+                # 新增的 RuntimeId
                 new_rids = curr_rids - known_rids
 
                 if not new_rids:
-                    # 更新已知集合：移除已滚出视口的旧 RuntimeId，防止无限膨胀
-                    known_rids = (known_rids & curr_rids) | curr_rids
-                    # 清理 sender_cache 中已滚出视口的条目
+                    # 移除已滚出可见区域的，只保留当前可见的
+                    known_rids = curr_rids
+                    # sender_cache 同步清理
                     for rid in list(sender_cache):
                         if rid not in curr_rids:
                             del sender_cache[rid]
@@ -11637,8 +11809,8 @@ class Weixin(WeixinWindow):
                     if msg.runtime_id and msg.runtime_id in new_rids:
                         msg_queue.put((chat, msg))
 
-                # 更新已知集合
-                known_rids |= new_rids
+                # 只保留当前可见的 + 新增的
+                known_rids = curr_rids
 
                 if stop_event.wait(interval):
                     break
