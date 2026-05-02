@@ -2065,17 +2065,34 @@ class SessionItem:
 class MomentItem:
     """朋友圈动态条目"""
 
-    def __init__(self, *, type="", sender="", content="",
+    def __init__(self, *,  moment: "Moment", runtime_id: tuple, 
+                 type="", sender="", content="",
                  raw_text="", timestamp="", image_count=0,
-                 cell_type="", runtime_id: tuple = ()):
-        self.type = type              # 动态类型
-        self.sender = sender          # 发送者昵称
-        self.content = content        # 文本内容
-        self.raw_text = raw_text      # 原始文本（控件 Name 属性）
-        self.timestamp = timestamp    # 时间文本（如 "8小时前"）
-        self.image_count = image_count  # 图片数量
-        self.cell_type = cell_type    # 原始 Cell ClassName
-        self.runtime_id: tuple = runtime_id  # UI Automation RuntimeId
+                 cell_type=""):
+        self.moment = moment
+        self.runtime_id = runtime_id
+        self.type = type
+        self.sender = sender
+        self.content = content
+        self.raw_text = raw_text
+        self.timestamp = timestamp
+        self.image_count = image_count
+        self.cell_type = cell_type
+
+    def like(self) -> bool:
+        """点赞此条动态"""
+        return self.moment.like(self)
+
+    def comment(self, content: str) -> bool:
+        """评论此条动态"""
+        return self.moment.comment(self, content)
+
+    def scroll_to_visible(self) -> bool:
+        """将此条动态滚动到可见区域"""
+        ctrl = self.moment._find_moment_cell(self)
+        if not ctrl:
+            raise RuntimeError(f"未找到朋友圈动态: {self.sender}")
+        return self.moment._scroll_cell_into_view(ctrl)
 
     def __repr__(self):
         return (f"MomentItem(type={self.type!r}, sender={self.sender!r}, "
@@ -2186,8 +2203,7 @@ class Moment(WeixinWindow):
             raise RuntimeError("未找到朋友圈列表控件 (sns_list)")
         return lc
 
-    @staticmethod
-    def _parse_moment_name(raw_name: str, cls_name: str = "") -> MomentItem | None:
+    def _parse_moment_name(self, runtime_id: tuple, raw_name: str, cls_name: str = "") -> MomentItem | None:
         """
         解析单条朋友圈动态 ListItem 的 Name 属性。
 
@@ -2280,6 +2296,8 @@ class Moment(WeixinWindow):
             moment_type = "其他"
 
         return MomentItem(
+            moment=self, 
+            runtime_id=runtime_id,
             type=moment_type,
             sender=sender,
             content=content,
@@ -2351,9 +2369,8 @@ class Moment(WeixinWindow):
                 key = (rid, raw) if rid else ((), raw)
                 if key in seen_keys:
                     continue
-                item = self._parse_moment_name(raw, cls_name)
+                item = self._parse_moment_name(rid, raw, cls_name)
                 if item:
-                    item.runtime_id = rid
                     seen_keys.add(key)
                     moments.append(item)
                     new_found = True
@@ -2434,9 +2451,8 @@ class Moment(WeixinWindow):
                 key = (rid, raw) if rid else ((), raw)
                 if key in seen_keys:
                     continue
-                item = self._parse_moment_name(raw, cls_name)
+                item = self._parse_moment_name(rid, raw, cls_name)
                 if item:
-                    item.runtime_id = rid
                     seen_keys.add(key)
                     yield item
                     yielded += 1
