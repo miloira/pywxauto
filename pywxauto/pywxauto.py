@@ -2384,6 +2384,253 @@ class Moment(WeixinWindow):
 
         return moments[:count]
 
+    def iter_moments(self, count: int = 10, position: str = "top"):
+        """
+        逐条获取朋友圈动态（生成器）。
+
+        与 get_moments 相同的采集逻辑，但每获取到一条新动态立即 yield，
+        适合边获取边操作的场景（如逐条点赞）。
+
+        注意：不使用 @PIM.guard 装饰器（装饰器与生成器不兼容），
+        在首次迭代时手动执行一次 guard 等待。
+
+        Args:
+            count:    要获取的动态条数，默认 10 条
+            position: "top" 从顶部开始，"current" 从当前位置
+
+        Yields:
+            MomentItem 实例
+
+        用法::
+
+            for item in wx.moment.iter_moments(10):
+                print(item)
+                wx.moment.like(item)
+        """
+        # 手动执行 guard 等待（替代 @PIM.guard）
+        if PIM._running and PIM.idle_wait > 0:
+            PIM.wait_for_idle(PIM.idle_wait)
+
+        self._open_sns_window()
+
+        if position == "top":
+            refresh_btn = self._win.ButtonControl(
+                ClassName="mmui::XTabBarItem",
+                Name="刷新",
+            )
+            if refresh_btn.Exists(maxSearchSeconds=2):
+                refresh_btn.Click(ratioX=_rand_ratio(), ratioY=_rand_ratio())
+                time.sleep(2)
+
+        lc = self._find_sns_list()
+
+        yielded = 0
+        seen_keys: set[tuple] = set()
+
+        while yielded < count:
+            new_found = False
+            for raw, cls_name, rid in self._collect_moments(lc):
+                key = (rid, raw) if rid else ((), raw)
+                if key in seen_keys:
+                    continue
+                item = self._parse_moment_name(raw, cls_name)
+                if item:
+                    item.runtime_id = rid
+                    seen_keys.add(key)
+                    yield item
+                    yielded += 1
+                    new_found = True
+                if yielded >= count:
+                    return
+
+            if not new_found:
+                lc.SetFocus()
+                time.sleep(0.2)
+                lc.SendKeys("{PageDown}")
+                time.sleep(1)
+                found_after_scroll = False
+                for raw, _, rid in self._collect_moments(lc):
+                    key = (rid, raw) if rid else ((), raw)
+                    if key not in seen_keys:
+                        found_after_scroll = True
+                        break
+                if not found_after_scroll:
+                    return
+            else:
+                lc.SetFocus()
+                time.sleep(0.2)
+                lc.SendKeys("{PageDown}")
+                time.sleep(0.5)
+
+    def _find_moment_cell(self, item: MomentItem) -> auto.Control | None:
+        """
+        在朋友圈列表中查找指定动态的控件。
+
+        通过 raw_text（Name 属性）匹配，使用 SubName 模糊匹配
+        （取 sender 作为子串，避免完整 Name 因时间戳变化而匹配失败）。
+        """
+        lc = self._find_sns_list()
+        sender = item.sender
+        for ctrl, _ in auto.WalkControl(lc):
+            if ctrl.ControlType != auto.ControlType.ListItemControl:
+                continue
+            cls_name = ctrl.ClassName or ""
+            if not cls_name.startswith(self.TIMELINE_CELL_PREFIX):
+                continue
+            if cls_name in self.SKIP_CELL_CLASSES:
+                continue
+            if ctrl.Name and sender in ctrl.Name and item.content[:20] in ctrl.Name:
+                return ctrl
+        return None
+
+    def _scroll_cell_into_view(self, ctrl) -> bool:
+        """
+        将朋友圈动态控件滚动到窗口可见区域内。
+
+        通过比较控件底部坐标和列表底部坐标判断是否可见，
+        不可见则用鼠标滚轮向下滚动。
+        """
+        lc = self._find_sns_list()
+        list_rect = lc.BoundingRectangle
+        for _ in range(30):
+            ctrl_rect = ctrl.BoundingRectangle
+            if ctrl_rect.bottom <= list_rect.bottom - 10:
+                return True
+            lc.WheelDown(wheelTimes=3)
+            time.sleep(0.3)
+        return False
+
+    def _click_action_button(self, ctrl, button_name: str) -> bool:
+        """
+        点击朋友圈动态的操作按钮（赞/评论）。
+
+        微信朋友圈的操作栏需要鼠标悬停在动态右下角区域才会出现。
+        从动态的右下角开始，逐步向左移动鼠标并点击，
+        直到出现目标按钮（"赞"/"取消"/"评论"）。
+
+        Args:
+            ctrl:        动态的 ListItemControl
+            button_name: 要点击的按钮名称（"赞" 或 "评论"）
+
+        Returns:
+            True 成功点击
+        """
+        distance = 30
+        max_distance = 200
+        while distance < max_distance:
+            ctrl_rect = ctrl.BoundingRectangle
+            click_x = ctrl_rect.right - distance
+            click_y = ctrl_rect.bottom - 5
+            auto.MoveTo(click_x, click_y)
+            time.sleep(0.1)
+            auto.Click(click_x, click_y)
+            time.sleep(0.3)
+
+            # 检查目标按钮是否出现
+            btn = self._win.TextControl(
+                Name=button_name, ClassName="mmui::XTextView",
+            )
+            if btn.Exists(0, 0):
+                btn.Click()
+                time.sleep(0.3)
+                return True
+
+            # 已点赞的情况：出现"取消"按钮
+            if button_name == "赞":
+                cancel_btn = self._win.ButtonControl(
+                    Name="取消", ClassName="mmui::XButton",
+                )
+                if cancel_btn.Exists(0, 0):
+                    # 已经点过赞了，关闭操作栏
+                    cancel_btn.Click()
+                    time.sleep(0.2)
+                    return True
+
+            distance += 20
+
+        return False
+
+    @PIM.guard
+    def like(self, item: MomentItem) -> bool:
+        """
+        对指定朋友圈动态点赞。
+
+        流程：
+        1. 打开朋友圈窗口
+        2. 在列表中查找目标动态控件
+        3. 将动态滚动到可见区域
+        4. 悬停在动态右下角触发操作栏
+        5. 点击"赞"按钮
+
+        Args:
+            item: 要点赞的 MomentItem（从 get_moments 获取）
+
+        Returns:
+            True 点赞成功（或已点赞）
+        """
+        self._open_sns_window()
+        ctrl = self._find_moment_cell(item)
+        if not ctrl:
+            raise RuntimeError(f"未找到朋友圈动态: {item.sender}")
+
+        self._scroll_cell_into_view(ctrl)
+        return self._click_action_button(ctrl, "赞")
+
+    @PIM.guard
+    def comment(self, item: MomentItem, content: str) -> bool:
+        """
+        对指定朋友圈动态评论。
+
+        流程：
+        1. 打开朋友圈窗口
+        2. 在列表中查找目标动态控件
+        3. 将动态滚动到可见区域
+        4. 悬停在动态右下角触发操作栏
+        5. 点击"评论"按钮
+        6. 输入评论内容
+        7. 找到评论区（mmui::TimelineCommentCell）控件，
+           点击其右下角偏移位置触发发送按钮
+
+        Args:
+            item:    要评论的 MomentItem
+            content: 评论内容
+
+        Returns:
+            True 评论成功
+        """
+        if not content or not content.strip():
+            raise ValueError("评论内容不能为空")
+
+        self._open_sns_window()
+        ctrl = self._find_moment_cell(item)
+        if not ctrl:
+            raise RuntimeError(f"未找到朋友圈动态: {item.sender}")
+
+        self._scroll_cell_into_view(ctrl)
+
+        if not self._click_action_button(ctrl, "评论"):
+            raise RuntimeError("未能打开评论输入框")
+
+        # 输入评论内容
+        paste(content)
+        time.sleep(0.5)
+
+        # 当前动态的下一个兄弟控件就是其评论区
+        comment_cell = ctrl.GetNextSiblingControl()
+        if (not comment_cell
+                or comment_cell.ClassName != "mmui::TimelineCommentCell"):
+            raise RuntimeError("未找到当前动态的评论区控件")
+
+        # 发送按钮在评论区右下角，通过坐标偏移点击
+        rect = comment_cell.BoundingRectangle
+        send_x = rect.right - 70
+        send_y = rect.bottom - 50
+        auto.MoveTo(send_x, send_y)
+        time.sleep(0.1)
+        auto.Click(send_x, send_y)
+        time.sleep(0.5)
+        return True
+
     # ---- 发布相关控件信息 ----
     # 发布面板: GroupControl, ClassName="mmui::SnsPublishPanel",
     #           AutomationId="SnsPublishPanel"
