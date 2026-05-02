@@ -5067,7 +5067,6 @@ class Session:
         chat_type = chat_type or ["联系人", "群聊", "功能"]
         edit = self._get_search_edit()
         edit.Click(ratioX=_rand_ratio(), ratioY=_rand_ratio())
-        time.sleep(0.3)
         edit.GetValuePattern().SetValue(keyword)
         time.sleep(0.5)
 
@@ -5487,7 +5486,8 @@ class Chat:
         Chat: 激活微信主窗口
         SeparateChat: 子类覆盖此方法，激活独立窗口
         """
-        self._activate_window()
+        if self.wx:
+            self.wx.activate()
 
     def __str__(self) -> str:
         try:
@@ -10623,6 +10623,13 @@ class Weixin(WeixinWindow):
 
     WINDOW_CLASS = "mmui::MainWindow"
     WINDOW_REGEX = "微信|Weixin"
+    SHORTCUTS = {
+        "发送消息": "Enter",
+        "语音输入文字": "Ctrl+Win",
+        "截图": "Alt+A",
+        "锁定": "Ctrl+L",
+        "显示窗口": "Ctrl+Alt+W",
+    }
 
     def __init__(self, install_path: Optional[str] = None, wxocr_path: Optional[str] = None,
                  ocr_engine: str = "wcocr", idle_wait: float = 0, lock_input: bool = False):
@@ -10643,19 +10650,13 @@ class Weixin(WeixinWindow):
         if idle_wait > 0:
             PIM(idle_wait=idle_wait, lock_input=lock_input)
             PIM.start()
+
         # 事件处理器 (pyee EventEmitter)
         self._ee = EventEmitter()
-        # 微信全局快捷键映射：名称 -> 按键组合
-        self._shortcuts = {
-            "发送消息": "Enter",
-            "语音输入文字": "Ctrl+Win",
-            "截图": "Alt+A",
-            "锁定": "Ctrl+L",
-            "显示窗口": "Ctrl+Alt+W",
-        }
+
+        # 选择OCR引擎
         if ocr_engine not in ("wcocr", "rapidocr"):
             raise ValueError(f"ocr_engine 参数必须为 'wcocr' 或 'rapidocr'，当前: {ocr_engine!r}")
-
         self._ocr_engine = ocr_engine
 
         # 微信安装路径
@@ -10704,11 +10705,6 @@ class Weixin(WeixinWindow):
         return result
 
     @staticmethod
-    def wakeup_window() -> None:
-        """按下ctrl+alt+w唤醒微信窗口"""
-        send_shortcut("Ctrl+Alt+W")
-
-    @staticmethod
     def _is_process_running(name: str) -> bool:
         output = subprocess.check_output(
             ["tasklist", "/FI", f"IMAGENAME eq {name}", "/NH"],
@@ -10733,7 +10729,7 @@ class Weixin(WeixinWindow):
             return
 
         # 窗口不存在，尝试用快捷键唤醒
-        Weixin.wakeup_window()
+        Weixin.shortcut("显示窗口")
 
         # 检测微信窗口是否存在
         if Weixin.is_exists_window(timeout=3, interval=0.1):
@@ -11265,11 +11261,12 @@ class Weixin(WeixinWindow):
         """锁定微信（Ctrl+L）"""
         self.shortcut("锁定")
 
-    def shortcut(self, name: str) -> None:
+    @staticmethod
+    def shortcut(name: str) -> None:
         """
         通过快捷键名称执行对应的键盘快捷键。
 
-        支持的快捷键名称（见 self._shortcuts）：
+        支持的快捷键名称（见 Weixin.SHORTCUTS）：
         - "发送消息":     Enter
         - "语音输入文字": Ctrl+Win
         - "截图":         Alt+A
@@ -11284,7 +11281,7 @@ class Weixin(WeixinWindow):
         Raises:
             ValueError: 名称未注册且无法解析为按键组合时抛出
         """
-        combo = self._shortcuts.get(name, name)
+        combo = Weixin.SHORTCUTS.get(name, name)
         send_shortcut(combo)
 
     def wakeup(self) -> None:
@@ -11648,7 +11645,7 @@ class Weixin(WeixinWindow):
             raise ValueError(
                 "未注册任何事件处理器，请使用 @wx.on(Event) 装饰器注册"
             )
-        if not hasattr(self, '_listeners') or not self._chat_listeners:
+        if not hasattr(self, '_chat_listeners') or not self._chat_listeners:
             raise RuntimeError("未注册任何监听，请先调用 add_chat_listen")
 
         self._stop_event = threading.Event()
