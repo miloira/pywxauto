@@ -657,7 +657,7 @@ def copy_files(file_paths) -> None:
     set_clipboard(win32con.CF_HDROP, header + payload)
 
 
-def paste(content, interval=0) -> None:
+def paste(content) -> None:
     saved = save_clipboard()
     try:
         if isinstance(content, str):
@@ -666,10 +666,7 @@ def paste(content, interval=0) -> None:
             copy_files(content)
         else:
             raise TypeError(f"Not support type: {type(content)}")
-
-        time.sleep(interval)
         simulate_paste()
-        time.sleep(0.3)
     finally:
         restore_clipboard(saved)
 
@@ -3253,78 +3250,6 @@ class FriendCircle(WeixinWindow):
 
         raise RuntimeError("发布超时，发布面板未关闭")
 
-    @PIM.guard
-    def publish_text(self, content: str) -> bool:
-        """
-        发布纯文本朋友圈。
-
-        流程:
-        1. 打开朋友圈独立窗口
-        2. 长按工具栏"发表"按钮 3 秒，进入纯文本发布模式
-        3. 在文本输入框中输入内容
-        4. 长按"发表"按钮 3 秒确认发布
-        5. 等待发布完成
-
-        Args:
-            content: 要发布的文本内容，不能为空
-
-        Returns:
-            True 发布成功
-
-        Raises:
-            ValueError: content 为空时抛出
-            RuntimeError: 发布过程中出现异常时抛出
-        """
-        if not content or not content.strip():
-            raise ValueError("发布内容不能为空")
-
-        # 1. 打开朋友圈窗口
-        self._open_sns_window()
-
-        # 2. 长按"发表"按钮 3 秒，进入纯文本发布模式
-        panel = self._open_publish_panel(text_only=True)
-        time.sleep(0.5)
-
-        # 3. 找到文本输入框并输入内容
-        edit = self._find_publish_input(panel)
-        edit.GetValuePattern().SetValue(content)
-        time.sleep(0.5)
-
-        # 4. 点击"发表"按钮
-        publish_btn = self._find_publish_button(panel)
-        publish_btn.Click(ratioX=_rand_ratio(), ratioY=_rand_ratio())
-
-        # 5. 等待发布面板消失（表示发布成功）
-        for _ in range(30):
-            if not panel.Exists(maxSearchSeconds=1):
-                logger.info("朋友圈文本发布成功")
-                return True
-            time.sleep(1)
-
-        raise RuntimeError("发布超时，发布面板未关闭")
-
-    @PIM.guard
-    def cancel_publish(self) -> None:
-        """
-        取消当前发布操作。
-
-        如果发布面板已打开，点击"取消"按钮关闭面板。
-        """
-        self._open_sns_window()
-        panel = self._win.GroupControl(
-            ClassName=self.PUBLISH_PANEL_CLASS,
-            AutomationId=self.PUBLISH_PANEL_ID,
-        )
-        if not panel.Exists(maxSearchSeconds=1):
-            return  # 面板未打开，无需取消
-
-        cancel_btn = self._find_cancel_button(panel)
-        cancel_btn.Click(ratioX=_rand_ratio(), ratioY=_rand_ratio())
-        time.sleep(0.5)
-
-    # ---- 工具栏按钮名称 ----
-    REFRESH_BTN_NAME = "刷新"
-
     def _find_toolbar_button(self, name: str) -> auto.ButtonControl:
         """
         在朋友圈工具栏中查找指定名称的按钮。
@@ -3365,7 +3290,7 @@ class FriendCircle(WeixinWindow):
         点击工具栏"刷新"按钮，回到列表顶部并加载最新动态。
         """
         self._open_sns_window()
-        btn = self._find_toolbar_button(self.REFRESH_BTN_NAME)
+        btn = self._find_toolbar_button("刷新")
         btn.Click(ratioX=_rand_ratio(), ratioY=_rand_ratio())
         time.sleep(2)
 
@@ -11321,6 +11246,14 @@ class Weixin(WeixinWindow):
     def comment_moment(self, moment: "Moment", content: str) -> bool:
         """对指定动态评论"""
         return self.friend_circle.comment(moment, content)
+
+    def refresh_friend_circle(self) -> None:
+        """刷新朋友圈，回到列表顶部并加载最新动态"""
+        self.friend_circle.refresh()
+
+    def close_friend_circle(self) -> None:
+        """关闭朋友圈窗口"""
+        self.friend_circle.close()
 
     def ocr(self, image: bytes | str) -> dict:
         """
