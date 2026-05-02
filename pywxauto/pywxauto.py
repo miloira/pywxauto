@@ -10668,8 +10668,6 @@ class Weixin(WeixinWindow):
             }
         return data
 
-    # ---- 事件处理机制 (pyee) ----
-
     def _register_handler(self, events: "Event | list[Event] | None",
                          func: callable, once: bool = False) -> callable:
         """内部方法：注册事件处理器到 pyee EventEmitter"""
