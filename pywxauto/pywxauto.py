@@ -2083,14 +2083,65 @@ class Moment:
         """
         点赞此条动态。
 
-        流程：打开朋友圈 → 查找控件 → 滚动到可见 → 触发操作栏 → 点击"赞"
+        如果已点赞则不重复操作，返回 True。
         """
         self.friend_circle._open_sns_window()
         ctrl = self._find_cell()
         if not ctrl:
             raise RuntimeError(f"未找到朋友圈动态: {self.sender}")
         self._scroll_into_view(ctrl)
-        return self._click_action_button(ctrl, "赞")
+
+        win = self.friend_circle._win
+        if not self._open_action_bar(ctrl):
+            return False
+
+        # 已点赞时显示"取消"，未点赞时显示"赞"
+        # 先检查是否已点赞（"取消"按钮），避免重复点赞
+        for cls in ("mmui::XTextView", "mmui::XButton"):
+            cancel_btn = win.Control(Name="取消", ClassName=cls)
+            if cancel_btn.Exists(0, 0):
+                # 已点赞，关闭操作栏
+                auto.SendKeys("{Esc}")
+                time.sleep(0.2)
+                return True
+
+        # 未点赞，点击"赞"
+        btn = win.TextControl(Name="赞", ClassName="mmui::XTextView")
+        if btn.Exists(0, 0):
+            btn.Click()
+            time.sleep(0.3)
+            return True
+
+        return False
+
+    def unlike(self) -> bool:
+        """
+        取消点赞此条动态。
+
+        如果未点赞则不操作，返回 True。
+        """
+        self.friend_circle._open_sns_window()
+        ctrl = self._find_cell()
+        if not ctrl:
+            raise RuntimeError(f"未找到朋友圈动态: {self.sender}")
+        self._scroll_into_view(ctrl)
+
+        win = self.friend_circle._win
+        if not self._open_action_bar(ctrl):
+            return False
+
+        # 检查是否已点赞（"取消"按钮）
+        for cls in ("mmui::XTextView", "mmui::XButton"):
+            cancel_btn = win.Control(Name="取消", ClassName=cls)
+            if cancel_btn.Exists(0, 0):
+                cancel_btn.Click()
+                time.sleep(0.3)
+                return True
+
+        # 未点赞，关闭操作栏
+        auto.SendKeys("{Esc}")
+        time.sleep(0.2)
+        return True
 
     def comment(self, content: str) -> bool:
         """
@@ -2166,8 +2217,12 @@ class Moment:
             time.sleep(0.3)
         return False
 
-    def _click_action_button(self, ctrl, button_name: str) -> bool:
-        """从动态右下角逐步向左点击，触发操作栏后点击目标按钮"""
+    def _open_action_bar(self, ctrl) -> bool:
+        """
+        触发朋友圈动态的操作栏（赞/评论按钮）。
+
+        从动态右下角逐步向左移动鼠标并点击，直到操作栏出现。
+        """
         win = self.friend_circle._win
         distance = 30
         while distance < 200:
@@ -2177,20 +2232,27 @@ class Moment:
             auto.Click(ctrl_rect.right - distance, ctrl_rect.bottom - 5)
             time.sleep(0.3)
 
-            btn = win.TextControl(Name=button_name, ClassName="mmui::XTextView")
-            if btn.Exists(0, 0):
-                btn.Click()
-                time.sleep(0.3)
+            # 检查操作栏是否出现
+            if (win.TextControl(Name="赞", ClassName="mmui::XTextView").Exists(0, 0)
+                    or win.TextControl(Name="评论", ClassName="mmui::XTextView").Exists(0, 0)
+                    or win.Control(Name="取消", ClassName="mmui::XTextView").Exists(0, 0)
+                    or win.Control(Name="取消", ClassName="mmui::XButton").Exists(0, 0)):
                 return True
 
-            if button_name == "赞":
-                cancel_btn = win.ButtonControl(Name="取消", ClassName="mmui::XButton")
-                if cancel_btn.Exists(0, 0):
-                    cancel_btn.Click()
-                    time.sleep(0.2)
-                    return True
-
             distance += 20
+        return False
+
+    def _click_action_button(self, ctrl, button_name: str) -> bool:
+        """触发操作栏后点击指定按钮（用于评论等）"""
+        win = self.friend_circle._win
+        if not self._open_action_bar(ctrl):
+            return False
+
+        btn = win.TextControl(Name=button_name, ClassName="mmui::XTextView")
+        if btn.Exists(0, 0):
+            btn.Click()
+            time.sleep(0.3)
+            return True
         return False
 
     def __repr__(self):
@@ -2581,6 +2643,10 @@ class FriendCircle(WeixinWindow):
     def like(self, moment: Moment) -> bool:
         """对指定动态点赞"""
         return moment.like()
+
+    def unlike(self, moment: Moment) -> bool:
+        """取消指定动态的点赞"""
+        return moment.unlike()
 
     def comment(self, moment: Moment, content: str) -> bool:
         """对指定动态评论"""
