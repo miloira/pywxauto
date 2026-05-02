@@ -114,6 +114,78 @@ logging.basicConfig(level=logging.INFO, format="%(asctime)s [%(levelname)s] %(me
 logger = logging.getLogger(__name__)
 
 
+# ---- 常量与结构体 ----
+
+# DROPFILES struct: pFiles(uint), x(long), y(long), fNC(int), fWide(bool)
+_DROPFILES_FORMAT = "Illii"
+_DROPFILES_SIZE = struct.calcsize(_DROPFILES_FORMAT)
+
+# 虚拟键码映射
+_VK_MAP = {
+    "ctrl":  win32con.VK_CONTROL,
+    "alt":   win32con.VK_MENU,
+    "shift": win32con.VK_SHIFT,
+    "win":   win32con.VK_LWIN,
+    "enter": win32con.VK_RETURN,
+    "tab":   win32con.VK_TAB,
+    "esc":   win32con.VK_ESCAPE,
+}
+
+# 剪贴板保存/恢复时优先尝试的格式（按优先级排列）
+_CLIPBOARD_SAVE_FORMATS = [
+    win32con.CF_HDROP,         # 文件列表
+    win32con.CF_DIB,           # 图片 (DIB)
+    win32con.CF_UNICODETEXT,   # Unicode 文本
+    win32con.CF_TEXT,          # ANSI 文本
+]
+
+# ---- 底层钩子常量与结构体（PIM 物理输入监控） ----
+
+_LLKHF_INJECTED = 0x00000010
+_LLMHF_INJECTED = 0x00000001
+_WH_KEYBOARD_LL = 13
+_WH_MOUSE_LL = 14
+_WM_QUIT = 0x0012
+
+_LowLevelHookProc = ctypes.WINFUNCTYPE(
+    ctypes.c_long,       # LRESULT
+    ctypes.c_int,        # nCode
+    ctypes.c_ulonglong,  # wParam (WPARAM)
+    ctypes.c_void_p,     # lParam (LPARAM)
+)
+
+# 设置 CallNextHookEx 参数类型，避免 64 位系统上 lParam 溢出
+ctypes.windll.user32.CallNextHookEx.argtypes = [
+    ctypes.c_void_p,     # hhk (HHOOK)
+    ctypes.c_int,        # nCode
+    ctypes.c_ulonglong,  # wParam (WPARAM)
+    ctypes.c_void_p,     # lParam (LPARAM)
+]
+ctypes.windll.user32.CallNextHookEx.restype = ctypes.c_long
+
+
+class _KBDLLHOOKSTRUCT(ctypes.Structure):
+    _fields_ = [
+        ("vkCode", ctypes.c_ulong),
+        ("scanCode", ctypes.c_ulong),
+        ("flags", ctypes.c_ulong),
+        ("time", ctypes.c_ulong),
+        ("dwExtraInfo", ctypes.POINTER(ctypes.c_ulong)),
+    ]
+
+
+class _MSLLHOOKSTRUCT(ctypes.Structure):
+    _fields_ = [
+        ("pt_x", ctypes.c_long),
+        ("pt_y", ctypes.c_long),
+        ("mouseData", ctypes.c_ulong),
+        ("flags", ctypes.c_ulong),
+        ("time", ctypes.c_ulong),
+        ("dwExtraInfo", ctypes.POINTER(ctypes.c_ulong)),
+    ]
+
+
+
 # ---- 消息事件类型 ----
 # 用于 on/once 装饰器注册事件处理器
 
@@ -144,9 +216,6 @@ class Event(str, Enum):
 _MSG_CLASS_TO_EVENT: dict[type, Event] = {}  # 延迟填充，在类定义之后
 
 
-# DROPFILES struct: pFiles(uint), x(long), y(long), fNC(int), fWide(bool)
-_DROPFILES_FORMAT = "Illii"
-_DROPFILES_SIZE = struct.calcsize(_DROPFILES_FORMAT)
 
 
 def query_reg_install_path(reg_path: str) -> Optional[str]:
@@ -246,16 +315,6 @@ def find_window_by_name(name_pattern: str) -> list[int]:
     return result
 
 
-# ---- 虚拟键码映射 ----
-_VK_MAP = {
-    "ctrl":  win32con.VK_CONTROL,
-    "alt":   win32con.VK_MENU,
-    "shift": win32con.VK_SHIFT,
-    "win":   win32con.VK_LWIN,
-    "enter": win32con.VK_RETURN,
-    "tab":   win32con.VK_TAB,
-    "esc":   win32con.VK_ESCAPE,
-}
 
 
 def send_shortcut(combo: str) -> None:
@@ -299,53 +358,6 @@ def copy() -> None:
     send_shortcut("Ctrl+C")
 
 
-# ---- 用户物理输入空闲检测 ----
-# 通过 WH_KEYBOARD_LL / WH_MOUSE_LL 底层钩子监听输入事件，
-# 利用 LLKHF_INJECTED 标志位过滤掉程序模拟的输入（keybd_event、SendInput），
-# 只记录物理键盘/鼠标的最后操作时间。
-
-_LLKHF_INJECTED = 0x00000010
-_LLMHF_INJECTED = 0x00000001
-_WH_KEYBOARD_LL = 13
-_WH_MOUSE_LL = 14
-_WM_QUIT = 0x0012
-
-_LowLevelHookProc = ctypes.WINFUNCTYPE(
-    ctypes.c_long,       # LRESULT
-    ctypes.c_int,        # nCode
-    ctypes.c_ulonglong,  # wParam (WPARAM)
-    ctypes.c_void_p,     # lParam (LPARAM)
-)
-
-# 设置 CallNextHookEx 参数类型，避免 64 位系统上 lParam 溢出
-ctypes.windll.user32.CallNextHookEx.argtypes = [
-    ctypes.c_void_p,     # hhk (HHOOK)
-    ctypes.c_int,        # nCode
-    ctypes.c_ulonglong,  # wParam (WPARAM)
-    ctypes.c_void_p,     # lParam (LPARAM)
-]
-ctypes.windll.user32.CallNextHookEx.restype = ctypes.c_long
-
-
-class _KBDLLHOOKSTRUCT(ctypes.Structure):
-    _fields_ = [
-        ("vkCode", ctypes.c_ulong),
-        ("scanCode", ctypes.c_ulong),
-        ("flags", ctypes.c_ulong),
-        ("time", ctypes.c_ulong),
-        ("dwExtraInfo", ctypes.POINTER(ctypes.c_ulong)),
-    ]
-
-
-class _MSLLHOOKSTRUCT(ctypes.Structure):
-    _fields_ = [
-        ("pt_x", ctypes.c_long),
-        ("pt_y", ctypes.c_long),
-        ("mouseData", ctypes.c_ulong),
-        ("flags", ctypes.c_ulong),
-        ("time", ctypes.c_ulong),
-        ("dwExtraInfo", ctypes.POINTER(ctypes.c_ulong)),
-    ]
 
 
 class PIM:
@@ -576,13 +588,6 @@ def get_clipboard() -> str:
         win32clipboard.CloseClipboard()
 
 
-# 保存/恢复剪贴板时优先尝试的格式（按优先级排列）
-_CLIPBOARD_SAVE_FORMATS = [
-    win32con.CF_HDROP,         # 文件列表
-    win32con.CF_DIB,           # 图片 (DIB)
-    win32con.CF_UNICODETEXT,   # Unicode 文本
-    win32con.CF_TEXT,          # ANSI 文本
-]
 
 
 def save_clipboard() -> Optional[tuple[int, object]]:
