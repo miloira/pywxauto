@@ -2068,7 +2068,7 @@ class Moment:
     def __init__(self, friend_circle: "FriendCircle", runtime_id: tuple, *,
                  type="", sender="", content="",
                  raw_text="", timestamp="", image_count=0,
-                 cell_type=""):
+                 cell_type="", scroll_offset: int = 0):
         self.friend_circle = friend_circle
         self.runtime_id = runtime_id
         self.type = type
@@ -2078,6 +2078,7 @@ class Moment:
         self.timestamp = timestamp
         self.image_count = image_count
         self.cell_type = cell_type
+        self.scroll_offset = scroll_offset
 
     def like(self) -> bool:
         """
@@ -2189,21 +2190,63 @@ class Moment:
         return self._scroll_into_view(ctrl)
 
     def _find_cell(self) -> "auto.Control | None":
-        """在朋友圈列表中查找此条动态的控件"""
+        """
+        在朋友圈列表中查找此条动态的控件。
+
+        利用 scroll_offset（前面所有朋友圈高度累加）快速定位：
+        1. 先在当前可见区域查找（命中直接返回）
+        2. 点击"刷新"回到列表顶部
+        3. 边滚动边匹配：每滚一小段就检查可见区域，命中立即返回
+        """
         lc = self.friend_circle._find_sns_list()
-        for ctrl, _ in auto.WalkControl(lc):
-            if ctrl.ControlType != auto.ControlType.ListItemControl:
-                continue
-            cls_name = ctrl.ClassName or ""
-            if not cls_name.startswith(FriendCircle.TIMELINE_CELL_PREFIX):
-                continue
-            if cls_name in FriendCircle.SKIP_CELL_CLASSES:
-                continue
-            if (ctrl.Name
-                    and self.sender in ctrl.Name
-                    and self.content[:20] in ctrl.Name):
-                return ctrl
-        return None
+
+        def _match_in_visible():
+            for ctrl, _ in auto.WalkControl(lc):
+                if ctrl.ControlType != auto.ControlType.ListItemControl:
+                    continue
+                cls_name = ctrl.ClassName or ""
+                if not cls_name.startswith(FriendCircle.TIMELINE_CELL_PREFIX):
+                    continue
+                if cls_name in FriendCircle.SKIP_CELL_CLASSES:
+                    continue
+                if (ctrl.Name
+                        and self.sender in ctrl.Name
+                        and self.content[:20] in ctrl.Name):
+                    return ctrl
+            return None
+
+        # 先在当前可见区域查找
+        result = _match_in_visible()
+        if result:
+            return result
+
+        # 回到顶部
+        refresh_btn = self.friend_circle._win.ButtonControl(
+            ClassName="mmui::XTabBarItem",
+            Name="刷新",
+        )
+        if refresh_btn.Exists(maxSearchSeconds=2):
+            refresh_btn.Click(ratioX=_rand_ratio(), ratioY=_rand_ratio())
+            time.sleep(2)
+
+        if self.scroll_offset <= 0:
+            return _match_in_visible()
+
+        # 边滚动边匹配
+        # 每次滚动约 500px（wheelTimes=5），滚完立即检查
+        scrolled = 0
+        step = 5
+        step_px = 500
+        while scrolled < self.scroll_offset + step_px:
+            result = _match_in_visible()
+            if result:
+                return result
+            lc.WheelDown(wheelTimes=step)
+            scrolled += step_px
+            time.sleep(0.15)
+
+        # 最后再检查一次
+        return _match_in_visible()
 
     def _scroll_into_view(self, ctrl) -> bool:
         """将控件滚动到朋友圈列表可见区域内"""
@@ -2364,7 +2407,8 @@ class FriendCircle(WeixinWindow):
             raise RuntimeError("未找到朋友圈列表控件 (sns_list)")
         return lc
 
-    def _parse_moment_name(self, runtime_id: tuple, raw_name: str, cls_name: str = "") -> Moment | None:
+    def _parse_moment_name(self, runtime_id: tuple, raw_name: str,
+                           cls_name: str = "", scroll_offset: int = 0) -> Moment | None:
         """
         解析单条朋友圈动态 ListItem 的 Name 属性。
 
@@ -2466,14 +2510,16 @@ class FriendCircle(WeixinWindow):
             timestamp=timestamp,
             image_count=image_count,
             cell_type=cls_name,
+            scroll_offset=scroll_offset,
         )
 
-    def _collect_moments(self, lc) -> list[tuple[str, str, tuple]]:
+    def _collect_moments(self, lc) -> list[tuple[str, str, tuple, int]]:
         """
-        收集当前可见的动态条目的 (raw_name, cls_name, runtime_id) 列表。
+        收集当前可见的动态条目的 (raw_name, cls_name, runtime_id, ctrl_height) 列表。
         跳过评论区、辅助行等非动态 Cell。
+        ctrl_height 为控件的高度（像素），用于累加计算滚动偏移。
         """
-        items: list[tuple[str, str, tuple]] = []
+        items: list[tuple[str, str, tuple, int]] = []
         for ctrl, _ in auto.WalkControl(lc):
             if ctrl.ControlType != auto.ControlType.ListItemControl:
                 continue
@@ -2488,7 +2534,11 @@ class FriendCircle(WeixinWindow):
                     rid = tuple(ctrl.GetRuntimeId())
                 except Exception:
                     rid = ()
-                items.append((raw, cls_name, rid))
+                try:
+                    ctrl_height = ctrl.BoundingRectangle.height()
+                except Exception:
+                    ctrl_height = 0
+                items.append((raw, cls_name, rid, ctrl_height))
         return items
 
     @PIM.guard
@@ -2523,17 +2573,21 @@ class FriendCircle(WeixinWindow):
 
         moments: list[Moment] = []
         seen_keys: set[tuple] = set()  # (runtime_id, raw_text) 组合去重
+        cumulative_height: int = 0  # 已采集朋友圈的高度累加
 
         while len(moments) < count:
             new_found = False
-            for raw, cls_name, rid in self._collect_moments(lc):
+            for raw, cls_name, rid, ctrl_height in self._collect_moments(lc):
                 key = (rid, raw) if rid else ((), raw)
                 if key in seen_keys:
                     continue
-                item = self._parse_moment_name(rid, raw, cls_name)
+                item = self._parse_moment_name(
+                    rid, raw, cls_name, scroll_offset=cumulative_height,
+                )
                 if item:
                     seen_keys.add(key)
                     moments.append(item)
+                    cumulative_height += ctrl_height
                     new_found = True
                 if len(moments) >= count:
                     break
@@ -2547,7 +2601,7 @@ class FriendCircle(WeixinWindow):
                 lc.SendKeys("{PageDown}")
                 time.sleep(1)
                 found_after_scroll = False
-                for raw, _, rid in self._collect_moments(lc):
+                for raw, _, rid, _ in self._collect_moments(lc):
                     key = (rid, raw) if rid else ((), raw)
                     if key not in seen_keys:
                         found_after_scroll = True
@@ -2605,16 +2659,20 @@ class FriendCircle(WeixinWindow):
 
         yielded = 0
         seen_keys: set[tuple] = set()
+        cumulative_height: int = 0
 
         while yielded < count:
             new_found = False
-            for raw, cls_name, rid in self._collect_moments(lc):
+            for raw, cls_name, rid, ctrl_height in self._collect_moments(lc):
                 key = (rid, raw) if rid else ((), raw)
                 if key in seen_keys:
                     continue
-                item = self._parse_moment_name(rid, raw, cls_name)
+                item = self._parse_moment_name(
+                    rid, raw, cls_name, scroll_offset=cumulative_height,
+                )
                 if item:
                     seen_keys.add(key)
+                    cumulative_height += ctrl_height
                     yield item
                     yielded += 1
                     new_found = True
@@ -2627,7 +2685,7 @@ class FriendCircle(WeixinWindow):
                 lc.SendKeys("{PageDown}")
                 time.sleep(1)
                 found_after_scroll = False
-                for raw, _, rid in self._collect_moments(lc):
+                for raw, _, rid, _ in self._collect_moments(lc):
                     key = (rid, raw) if rid else ((), raw)
                     if key not in seen_keys:
                         found_after_scroll = True
