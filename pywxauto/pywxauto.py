@@ -3299,7 +3299,7 @@ class NoteEditorWindow(WeixinWindow):
         return f"NoteEditorWindow(content={preview!r})"
 
 
-class FileManager:
+class FileManager(WeixinWindow):
     """
     微信"聊天文件"管理器窗口操作类。
 
@@ -3326,16 +3326,18 @@ class FileManager:
 
     def __init__(self, wx: "Weixin"):
         self.wx = wx
-        self._file_manager_window: Optional[auto.WindowControl] = None
+        self._win = auto.WindowControl(
+            Name=self.WINDOW_NAME, searchDepth=1,
+        )
 
     def _find_window(self) -> Optional[auto.WindowControl]:
         """查找并激活聊天文件窗口（独立窗口）"""
-        self._file_manager_window = auto.WindowControl(
+        self._win = auto.WindowControl(
             Name=self.WINDOW_NAME, searchDepth=1
         )
-        if self._file_manager_window.Exists(maxSearchSeconds=3):
-            self._file_manager_window.SetActive()
-            return self._file_manager_window
+        if self._win.Exists(maxSearchSeconds=3):
+            self._win.SetActive()
+            return self._win
         return None
 
     @PIM.wait_idle
@@ -3357,7 +3359,7 @@ class FileManager:
         self.wx.navigator.switch_to("更多")
 
         # 点击"聊天文件"按钮
-        chat_file_btn = self.wx.window.ButtonControl(
+        chat_file_btn = self.wx._win.ButtonControl(
             Name="聊天文件", searchDepth=10
         )
         if not chat_file_btn.Exists(maxSearchSeconds=3):
@@ -3673,7 +3675,7 @@ class FileManager:
         confirm_btn = None
 
         # 优先查找 mmui::XOutlineButton 的"删除"按钮
-        delete_btn = self._file_manager_window.ButtonControl(
+        delete_btn = self._win.ButtonControl(
             ClassName="mmui::XOutlineButton", Name="删除",
         )
         if delete_btn.Exists(maxSearchSeconds=2):
@@ -3872,9 +3874,13 @@ class FileManager:
         return [f for f in all_files
                 if f.file_date == today_str or f.file_date == today_formatted]
 
+    @property
+    def exists(self) -> bool:
+        """聊天文件窗口是否存在"""
+        return self._win.Exists(maxSearchSeconds=1)
+
     def __str__(self) -> str:
-        fm_win = auto.WindowControl(Name=self.WINDOW_NAME, searchDepth=1)
-        if fm_win.Exists(0, 0):
+        if self._win.Exists(0, 0):
             return "FileManager(open)"
         return "FileManager(closed)"
 
@@ -3893,7 +3899,7 @@ class Navigator:
 
     def __init__(self, wx: "Weixin"):
         self.wx = wx
-        self._win = wx.window
+        self._win = wx._win
         self._tabbar = self._win.ToolBarControl(ClassName="mmui::MainTabBar", searchDepth=5)
 
     def switch_to(self, tab_name: str) -> None:
@@ -3925,7 +3931,7 @@ class Session:
 
     def __init__(self, wx: "Weixin"):
         self.wx = wx
-        self._win = wx.window
+        self._win = wx._win
 
     @property
     def is_visible(self) -> bool:
@@ -4736,7 +4742,7 @@ class Chat:
 
     def __init__(self, wx: "Weixin"):
         self.wx = wx
-        self._win = wx.window
+        self._win = wx._win
 
     def _get_image_text(self, image: bytes) -> dict:
         """
@@ -9942,7 +9948,7 @@ class Weixin(WeixinWindow):
         self._ensure_running()
 
         # 窗口定位
-        self.window: auto.WindowControl = auto.WindowControl(
+        self._win: auto.WindowControl = auto.WindowControl(
             ClassName=self.WINDOW_CLASS,
             RegexName=self.WINDOW_REGEX,
             Depth=1,
@@ -10023,7 +10029,7 @@ class Weixin(WeixinWindow):
 
     @property
     def is_locked(self) -> bool:
-        txt = self.window.TextControl(ClassName="mmui::XTextView", Name="Windows 微信已被锁定")
+        txt = self._win.TextControl(ClassName="mmui::XTextView", Name="Windows 微信已被锁定")
         return txt.Exists(0, 0)
 
     @property
@@ -10034,7 +10040,7 @@ class Weixin(WeixinWindow):
     @property
     def chat(self) -> Optional[Chat]:
         for aid in Chat.TITLE_LABEL_IDS:
-            title = self.window.TextControl(AutomationId=aid)
+            title = self._win.TextControl(AutomationId=aid)
             if title.Exists(0, 0) and title.Name:
                 return Chat(self)
         return None
@@ -10482,7 +10488,7 @@ class Weixin(WeixinWindow):
 
         使用 BitBlt API 捕获窗口内容，返回 PNG bytes。
         """
-        hwnd = self.window.NativeWindowHandle
+        hwnd = self._win.NativeWindowHandle
         if not hwnd:
             raise RuntimeError("无法获取微信窗口句柄")
         return capture_window(hwnd)
@@ -10496,7 +10502,7 @@ class Weixin(WeixinWindow):
         Args:
             save_path: 保存路径（含文件名），如 "C:\\screenshots\\wx.png"
         """
-        hwnd = self.window.NativeWindowHandle
+        hwnd = self._win.NativeWindowHandle
         if not hwnd:
             raise RuntimeError("无法获取微信窗口句柄")
         if self.is_minimized:
@@ -10519,9 +10525,9 @@ class Weixin(WeixinWindow):
         more_btn.Click(ratioX=_rand_ratio(), ratioY=_rand_ratio())
         time.sleep(0.1)
 
-        lock_btn = self.window.ButtonControl(ClassName="mmui::XButton", Name="锁定")
+        lock_btn = self._win.ButtonControl(ClassName="mmui::XButton", Name="锁定")
         if not lock_btn.Exists(maxSearchSeconds=2):
-            self.window.SendKeys("{Esc}")
+            self._win.SendKeys("{Esc}")
             raise RuntimeError("弹出菜单中未找到锁定按钮")
         lock_btn.Click(ratioX=_rand_ratio(), ratioY=_rand_ratio())
 
@@ -10641,11 +10647,6 @@ class Weixin(WeixinWindow):
                 "height": height,
             }
         return data
-
-    @property
-    def _window(self) -> auto.WindowControl:
-        """覆盖基类属性，Weixin 使用 self.window 而非 self._win"""
-        return self.window
 
     # ---- 事件处理机制 (pyee) ----
 
