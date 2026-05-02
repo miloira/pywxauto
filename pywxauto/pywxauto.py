@@ -5046,7 +5046,7 @@ class Chat:
         """
         发送文件/图片/视频的通用实现。
 
-        逐个发送文件，每个文件独立粘贴、发送、校验。
+        支持单个路径或路径列表，多文件时一次性粘贴所有文件后发送。
         支持本地路径和网络 URL（自动下载到临时目录）。
 
         Args:
@@ -5055,7 +5055,7 @@ class Chat:
             check_status: 发送后的状态检测方法
 
         Returns:
-            最后一个文件的发送状态
+            发送状态
         """
         self._activate_window()
 
@@ -5063,23 +5063,22 @@ class Chat:
         if not paths:
             raise ValueError(f"{label}路径不能为空")
 
-        last_status = MessageStatus.UNKNOWN
-        for path in paths:
-            last_status = self._send_single_media(path, label, check_status)
-
-        return last_status
-
-    def _send_single_media(self, file_path: str, label: str,
-                           check_status: callable) -> MessageStatus:
-        """发送单个文件/图片/视频"""
-        tmp_file = None
-        if _is_url(file_path):
-            tmp_file = _download_to_temp(file_path)
-            file_path = tmp_file
+        # 预处理：下载网络 URL 到临时文件
+        local_paths: list[str] = []
+        tmp_files: list[str] = []
+        for p in paths:
+            if _is_url(p):
+                tmp = _download_to_temp(p)
+                local_paths.append(tmp)
+                tmp_files.append(tmp)
+            else:
+                local_paths.append(p)
 
         try:
             self.clear_input()
-            paste([file_path])
+
+            # 一次性粘贴所有文件
+            paste(local_paths)
 
             doc_len = self._get_input_doc_length()
             if doc_len == 0:
@@ -5097,11 +5096,13 @@ class Chat:
 
             return check_status()
         finally:
-            if tmp_file and os.path.exists(tmp_file):
-                try:
-                    os.remove(tmp_file)
-                except OSError:
-                    pass
+            # 清理临时文件
+            for tmp in tmp_files:
+                if os.path.exists(tmp):
+                    try:
+                        os.remove(tmp)
+                    except OSError:
+                        pass
 
     @PIM.guard
     def send_at(self, content: str, at_members: list[str]) -> MessageStatus:
