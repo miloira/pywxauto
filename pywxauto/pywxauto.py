@@ -7153,49 +7153,38 @@ class Chat:
         img: "Image.Image", w: int, h: int, chat_name: str,
     ) -> tuple[str, SenderType] | None:
         """
-        策略2: 从左右两侧向内扫描，通过头像位置判断发送者。
+        从左右两侧同时向中间扫描，先找到非白色像素的一侧即为头像侧。
 
-        在截图上部区域（头像所在区域）多行扫描，
-        从左侧向右找第一个非白色像素，从右侧向左找第一个非白色像素，
-        取所有扫描行中最靠边的结果（最小距离）。
-
-        头像是圆形实心区域，一定紧贴某一侧边缘；
-        而气泡/表情/图片等内容区域居中偏向一侧，不会紧贴边缘。
-        因此最靠边的非白色像素一定来自头像侧。
+        在截图中间行扫描，左右指针同步推进，
+        哪边先碰到非白色像素就说明头像在哪边。
 
         Returns:
             (sender, sender_type) 或 None（无法判断时）
         """
-        # 扫描消息顶部偏下 50px 处（头像所在区域，固定位置更可靠）
-        scan_rows = [35]
+        scan_y = 38
+        if scan_y >= h:
+            return None
 
-        best_left = w   # 左侧最靠边的非白色像素到左边缘的距离（越小越靠边）
-        best_left_y = 0
-        best_right = w  # 右侧最靠边的非白色像素到右边缘的距离
-        best_right_y = 0
+        left = 0
+        right = w - 1
+        found_left = False
+        found_right = False
 
-        for scan_y in scan_rows:
-            if scan_y >= h:
-                continue
-
-            # 从左侧向右扫描
-            for x in range(w):
-                r, g, b = img.getpixel((x, scan_y))[:3]
+        while left <= right:
+            if not found_left:
+                r, g, b = img.getpixel((left, scan_y))[:3]
                 if Chat._is_non_white(r, g, b):
-                    if x < best_left:
-                        best_left = x
-                        best_left_y = scan_y
-                    break
-
-            # 从右侧向左扫描
-            for x in range(w - 1, -1, -1):
-                r, g, b = img.getpixel((x, scan_y))[:3]
+                    found_left = True
+            if not found_right:
+                r, g, b = img.getpixel((right, scan_y))[:3]
                 if Chat._is_non_white(r, g, b):
-                    dist = w - 1 - x
-                    if dist < best_right:
-                        best_right = dist
-                        best_right_y = scan_y
-                    break
+                    found_right = True
+
+            if found_left or found_right:
+                break
+
+            left += 1
+            right -= 1
 
         # ---- 调试：标记扫描点并保存图片 ----
         try:
@@ -7203,41 +7192,40 @@ class Chat:
             debug_img = img.copy()
             draw = ImageDraw.Draw(debug_img)
             marker_size = 6
-            # 左侧扫描点（蓝色）
-            if best_left < w:
-                lx, ly = best_left, best_left_y
+            if found_left:
                 draw.ellipse(
-                    [lx - marker_size, ly - marker_size,
-                     lx + marker_size, ly + marker_size],
+                    [left - marker_size, scan_y - marker_size,
+                     left + marker_size, scan_y + marker_size],
                     fill="blue", outline="white",
                 )
-                draw.text((lx + 10, ly - 8), f"L({lx},{ly})", fill="blue")
-            # 右侧扫描点（红色）
-            if best_right < w:
-                rx, ry = w - 1 - best_right, best_right_y
+                draw.text((left + 10, scan_y - 8), f"L({left},{scan_y})", fill="blue")
+            if found_right:
                 draw.ellipse(
-                    [rx - marker_size, ry - marker_size,
-                     rx + marker_size, ry + marker_size],
+                    [right - marker_size, scan_y - marker_size,
+                     right + marker_size, scan_y + marker_size],
                     fill="red", outline="white",
                 )
-                draw.text((rx - 80, ry - 8), f"R({rx},{ry})", fill="red")
+                draw.text((right - 80, scan_y - 8), f"R({right},{scan_y})", fill="red")
             debug_img.save(os.path.join(".", "_debug_edge_scan.png"))
         except Exception:
             pass
         # ---- 调试结束 ----
 
-        # 两侧都没找到非白色像素
-        if best_left >= w and best_right >= w:
+        if not found_left and not found_right:
             return None
 
-        # 距离差太小（< 图片宽度的 5%），无法可靠判断
-        if abs(best_left - best_right) < w * 0.05:
-            return None
+        # 同时找到时，比较谁更靠边
+        if found_left and found_right:
+            if left < (w - 1 - right):
+                return chat_name, SenderType.FRIEND
+            elif (w - 1 - right) < left:
+                return "我", SenderType.SELF
+            else:
+                return None  # 距离相同，无法判断
 
-        if best_left < best_right:
+        if found_left:
             return chat_name, SenderType.FRIEND
-        else:
-            return "我", SenderType.SELF
+        return "我", SenderType.SELF
 
     @staticmethod
     def _detect_sender_by_bubble_color(
