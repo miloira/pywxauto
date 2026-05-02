@@ -2384,6 +2384,7 @@ class Moment(WeixinWindow):
 
         return moments[:count]
 
+    @PIM.guard
     def iter_moments(self, count: int = 10, position: str = "top"):
         """
         逐条获取朋友圈动态（生成器）。
