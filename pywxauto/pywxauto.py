@@ -9926,8 +9926,11 @@ class SeparateChat(Chat, WeixinWindow):
     def __str__(self) -> str:
         if not self._win.Exists(0, 0):
             return "SeparateChat(closed)"
-        return (f"SeparateChat(type={self.chat_type!r}, "
+        return (f"SeparateChat(chat_type={self.chat_type!r}, "
                 f"name={self.current_name!r})")
+
+    def __repr__(self) -> str:
+        return self.__str__()
 
 
 class Weixin(WeixinWindow):
@@ -10220,6 +10223,22 @@ class Weixin(WeixinWindow):
             return SeparateChat(contact_name)
         except (RuntimeError, ValueError):
             return None
+
+    def get_separate_chats(self) -> list[SeparateChat]:
+        """
+        获取所有已打开的独立聊天窗口。
+
+        遍历桌面顶层窗口，返回所有 mmui::ChatSingleWindow 的 SeparateChat 实例。
+        """
+        result: list[SeparateChat] = []
+        skip_names = {"微信", "Weixin"}
+        for ctrl in auto.GetRootControl().GetChildren():
+            try:
+                if ctrl.ClassName == SeparateChat.WINDOW_CLASS and ctrl.Name and ctrl.Name not in skip_names:
+                    result.append(SeparateChat(ctrl.Name))
+            except (RuntimeError, ValueError, Exception):
+                pass
+        return result
 
     def chat_with(self, nickname: str, chat_type: Optional[list[str]] = None,
                   force_search: bool = False) -> "Chat | SeparateChat":
@@ -10842,7 +10861,8 @@ class Weixin(WeixinWindow):
             wx.listen(on_msg)  # 阻塞运行，Ctrl+C 退出
         """
 
-        stop_event = threading.Event()
+        self._stop_event = threading.Event()
+        stop_event = self._stop_event
         # 消息队列：子线程生产，主线程消费
         msg_queue: Queue[tuple[SeparateChat, Message]] = Queue()
         # {窗口名: Thread}
@@ -10982,7 +11002,7 @@ class Weixin(WeixinWindow):
         scanner.start()
 
         try:
-            while True:
+            while not stop_event.is_set():
                 try:
                     chat, msg = msg_queue.get(timeout=0.1)
                 except Empty:
@@ -10992,12 +11012,15 @@ class Weixin(WeixinWindow):
                 except Exception as e:
                     logger.exception("回调异常 [%s]", chat.current_name)
         except KeyboardInterrupt:
+            pass
+        finally:
             logger.info("正在停止监听线程...")
             stop_event.set()
             scanner.join(timeout=3)
             with threads_lock:
                 for t in threads.values():
                     t.join(timeout=3)
+            self._stop_event = None
             logger.info("监听已停止")
 
     def add_chat_listen(self, names: "str | list[str] | None" = None,
@@ -11064,6 +11087,54 @@ class Weixin(WeixinWindow):
 
         return result
 
+    def remove_chat_listen(self, names: "str | list[str] | None" = None) -> None:
+        """
+        移除聊天监听。
+
+        Args:
+            names: 要移除的联系人/群聊名称。
+                - None: 移除所有监听
+                - str: 移除单个监听
+                - list[str]: 移除列表中的监听
+
+        移除后如果窗口在屏幕外（offscreen），会自动移回原位。
+        """
+        if not hasattr(self, '_listeners'):
+            return
+
+        if names is None:
+            for name, chat in list(self._listeners.items()):
+                if chat.exists and chat.is_offscreen:
+                    try:
+                        chat.move_back()
+                    except Exception:
+                        pass
+                logger.info("已移除监听: %s", name)
+            self._listeners.clear()
+            return
+
+        if isinstance(names, str):
+            names = [names]
+
+        for name in names:
+            chat = self._listeners.pop(name, None)
+            if chat is not None:
+                if chat.exists and chat.is_offscreen:
+                    try:
+                        chat.move_back()
+                    except Exception:
+                        pass
+                logger.info("已移除监听: %s", name)
+
+    def stop(self) -> None:
+        """
+        停止消息监听（run/listen）。
+
+        可从其他线程调用，触发 stop_event 使监听循环退出。
+        """
+        if hasattr(self, '_stop_event') and self._stop_event is not None:
+            self._stop_event.set()
+
     def run(
         self,
         interval: float = 0.1,
@@ -11089,7 +11160,8 @@ class Weixin(WeixinWindow):
         if not hasattr(self, '_listeners') or not self._listeners:
             raise RuntimeError("未注册任何监听，请先调用 add_chat_listen")
 
-        stop_event = threading.Event()
+        self._stop_event = threading.Event()
+        stop_event = self._stop_event
         msg_queue: Queue[tuple[SeparateChat, Message]] = Queue()
         threads: dict[str, threading.Thread] = {}
 
@@ -11206,7 +11278,7 @@ class Weixin(WeixinWindow):
         logger.info("消息监听已启动 (Ctrl+C 退出)...")
 
         try:
-            while True:
+            while not stop_event.is_set():
                 # 检查是否所有线程都已退出
                 alive = [n for n, t in threads.items() if t.is_alive()]
                 if not alive:
@@ -11222,8 +11294,11 @@ class Weixin(WeixinWindow):
                 except Exception:
                     logger.exception("事件分发异常 [%s]", chat.current_name)
         except KeyboardInterrupt:
+            pass
+        finally:
             logger.info("正在停止监听线程...")
             stop_event.set()
             for t in threads.values():
                 t.join(timeout=3)
+            self._stop_event = None
             logger.info("监听已停止")
