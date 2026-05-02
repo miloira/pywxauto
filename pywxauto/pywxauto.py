@@ -114,7 +114,7 @@ logger = logging.getLogger(__name__)
 
 
 # ---- 消息事件类型 ----
-# 用于 handle 装饰器注册事件处理器
+# 用于 on/once 装饰器注册事件处理器
 
 class Event(str, Enum):
     """消息事件类型枚举"""
@@ -138,28 +138,6 @@ class Event(str, Enum):
     MUSIC = "music_message"
     SYSTEM = "system_message"
     OTHER = "other_message"
-
-# 向后兼容：保留旧的常量名
-ALL_MESSAGE = Event.ALL
-TEXT_MESSAGE = Event.TEXT
-IMAGE_MESSAGE = Event.IMAGE
-VIDEO_MESSAGE = Event.VIDEO
-FILE_MESSAGE = Event.FILE
-VOICE_MESSAGE = Event.VOICE
-QUOTE_MESSAGE = Event.QUOTE
-EMOTION_MESSAGE = Event.EMOTION
-LOCATION_MESSAGE = Event.LOCATION
-LINK_MESSAGE = Event.LINK
-CARD_MESSAGE = Event.CARD
-PERSONAL_CARD_MESSAGE = Event.PERSONAL_CARD
-MERGE_MESSAGE = Event.MERGE
-NOTE_MESSAGE = Event.NOTE
-VOIP_MESSAGE = Event.VOIP
-RED_PACKET_MESSAGE = Event.RED_PACKET
-TRANSFER_MESSAGE = Event.TRANSFER
-MUSIC_MESSAGE = Event.MUSIC
-SYSTEM_MESSAGE = Event.SYSTEM
-OTHER_MESSAGE = Event.OTHER
 
 # 消息类 -> 事件类型映射
 _MSG_CLASS_TO_EVENT: dict[type, Event] = {}  # 延迟填充，在类定义之后
@@ -1366,27 +1344,27 @@ class OtherMessage(Message):
         return "其他消息"
 
 
-# 填充消息类 -> 事件类型常量映射
+# 填充消息类 -> 事件类型映射
 _MSG_CLASS_TO_EVENT.update({
-    TextMessage: TEXT_MESSAGE,
-    ImageMessage: IMAGE_MESSAGE,
-    VideoMessage: VIDEO_MESSAGE,
-    FileMessage: FILE_MESSAGE,
-    VoiceMessage: VOICE_MESSAGE,
-    QuoteMessage: QUOTE_MESSAGE,
-    EmotionMessage: EMOTION_MESSAGE,
-    LocationMessage: LOCATION_MESSAGE,
-    LinkMessage: LINK_MESSAGE,
-    CardMessage: CARD_MESSAGE,
-    PersonalCardMessage: PERSONAL_CARD_MESSAGE,
-    MergeMessage: MERGE_MESSAGE,
-    NoteMessage: NOTE_MESSAGE,
-    VoipMessage: VOIP_MESSAGE,
-    RedPacketMessage: RED_PACKET_MESSAGE,
-    TransferMessage: TRANSFER_MESSAGE,
-    MusicMessage: MUSIC_MESSAGE,
-    SystemMessage: SYSTEM_MESSAGE,
-    OtherMessage: OTHER_MESSAGE,
+    TextMessage: Event.TEXT,
+    ImageMessage: Event.IMAGE,
+    VideoMessage: Event.VIDEO,
+    FileMessage: Event.FILE,
+    VoiceMessage: Event.VOICE,
+    QuoteMessage: Event.QUOTE,
+    EmotionMessage: Event.EMOTION,
+    LocationMessage: Event.LOCATION,
+    LinkMessage: Event.LINK,
+    CardMessage: Event.CARD,
+    PersonalCardMessage: Event.PERSONAL_CARD,
+    MergeMessage: Event.MERGE,
+    NoteMessage: Event.NOTE,
+    VoipMessage: Event.VOIP,
+    RedPacketMessage: Event.RED_PACKET,
+    TransferMessage: Event.TRANSFER,
+    MusicMessage: Event.MUSIC,
+    SystemMessage: Event.SYSTEM,
+    OtherMessage: Event.OTHER,
 })
 
 
@@ -10671,78 +10649,46 @@ class Weixin(WeixinWindow):
 
     # ---- 事件处理机制 (pyee) ----
 
-    def handle(
-        self,
-        events: "Event | list[Event] | None" = None,
-        once: bool = False,
-    ) -> "callable":
+    def _register_handler(self, events: "Event | list[Event] | None",
+                         func: callable, once: bool = False) -> callable:
+        """内部方法：注册事件处理器到 pyee EventEmitter"""
+        if not events:
+            event_list = [Event.ALL]
+        elif isinstance(events, list):
+            event_list = events
+        else:
+            event_list = [events]
+
+        listen = self._ee.once if once else self._ee.on
+        for event in event_list:
+            listen(event, func)
+        return func
+
+    def on(self, events: "Event | list[Event] | None" = None) -> "callable":
         """
-        注册消息事件处理器的装饰器。
-
-        基于 pyee EventEmitter 实现事件注册与分发。
-
-        用法::
-
-            @wx.handle(Event.TEXT)
-            def on_text(wx, message):
-                print(message.content)
-
-            @wx.handle([Event.TEXT, Event.IMAGE])
-            def on_text_or_image(wx, message):
-                print(message.type_label)
-
-            @wx.handle()  # 监听所有消息
-            def on_all(wx, message):
-                print(message)
-
-            @wx.handle(Event.TEXT, once=True)  # 只触发一次
-            def on_first_text(wx, message):
-                print("第一条文本消息:", message.content)
-
-        Args:
-            events: Event 枚举值或列表，None 表示监听所有消息 (Event.ALL)
-            once:   True 时回调只触发一次后自动移除
-
-        Returns:
-            装饰器函数
-        """
-        def decorator(func):
-            if not events:
-                event_list = [ALL_MESSAGE]
-            elif isinstance(events, list):
-                event_list = events
-            else:
-                event_list = [events]
-
-            listen = self._ee.once if once else self._ee.on
-            for event in event_list:
-                listen(event, func)
-
-            return func
-
-        return decorator
-
-    def on(
-        self,
-        events: "Event | list[Event] | None" = None,
-    ) -> "callable":
-        """
-        注册消息事件处理器（handle 的别名，once=False）。
+        注册消息事件处理器（装饰器）。
 
         用法::
 
             @wx.on(Event.TEXT)
             def on_text(wx, message):
                 print(message.content)
-        """
-        return self.handle(events, once=False)
 
-    def once(
-        self,
-        events: "Event | list[Event] | None" = None,
-    ) -> "callable":
+            @wx.on([Event.TEXT, Event.IMAGE])
+            def on_text_or_image(wx, message):
+                print(message.type_label)
+
+            @wx.on()  # 监听所有消息
+            def on_all(wx, message):
+                print(message)
         """
-        注册一次性消息事件处理器（handle 的别名，once=True）。
+        def decorator(func):
+            return self._register_handler(events, func, once=False)
+        return decorator
+
+    def once(self, events: "Event | list[Event] | None" = None) -> "callable":
+        """
+        注册一次性消息事件处理器（装饰器）。
 
         回调触发一次后自动移除。
 
@@ -10752,13 +10698,11 @@ class Weixin(WeixinWindow):
             def on_first_text(wx, message):
                 print("第一条文本消息:", message.content)
         """
-        return self.handle(events, once=True)
+        def decorator(func):
+            return self._register_handler(events, func, once=True)
+        return decorator
 
-    def off(
-        self,
-        events: "Event | list[Event] | None" = None,
-        func: "callable | None" = None,
-    ) -> None:
+    def off(self, events: "Event | list[Event] | None" = None, func: "callable | None" = None) -> None:
         """
         移除事件处理器。
 
@@ -10788,213 +10732,19 @@ class Weixin(WeixinWindow):
         分发逻辑：
         1. 根据消息类型查找对应的事件类型常量
         2. emit 该事件类型（触发具体类型的处理器）
-        3. emit ALL_MESSAGE（触发全局处理器）
+        3. emit Event.ALL（触发全局处理器）
 
         回调签名: callback(wx: Weixin, message: Message)
         消息关联的聊天窗口通过 message.chat 获取。
         """
-        event_type = _MSG_CLASS_TO_EVENT.get(type(message), OTHER_MESSAGE)
+        event_type = _MSG_CLASS_TO_EVENT.get(type(message), Event.OTHER)
         self._ee.emit(event_type, self, message)
-        self._ee.emit(ALL_MESSAGE, self, message)
+        self._ee.emit(Event.ALL, self, message)
 
     @property
     def has_handlers(self) -> bool:
         """是否注册了任何事件处理器"""
         return bool(self._ee.event_names())
-
-    def listen(
-        self,
-        callback,
-        interval: float = 0.1,
-        idle_interval: float = 0.1,
-        history: int = 5,
-        scan_interval: float = 5.0,
-    ) -> None:
-        """
-        多线程监听所有独立聊天窗口（SeparateChat）的新消息。
-
-        每个独立窗口一个线程轮询消息，新消息逐条放入队列，
-        主线程从队列中取出并逐条回调。
-
-        通过 RuntimeId（UI Automation 为每个控件分配的唯一标识）进行差异比对，
-        精确识别新增消息，不受重复内容、同名消息等干扰。
-
-        callback: 回调函数，签名为 callback(wx: Weixin, message: Message)
-                  每次回调传入一条新消息，在主线程中执行。
-                  消息关联的聊天窗口通过 message.chat 获取。
-        interval:      有新消息时的轮询间隔（秒）
-        idle_interval: 无新消息时的轮询间隔（秒），降低 CPU 占用
-        history:       每个窗口初始记录的历史消息条数（用于去重基线，不触发回调）
-        scan_interval: 扫描新窗口的间隔（秒）
-
-        用法:
-            wx = Weixin()
-            def on_msg(wx, message):
-                print(f"[{message.chat.current_name}] {message}")
-            wx.listen(on_msg)  # 阻塞运行，Ctrl+C 退出
-        """
-
-        self._stop_event = threading.Event()
-        stop_event = self._stop_event
-        # 消息队列：子线程生产，主线程消费
-        msg_queue: Queue[tuple[SeparateChat, Message]] = Queue()
-        # {窗口名: Thread}
-        threads: dict[str, threading.Thread] = {}
-        threads_lock = threading.Lock()
-
-        def _watch_chat(chat: SeparateChat, name: str) -> None:
-            """
-            单个窗口的监听线程。
-
-            基于 RuntimeId 差异比对算法：
-            1. 首次获取可见消息，记录所有 RuntimeId 到已知集合（不触发回调）
-            2. 每次轮询获取可见消息，提取所有 RuntimeId
-            3. 用集合差集找出新增的 RuntimeId（不在已知集合中的）
-            4. 按消息在列表中的顺序，将新消息逐条推送到队列
-            5. 将新 RuntimeId 加入已知集合
-
-            RuntimeId 是 UI Automation 为每个控件分配的唯一整数元组，
-            同一控件在生命周期内 RuntimeId 不变，不同控件的 RuntimeId 不同。
-            即使两条消息内容完全相同，它们的 RuntimeId 也不同，
-            从根本上解决了内容签名去重的误判问题。
-
-            sender_cache 缓存已知消息的发送者检测结果，
-            避免对已知消息重复执行 PrintWindow 截图导致窗口闪烁。
-            """
-            # 已知消息的 RuntimeId 集合
-            known_rids: set[tuple] = set()
-            # 发送者缓存：{runtime_id: (sender, sender_type)}
-            sender_cache: dict[tuple, tuple] = {}
-            first_scan = True
-
-            # 移到屏幕外，窗口仍处于正常状态，UI Automation 正常工作
-            chat.move_offscreen()
-            time.sleep(0.3)
-
-            while not stop_event.is_set():
-                if not chat.exists:
-                    break
-
-                try:
-                    visible = chat.get_visible_messages(sender_cache=sender_cache)
-                except Exception:
-                    if stop_event.wait(interval):
-                        break
-                    continue
-
-                # 提取当前可见消息的 RuntimeId 集合
-                curr_rids = {msg.runtime_id for msg in visible if msg.runtime_id}
-
-                if first_scan:
-                    # 首次扫描：记录所有已有消息的 RuntimeId，不触发回调
-                    known_rids = curr_rids
-                    first_scan = False
-                    if stop_event.wait(interval):
-                        break
-                    continue
-
-                # 集合差集：找出新增的 RuntimeId
-                new_rids = curr_rids - known_rids
-
-                if not new_rids:
-                    # 无新消息
-                    # 更新已知集合：移除已滚出视口的旧 RuntimeId，防止无限膨胀
-                    known_rids = (known_rids & curr_rids) | curr_rids
-                    # 清理 sender_cache 中已滚出视口的条目
-                    for rid in list(sender_cache):
-                        if rid not in curr_rids:
-                            del sender_cache[rid]
-                    if stop_event.wait(idle_interval):
-                        break
-                    continue
-
-                # 按消息在列表中的原始顺序推送新消息
-                for msg in visible:
-                    if msg.runtime_id and msg.runtime_id in new_rids:
-                        msg_queue.put((chat, msg))
-
-                # 更新已知集合
-                known_rids |= new_rids
-
-                if stop_event.wait(interval):
-                    break
-
-            # 线程退出，移回窗口并从跟踪表移除
-            if chat.exists:
-                try:
-                    chat.move_back()
-                except Exception:
-                    pass
-            with threads_lock:
-                threads.pop(name, None)
-
-        def _discover_chats() -> dict[str, SeparateChat]:
-            found: dict[str, SeparateChat] = {}
-            # 过滤掉微信主窗口同名的伪独立窗口
-            skip_names = {"微信", "Weixin"}
-            for ctrl in auto.GetRootControl().GetChildren():
-                try:
-                    class_name = ctrl.ClassName
-                    name = ctrl.Name
-                except Exception:
-                    continue
-                if class_name == SeparateChat.WINDOW_CLASS and name and name not in skip_names:
-                    try:
-                        found[name] = SeparateChat(self, name)
-                    except (RuntimeError, ValueError):
-                        pass
-            return found
-
-        def _scan_loop() -> None:
-            """扫描线程：定期发现新窗口、清理已关闭窗口"""
-            while not stop_event.is_set():
-                current = _discover_chats()
-                with threads_lock:
-                    for name, chat in current.items():
-                        if name not in threads:
-                            t = threading.Thread(
-                                target=_watch_chat,
-                                args=(chat, name),
-                                daemon=True,
-                                name=f"listen-{name}",
-                            )
-                            threads[name] = t
-                            t.start()
-                            logger.info("开始监听: [%s] %s", chat.chat_type, name)
-
-                    for name in list(threads.keys()):
-                        if not threads[name].is_alive():
-                            threads.pop(name)
-                            logger.info("停止监听: %s", name)
-
-                if stop_event.wait(scan_interval):
-                    break
-
-        logger.info("开始多线程监听独立聊天窗口消息 (Ctrl+C 退出)...")
-        scanner = threading.Thread(target=_scan_loop, daemon=True, name="scanner")
-        scanner.start()
-
-        try:
-            while not stop_event.is_set():
-                try:
-                    chat, msg = msg_queue.get(timeout=0.1)
-                except Empty:
-                    continue
-                try:
-                    callback(self, msg)
-                except Exception as e:
-                    logger.exception("回调异常 [%s]", chat.current_name)
-        except KeyboardInterrupt:
-            pass
-        finally:
-            logger.info("正在停止监听线程...")
-            stop_event.set()
-            scanner.join(timeout=3)
-            with threads_lock:
-                for t in threads.values():
-                    t.join(timeout=3)
-            self._stop_event = None
-            logger.info("监听已停止")
 
     def add_chat_listen(self, names: "str | list[str] | None" = None,
                        offscreen: bool = True) -> list[SeparateChat]:
@@ -11110,16 +10860,12 @@ class Weixin(WeixinWindow):
         if hasattr(self, '_stop_event') and self._stop_event is not None:
             self._stop_event.set()
 
-    def run(
-        self,
-        interval: float = 0.1,
-        idle_interval: float = 0.1,
-    ) -> None:
+    def run(self, interval: float = 0.1, idle_interval: float = 0.1) -> None:
         """
         启动消息监听（阻塞运行，Ctrl+C 退出）。
 
         仅监听通过 add_chat_listen 注册的聊天窗口。
-        消息通过 handle/on/once 装饰器注册的事件处理器分发。
+        消息通过 on/once 装饰器注册的事件处理器分发。
 
         通过 RuntimeId（UI Automation 为每个控件分配的唯一标识）进行差异比对，
         精确识别新增消息。
@@ -11130,7 +10876,7 @@ class Weixin(WeixinWindow):
         """
         if not self.has_handlers:
             raise ValueError(
-                "未注册任何事件处理器，请使用 @wx.handle(EVENT) 装饰器注册"
+                "未注册任何事件处理器，请使用 @wx.on(Event) 装饰器注册"
             )
         if not hasattr(self, '_listeners') or not self._chat_listeners:
             raise RuntimeError("未注册任何监听，请先调用 add_chat_listen")
