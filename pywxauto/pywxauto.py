@@ -2781,6 +2781,420 @@ class FriendCircle(WeixinWindow):
             raise RuntimeError("未找到'取消'按钮")
         return btn
 
+    def _select_file_in_dialog(self, file_path: str) -> None:
+        """
+        在系统文件选择对话框中选择文件。
+
+        等待 #32770 对话框出现，输入文件路径，按 Alt+O 打开。
+        """
+        file_dlg = self._win.WindowControl(ClassName="#32770")
+        if not file_dlg.Exists(maxSearchSeconds=5):
+            raise RuntimeError("文件选择对话框未弹出")
+
+        # 激活文件名输入框
+        file_dlg.SendKeys("{Alt}N")
+        time.sleep(0.3)
+
+        # 输入文件路径
+        file_edit = file_dlg.PaneControl(AutomationId="1148").EditControl()
+        if not file_edit.Exists(maxSearchSeconds=3):
+            file_edit = file_dlg.EditControl(AutomationId="1148")
+        if not file_edit.Exists(maxSearchSeconds=3):
+            raise RuntimeError("未找到文件名输入框")
+
+        vp = file_edit.GetValuePattern()
+        if vp:
+            vp.SetValue(file_path)
+        else:
+            paste(file_path)
+        time.sleep(0.3)
+
+        # Alt+O 打开
+        file_dlg.SendKeys("{Alt}O")
+        time.sleep(1)
+
+    def _set_remind_contacts(self, panel: auto.Control,
+                             contacts: list[str]) -> None:
+        """
+        在发布面板中设置"提醒谁看"的联系人。
+
+        流程:
+        1. 点击发布面板中的"提醒谁看"按钮
+        2. 等待 SessionPickerWindow（"微信提醒谁看"）弹出
+        3. 通过 _select_in_session_picker 搜索并勾选联系人
+        4. 点击"完成"关闭弹窗
+
+        Args:
+            panel:    发布面板控件
+            contacts: 联系人昵称列表
+        """
+        # 点击"提醒谁看"
+        remind_btn = panel.GroupControl(
+            ClassName="mmui::PublishComponent",
+            Name="提醒谁看",
+        )
+        if not remind_btn.Exists(maxSearchSeconds=2):
+            raise RuntimeError("未找到'提醒谁看'按钮")
+        remind_btn.Click(ratioX=_rand_ratio(), ratioY=_rand_ratio())
+        time.sleep(0.5)
+
+        # 复用 SessionPickerWindow 选择逻辑
+        self._select_in_session_picker("微信提醒谁看", contacts=contacts)
+
+    # ---- 隐私设置相关常量 ----
+    # 隐私按钮: ButtonControl, ClassName="mmui::PublishPrivacyView"
+    PRIVACY_BTN_CLASS = "mmui::PublishPrivacyView"
+    # 隐私选项: RadioButtonControl, ClassName="mmui::PublishPrivacySelection"
+    PRIVACY_SELECTION_CLASS = "mmui::PublishPrivacySelection"
+    # 隐私确定按钮: ButtonControl, ClassName="mmui::XOutlineButton", Name="确定"
+    PRIVACY_CONFIRM_NAME = "确定"
+    # 有效的隐私选项
+    PRIVACY_OPTIONS = ("公开", "私密", "谁可以看", "不给谁看")
+
+    def _set_privacy(self, panel: auto.Control, permission: str,
+                     permission_contacts: list[str] | None = None,
+                     permission_labels: list[str] | None = None) -> None:
+        """
+        在发布面板中设置"谁可以看"隐私权限。
+
+        流程:
+        1. 点击发布面板中的 mmui::PublishPrivacyView 按钮
+        2. 弹出隐私选择面板，包含 4 个 RadioButton:
+           "公开"、"私密"、"谁可以看"、"不给谁看"
+        3. 选择对应的 RadioButton
+        4. 若选择"谁可以看"或"不给谁看"，会弹出 SessionPickerWindow
+           （Name="微信谁可以看" 或 "微信不给谁看"），
+           包含"标签"和"朋友"两个 tab，可分别选择标签和联系人
+        5. 选完后点击"完成"关闭 SessionPickerWindow
+        6. 点击"确定"关闭隐私选择面板
+
+        控件结构:
+        - 隐私按钮: ButtonControl, ClassName="mmui::PublishPrivacyView"
+        - 隐私选项: RadioButtonControl, ClassName="mmui::PublishPrivacySelection"
+        - 确定按钮: ButtonControl, ClassName="mmui::XOutlineButton", Name="确定"
+        - SessionPickerWindow 内部结构同 _set_remind_contacts，
+          额外有"标签"/"朋友"两个 tab (mmui::XButton)
+
+        Args:
+            panel:               发布面板控件
+            permission:          隐私选项，"公开"/"私密"/"谁可以看"/"不给谁看"
+            permission_contacts: 联系人昵称列表（"谁可以看"/"不给谁看"时使用）
+            permission_labels:   标签名称列表（"谁可以看"/"不给谁看"时使用）
+        """
+        if permission not in self.PRIVACY_OPTIONS:
+            raise ValueError(
+                f"无效的隐私选项 '{permission}'，"
+                f"有效值: {self.PRIVACY_OPTIONS}"
+            )
+
+        # 点击隐私按钮打开隐私选择面板
+        privacy_btn = panel.ButtonControl(
+            ClassName=self.PRIVACY_BTN_CLASS,
+            searchDepth=5,
+        )
+        if not privacy_btn.Exists(maxSearchSeconds=2):
+            raise RuntimeError("未找到'谁可以看'隐私按钮")
+        privacy_btn.Click(ratioX=_rand_ratio(), ratioY=_rand_ratio())
+        time.sleep(0.5)
+
+        # 隐私选项面板覆盖在发布面板上方，但不在 panel 子树中，
+        # 需要在 SNSWindow 上搜索
+        # 选择对应的隐私选项 RadioButton
+        radio = self._win.RadioButtonControl(
+            ClassName=self.PRIVACY_SELECTION_CLASS,
+            Name=permission,
+            searchDepth=10,
+        )
+        if not radio.Exists(maxSearchSeconds=2):
+            raise RuntimeError(f"未找到隐私选项 '{permission}'")
+        radio.Click(ratioX=_rand_ratio(), ratioY=_rand_ratio())
+        time.sleep(0.5)
+
+        # "谁可以看"和"不给谁看"需要选择联系人/标签
+        if permission in ("谁可以看", "不给谁看"):
+            picker_name = f"微信{permission}"
+            self._select_in_session_picker(
+                picker_name, permission_contacts, permission_labels,
+            )
+
+        # 点击"确定"关闭隐私选择面板（同样在 SNSWindow 上搜索）
+        confirm_btn = self._win.ButtonControl(
+            ClassName=self.PUBLISH_BTN_CLASS,
+            Name=self.PRIVACY_CONFIRM_NAME,
+            searchDepth=10,
+        )
+        if not confirm_btn.Exists(maxSearchSeconds=2):
+            raise RuntimeError("未找到隐私设置'确定'按钮")
+        confirm_btn.Click(ratioX=_rand_ratio(), ratioY=_rand_ratio())
+        time.sleep(0.5)
+
+    def _select_in_session_picker(
+        self,
+        picker_name: str,
+        contacts: list[str] | None = None,
+        labels: list[str] | None = None,
+    ) -> None:
+        """
+        在 SessionPickerWindow 中选择联系人和/或标签。
+
+        "谁可以看"/"不给谁看"/"提醒谁看"共用此方法。
+        SessionPickerWindow 内部结构:
+        - 搜索框: EditControl, Name="搜索", ClassName="mmui::XValidatorTextEdit"
+        - 搜索结果: CheckBoxControl, ClassName="mmui::SearchContactCellView"
+        - "标签" tab: ButtonControl, Name="标签", ClassName="mmui::XButton"
+        - "朋友" tab: ButtonControl, Name="朋友", ClassName="mmui::XButton"
+        - 标签列表项: CheckBoxControl, ClassName="mmui::SPSelectionContactRow"
+        - 完成按钮: ButtonControl, AutomationId="confirm_btn"
+
+        注意：picker 内部存在自引用控件，所有子控件查找必须限制 searchDepth。
+
+        Args:
+            picker_name: SessionPickerWindow 的 Name（如 "微信谁可以看"）
+            contacts:    联系人昵称列表
+            labels:      标签名称列表
+        """
+        picker = self._win.WindowControl(
+            ClassName="mmui::SessionPickerWindow",
+            Name=picker_name,
+        )
+        if not picker.Exists(maxSearchSeconds=3):
+            raise RuntimeError(f"'{picker_name}'弹窗未打开")
+
+        # 选择标签
+        if labels:
+            # 点击"标签" tab
+            label_tab = picker.ButtonControl(
+                ClassName="mmui::XButton",
+                Name="标签",
+                searchDepth=5,
+            )
+            if label_tab.Exists(maxSearchSeconds=2):
+                label_tab.Click(ratioX=_rand_ratio(), ratioY=_rand_ratio())
+                time.sleep(0.5)
+
+                # 标签列表中直接勾选（标签数量通常不多，无需搜索）
+                contact_list = picker.ListControl(
+                    AutomationId="sp_to_select_contact_list",
+                    searchDepth=5,
+                )
+                if contact_list.Exists(maxSearchSeconds=2):
+                    for label_name in labels:
+                        label_item = contact_list.CheckBoxControl(
+                            Name=label_name,
+                            searchDepth=2,
+                        )
+                        if label_item.Exists(maxSearchSeconds=2):
+                            label_item.Click(
+                                ratioX=_rand_ratio(), ratioY=_rand_ratio(),
+                            )
+                            time.sleep(0.3)
+                        else:
+                            logger.warning("未找到标签 '%s'", label_name)
+
+        # 选择联系人
+        if contacts:
+            # 点击"朋友" tab（如果有标签 tab 说明需要切换）
+            friend_tab = picker.ButtonControl(
+                ClassName="mmui::XButton",
+                Name="朋友",
+                searchDepth=5,
+            )
+            if friend_tab.Exists(maxSearchSeconds=2):
+                friend_tab.Click(ratioX=_rand_ratio(), ratioY=_rand_ratio())
+                time.sleep(0.5)
+
+            # 通过搜索逐个选择联系人
+            search_edit = picker.EditControl(
+                ClassName="mmui::XValidatorTextEdit",
+                Name="搜索",
+                searchDepth=5,
+            )
+            if not search_edit.Exists(maxSearchSeconds=2):
+                raise RuntimeError("未找到搜索框")
+
+            not_found: list[str] = []
+
+            for contact in contacts:
+                search_edit.Click(ratioX=_rand_ratio(), ratioY=_rand_ratio())
+                time.sleep(0.2)
+                search_edit.SendKeys("{Ctrl}a{Del}")
+                time.sleep(0.2)
+                paste(contact)
+                time.sleep(1)
+
+                result_list = picker.ListControl(
+                    AutomationId="sp_search_result_list",
+                    searchDepth=5,
+                )
+                if not result_list.Exists(maxSearchSeconds=2):
+                    logger.warning("搜索 '%s' 时未出现结果列表", contact)
+                    not_found.append(contact)
+                    continue
+
+                matched = result_list.CheckBoxControl(
+                    ClassName="mmui::SearchContactCellView",
+                    Name=contact,
+                    searchDepth=2,
+                )
+                if matched.Exists(maxSearchSeconds=2):
+                    matched.Click(ratioX=_rand_ratio(), ratioY=_rand_ratio())
+                    time.sleep(0.3)
+                else:
+                    first_result = result_list.CheckBoxControl(
+                        ClassName="mmui::SearchContactCellView",
+                        searchDepth=2,
+                    )
+                    if first_result.Exists(maxSearchSeconds=1):
+                        logger.warning(
+                            "未精确匹配 '%s'，选择第一个结果: '%s'",
+                            contact, first_result.Name,
+                        )
+                        first_result.Click(
+                            ratioX=_rand_ratio(), ratioY=_rand_ratio(),
+                        )
+                        time.sleep(0.3)
+                    else:
+                        logger.warning("搜索 '%s' 无结果", contact)
+                        not_found.append(contact)
+
+            if not_found:
+                logger.warning("以下联系人未找到: %s", not_found)
+
+        # 点击"完成"按钮
+        confirm_btn = picker.ButtonControl(
+            AutomationId="confirm_btn",
+            searchDepth=5,
+        )
+        if not confirm_btn.Exists(maxSearchSeconds=2):
+            raise RuntimeError("未找到'完成'按钮")
+        confirm_btn.Click(ratioX=_rand_ratio(), ratioY=_rand_ratio())
+        time.sleep(0.5)
+
+    @PIM.guard
+    def publish(self, text: Optional[str] = None, images: list[str] = None,
+                video: str = None, remind_contacts: list[str] = None,
+                permission: str = None,
+                permission_contacts: list[str] = None,
+                permission_labels: list[str] = None) -> bool:
+        """
+        发布朋友圈。
+
+        支持纯文字、图文、视频三种模式（图片和视频互斥）。
+
+        Args:
+            text:                 文本内容（纯文字模式必填，图文/视频模式可选）
+            images:               图片路径列表（与 video 互斥）
+            video:                视频路径（与 images 互斥）
+            remind_contacts:      提醒谁看的联系人昵称列表
+            permission:           隐私设置，可选值:
+                                  "公开"（默认）/ "私密" / "谁可以看" / "不给谁看"
+            permission_contacts:  隐私联系人列表（"谁可以看"/"不给谁看"时使用）
+            permission_labels:    隐私标签列表（"谁可以看"/"不给谁看"时使用）
+
+        Returns:
+            True 发布成功
+        """
+        # 参数校验
+        if images and video:
+            raise ValueError("images 和 video 只能指定其中一个参数")
+        if images and len(images) > 9:
+            raise ValueError("朋友圈最多发 9 张图片")
+        has_media = bool(images) or bool(video)
+        if not text and not has_media:
+            raise ValueError("text 和 images/video 至少指定一个")
+
+        self._open_sns_window()
+
+        # 右键"发表"按钮弹出菜单
+        publish_tab = self._find_toolbar_button(self.PUBLISH_TAB_NAME)
+        publish_tab.RightClick(ratioX=_rand_ratio(), ratioY=_rand_ratio())
+        time.sleep(0.5)
+
+        if has_media:
+            # 点击"选照片或视频"
+            menu_item = self._win.MenuItemControl(
+                ClassName="mmui::XMenuView",
+                Name="选照片或视频",
+            )
+            if not menu_item.Exists(maxSearchSeconds=2):
+                raise RuntimeError("未找到'选照片或视频'菜单项")
+            menu_item.Click(ratioX=_rand_ratio(), ratioY=_rand_ratio())
+            time.sleep(1)
+
+            # 选择第一个文件
+            first_file = images[0] if images else video
+            self._select_file_in_dialog(first_file)
+
+            # 等待发布面板出现
+            panel = self._win.GroupControl(
+                ClassName=self.PUBLISH_PANEL_CLASS,
+                AutomationId=self.PUBLISH_PANEL_ID,
+            )
+            if not panel.Exists(maxSearchSeconds=5):
+                raise RuntimeError("发布面板未打开")
+
+            # 多张图片：逐个点击"添加图片"格子添加
+            if images and len(images) > 1:
+                for img_path in images[1:]:
+                    # "添加图片"是 ListItemControl，ClassName="mmui::PublishImageAddGridCell"
+                    add_cell = panel.ListItemControl(
+                        ClassName="mmui::PublishImageAddGridCell",
+                        Name="添加图片",
+                        searchDepth=10,
+                    )
+                    if not add_cell.Exists(maxSearchSeconds=3):
+                        raise RuntimeError("未找到'添加图片'按钮")
+
+                    add_cell.Click(ratioX=_rand_ratio(), ratioY=_rand_ratio())
+                    time.sleep(1)
+
+                    self._select_file_in_dialog(img_path)
+        else:
+            # 纯文字：点击"发表文字"
+            menu_item = self._win.MenuItemControl(
+                ClassName="mmui::XMenuView",
+                Name="发表文字",
+            )
+            if not menu_item.Exists(maxSearchSeconds=2):
+                raise RuntimeError("未找到'发表文字'菜单项")
+            menu_item.Click(ratioX=_rand_ratio(), ratioY=_rand_ratio())
+            time.sleep(1)
+
+            panel = self._win.GroupControl(
+                ClassName=self.PUBLISH_PANEL_CLASS,
+                AutomationId=self.PUBLISH_PANEL_ID,
+            )
+            if not panel.Exists(maxSearchSeconds=5):
+                raise RuntimeError("发布面板未打开")
+
+        # 输入文字内容
+        if text:
+            edit = self._find_publish_input(panel)
+            edit.GetValuePattern().SetValue(text)
+
+        # 设置提醒谁看
+        if remind_contacts:
+            self._set_remind_contacts(panel, remind_contacts)
+
+        # 设置隐私权限
+        if permission:
+            self._set_privacy(
+                panel, permission, permission_contacts, permission_labels,
+            )
+
+        # 点击"发表"
+        publish_btn = self._find_publish_button(panel)
+        publish_btn.Click(ratioX=_rand_ratio(), ratioY=_rand_ratio())
+
+        # 等待发布面板消失
+        for _ in range(30):
+            if not panel.Exists(maxSearchSeconds=1):
+                logger.info("朋友圈发布成功")
+                return True
+            time.sleep(1)
+
+        raise RuntimeError("发布超时，发布面板未关闭")
+
     @PIM.guard
     def publish_text(self, content: str) -> bool:
         """
@@ -2815,15 +3229,7 @@ class FriendCircle(WeixinWindow):
 
         # 3. 找到文本输入框并输入内容
         edit = self._find_publish_input(panel)
-        edit.Click(ratioX=0.5, ratioY=0.5)
-        time.sleep(0.3)
-
-        # 清空输入框（如果有残留内容）
-        edit.SendKeys("{Ctrl}a{Del}")
-        time.sleep(0.2)
-
-        # 通过剪贴板粘贴文本，避免 SendKeys 丢字或特殊字符问题
-        paste(content)
+        edit.GetValuePattern().SetValue(content)
         time.sleep(0.5)
 
         # 4. 点击"发表"按钮
