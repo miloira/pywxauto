@@ -11245,6 +11245,28 @@ class Weixin(WeixinWindow):
         """发送消息（Enter）"""
         self.shortcut("发送消息")
 
+    # ---- 朋友圈快捷方法 ----
+
+    def get_moments(self, count: int = 10, position: str = "top") -> list:
+        """获取朋友圈动态列表，委托给 friend_circle"""
+        return self.friend_circle.get_moments(count, position)
+
+    def iter_moments(self, count: int = 10, position: str = "top"):
+        """逐条获取朋友圈动态（生成器），委托给 friend_circle"""
+        yield from self.friend_circle.iter_moments(count, position)
+
+    def like_moment(self, moment: "Moment") -> bool:
+        """对指定动态点赞"""
+        return self.friend_circle.like(moment)
+
+    def unlike_moment(self, moment: "Moment") -> bool:
+        """取消指定动态的点赞"""
+        return self.friend_circle.unlike(moment)
+
+    def comment_moment(self, moment: "Moment", content: str) -> bool:
+        """对指定动态评论"""
+        return self.friend_circle.comment(moment, content)
+
     def ocr(self, image: bytes | str) -> dict:
         """
         识别图片中的文本内容。
