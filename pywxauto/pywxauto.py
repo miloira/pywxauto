@@ -4979,19 +4979,22 @@ class Chat:
         """
         在当前会话中发送文本消息，返回发送状态。
 
-        通过剪贴板粘贴输入文本，避免 SendKeys 丢字或特殊字符问题。
+        通过 ValuePattern 设置输入框文本，然后按回车键发送。
         """
         if self.wx:
             self.wx.activate()
-        self.clear_input()
+
+        # 输入方式一 设置文本
         field = self._input_field
         if not field.Exists(maxSearchSeconds=2):
             raise RuntimeError("未找到聊天输入框")
+        field.GetValuePattern().SetValue(content)
 
-        # 通过剪贴板粘贴文本
-        paste(content)
-        time.sleep(0.2)
+        # 输入方式二 复制粘贴
+        # self.clear_input()
+        # paste(content)
 
+        # 回车发送
         self._win.SendKeys("{Enter}")
 
         # 发送后校验：输入框应已清空
