@@ -72,6 +72,7 @@ from __future__ import annotations
 import ctypes
 import ctypes.wintypes
 import fnmatch
+import functools
 import glob
 import io
 import json
@@ -352,33 +353,33 @@ class PIM:
     物理键盘/鼠标输入监控器 (Physical Input Monitor)。
 
     所有状态存储在类变量上，通过类方法操作，全局单例。
-    `@PIM.wait_idle` 装饰器可在类定义时使用，参数在实例化后生效。
+    `@PIM.guard` 装饰器可在类定义时使用，参数在实例化后生效。
 
     用法::
 
         # 方式1: 上下文管理器
-        with PIM(human_wait=3):
+        with PIM(idle_wait=3):
             wx = Weixin()
             wx.send_text("写诗喂狗", "hello")  # 自动等 3 秒物理空闲
 
         # 方式2: 手动管理
-        pim = PIM(human_wait=3)
+        pim = PIM(idle_wait=3)
         pim.start()
         ...
         pim.stop()
 
         # 方式3: 类方法装饰器（类定义时使用）
         class Chat:
-            @PIM.wait_idle
+            @PIM.guard
             def send_text(self, content): ...
 
-            @PIM.wait_idle(5)  # 固定 5 秒，忽略 human_wait
+            @PIM.guard(5)  # 固定 5 秒，忽略 idle_wait
             def send_file(self, path): ...
     """
 
     # ---- 类变量（全局单例状态） ----
-    human_wait: float = 0
-    block: bool = False
+    idle_wait: float = 0
+    lock_input: bool = False
     _running: bool = False
     _last_physical_input: float = 0
     _lock: threading.Lock = threading.Lock()
@@ -387,15 +388,15 @@ class PIM:
     _kb_proc = None
     _mouse_proc = None
 
-    def __init__(self, human_wait: float = 0, block: bool = False):
-        PIM.human_wait = human_wait
-        PIM.block = block
+    def __init__(self, idle_wait: float = 0, lock_input: bool = False):
+        PIM.idle_wait = idle_wait
+        PIM.lock_input = lock_input
 
-    def __call__(self, human_wait: float = None, block: bool = None) -> "PIM":
-        if human_wait is not None:
-            PIM.human_wait = human_wait
-        if block is not None:
-            PIM.block = block
+    def __call__(self, idle_wait: float = None, lock_input: bool = None) -> "PIM":
+        if idle_wait is not None:
+            PIM.idle_wait = idle_wait
+        if lock_input is not None:
+            PIM.lock_input = lock_input
         return self
 
     def __enter__(self) -> "PIM":
@@ -513,39 +514,37 @@ class PIM:
     # ---- 装饰器 ----
 
     @staticmethod
-    def wait_idle(func_or_wait=None):
+    def guard(func_or_wait=None):
         """
         类装饰器：被装饰的方法执行前等待物理输入空闲。
 
-        等待时间和是否锁定输入由 PIM.human_wait 和 PIM.block 控制，
-        通过 PIM(human_wait=3, block=True) 或 Weixin(human_wait=3, block=True) 设置。
+        等待时间和是否锁定输入由 PIM.idle_wait 和 PIM.lock_input 控制，
+        通过 PIM(idle_wait=3, lock_input=True) 或 Weixin(idle_wait=3, lock_input=True) 设置。
 
         Args:
-            func_or_wait: 函数或等待秒数（覆盖 human_wait）
+            func_or_wait: 函数或等待秒数（覆盖 idle_wait）
 
         用法::
 
-            @PIM.wait_idle
+            @PIM.guard
             def send_text(self, content): ...
 
-            @PIM.wait_idle(5)  # 固定 5 秒
+            @PIM.guard(5)  # 固定 5 秒
             def send_file(self, path): ...
         """
-        import functools
-
-        def _make_wrapper(fn, fixed_wait=None, do_block=None):
+        def _make_wrapper(fn, idle_wait=None, lock_input=None):
             @functools.wraps(fn)
             def wrapper(*args, **kwargs):
-                if PIM._running and PIM.human_wait > 0:
-                    t = fixed_wait if fixed_wait is not None else PIM.human_wait
+                if PIM._running and PIM.idle_wait > 0:
+                    t = idle_wait if idle_wait is not None else PIM.idle_wait
                     PIM.wait_for_idle(t)
-                should_block = do_block if do_block is not None else PIM.block
-                if should_block:
+                should_lock = lock_input if lock_input is not None else PIM.lock_input
+                if should_lock:
                     PIM.block_input()
                 try:
                     return fn(*args, **kwargs)
                 finally:
-                    if should_block:
+                    if should_lock:
                         PIM.unblock_input()
             return wrapper
 
@@ -555,7 +554,7 @@ class PIM:
         if isinstance(func_or_wait, (int, float)):
             fixed = float(func_or_wait)
             def decorator(fn):
-                return _make_wrapper(fn, fixed_wait=fixed)
+                return _make_wrapper(fn, fixed_idle_wait=fixed)
             return decorator
 
         if func_or_wait is None:
@@ -563,7 +562,7 @@ class PIM:
                 return _make_wrapper(fn)
             return decorator
 
-        raise TypeError(f"PIM.wait_idle 参数类型错误: {type(func_or_wait)}")
+        raise TypeError(f"PIM.guard 参数类型错误: {type(func_or_wait)}")
 
 
 def get_clipboard() -> str:
@@ -1430,14 +1429,14 @@ class WeixinWindow:
         """窗口是否已最大化"""
         return self._window.IsMaximize()
 
-    @PIM.wait_idle
+    @PIM.guard
     def activate(self) -> None:
         """激活窗口（置前并聚焦）"""
         self._window.SetActive()
         self._window.SetFocus()
         time.sleep(0.2)
 
-    @PIM.wait_idle
+    @PIM.guard
     def pin(self, event: bool = True, simulate_move: bool = True) -> None:
         """置顶窗口"""
         if event:
@@ -1450,7 +1449,7 @@ class WeixinWindow:
             if btn.Exists(0, 0):
                 btn.Click(simulateMove=simulate_move)
 
-    @PIM.wait_idle
+    @PIM.guard
     def unpin(self, event: bool = True, simulate_move: bool = True) -> None:
         """取消置顶窗口"""
         if event:
@@ -1463,7 +1462,7 @@ class WeixinWindow:
             if btn.Exists(0, 0):
                 btn.Click(simulateMove=simulate_move)
 
-    @PIM.wait_idle
+    @PIM.guard
     def minimize(self, event: bool = True, simulate_move: bool = True) -> None:
         """最小化窗口"""
         if event:
@@ -1478,7 +1477,7 @@ class WeixinWindow:
             btn.Click(ratioX=_rand_ratio(), ratioY=_rand_ratio(),
                       simulateMove=simulate_move)
 
-    @PIM.wait_idle
+    @PIM.guard
     def maximize(self, event: bool = True, simulate_move: bool = True) -> None:
         """最大化/还原窗口"""
         if event:
@@ -1502,7 +1501,7 @@ class WeixinWindow:
         """还原窗口"""
         self._window.Restore()
 
-    @PIM.wait_idle
+    @PIM.guard
     def close(self, event: bool = True, simulate_move: bool = True) -> None:
         """关闭窗口"""
         if event:
@@ -1592,7 +1591,7 @@ class Login(WeixinWindow):
             return name[len(prefix):]
         return name
 
-    @PIM.wait_idle
+    @PIM.guard
     def enter(self, timeout: int = 30) -> bool:
         """
         点击"进入微信"按钮登录。
@@ -1627,7 +1626,7 @@ class Login(WeixinWindow):
 
         raise LoginError("登录超时，登录窗口未关闭")
 
-    @PIM.wait_idle
+    @PIM.guard
     def switch_account(self) -> None:
         """
         点击"切换账号"按钮。
@@ -1645,7 +1644,7 @@ class Login(WeixinWindow):
         btn.Click(ratioX=_rand_ratio(), ratioY=_rand_ratio())
         time.sleep(0.5)
 
-    @PIM.wait_idle
+    @PIM.guard
     def transfer_only(self) -> None:
         """
         点击"仅传输文件"按钮。
@@ -1704,7 +1703,7 @@ class Login(WeixinWindow):
         if not self._is_proxy_page_open():
             self.open_proxy_settings()
 
-    @PIM.wait_idle
+    @PIM.guard
     def open_proxy_settings(self) -> None:
         """
         点击"网络代理设置"按钮，进入代理配置页面。
@@ -1731,7 +1730,7 @@ class Login(WeixinWindow):
         if not back_btn.Exists(maxSearchSeconds=3):
             raise RuntimeError("代理设置页面未打开")
 
-    @PIM.wait_idle
+    @PIM.guard
     def close_proxy_settings(self) -> None:
         """
         点击"返回"按钮，从代理设置页面返回登录页面。
@@ -1770,7 +1769,7 @@ class Login(WeixinWindow):
             return toggle.ToggleState == 1
         return False
 
-    @PIM.wait_idle
+    @PIM.guard
     def enable_proxy(self) -> None:
         """
         开启代理。
@@ -1790,7 +1789,7 @@ class Login(WeixinWindow):
         sw.Click(ratioX=_rand_ratio(), ratioY=_rand_ratio())
         time.sleep(0.5)
 
-    @PIM.wait_idle
+    @PIM.guard
     def disable_proxy(self) -> None:
         """
         关闭代理。
@@ -1857,7 +1856,7 @@ class Login(WeixinWindow):
             return vp.Value or ""
         return ""
 
-    @PIM.wait_idle
+    @PIM.guard
     def set_proxy(self, address: str = "", port: str = "",
                   username: str = "", password: str = "") -> None:
         """
@@ -1917,7 +1916,7 @@ class Login(WeixinWindow):
             result["password"] = self._get_proxy_field(self.PROXY_PASS_NAME)
         return result
 
-    @PIM.wait_idle
+    @PIM.guard
     def save_proxy(self) -> None:
         """
         点击"保存"按钮保存代理设置。
@@ -1935,7 +1934,7 @@ class Login(WeixinWindow):
         btn.Click(ratioX=_rand_ratio(), ratioY=_rand_ratio())
         time.sleep(0.5)
 
-    @PIM.wait_idle
+    @PIM.guard
     def close(self, event: bool = True, simulate_move: bool = True) -> None:
         """
         关闭登录窗口。
@@ -2301,7 +2300,7 @@ class Moment(WeixinWindow):
                 items.append((raw, cls_name))
         return items
 
-    @PIM.wait_idle
+    @PIM.guard
     def get(self, count: int = 10, position="top") -> list[MomentItem]:
         """
         获取指定条数的朋友圈动态列表。
@@ -2499,7 +2498,7 @@ class Moment(WeixinWindow):
             raise RuntimeError("未找到'取消'按钮")
         return btn
 
-    @PIM.wait_idle
+    @PIM.guard
     def publish_text(self, content: str) -> bool:
         """
         发布纯文本朋友圈。
@@ -2557,7 +2556,7 @@ class Moment(WeixinWindow):
 
         raise RuntimeError("发布超时，发布面板未关闭")
 
-    @PIM.wait_idle
+    @PIM.guard
     def cancel_publish(self) -> None:
         """
         取消当前发布操作。
@@ -2611,7 +2610,7 @@ class Moment(WeixinWindow):
             raise RuntimeError(f"未找到工具栏'{name}'按钮")
         return btn
 
-    @PIM.wait_idle
+    @PIM.guard
     def refresh(self) -> None:
         """
         刷新朋友圈。
@@ -2794,42 +2793,42 @@ class VoipCallWindow:
         except RuntimeError:
             return True
 
-    @PIM.wait_idle
+    @PIM.guard
     def toggle_mic(self) -> None:
         """切换麦克风开关"""
         btn = self._find_toolbar_button("麦克风已开", "麦克风已关")
         btn.Click(ratioX=_rand_ratio(), ratioY=_rand_ratio())
         time.sleep(0.3)
 
-    @PIM.wait_idle
+    @PIM.guard
     def toggle_speaker(self) -> None:
         """切换扬声器开关"""
         btn = self._find_toolbar_button("扬声器已开", "扬声器已关")
         btn.Click(ratioX=_rand_ratio(), ratioY=_rand_ratio())
         time.sleep(0.3)
 
-    @PIM.wait_idle
+    @PIM.guard
     def toggle_camera(self) -> None:
         """切换摄像头开关（仅视频通话）"""
         btn = self._find_toolbar_button("摄像头已开", "摄像头已关", "无摄像头")
         btn.Click(ratioX=_rand_ratio(), ratioY=_rand_ratio())
         time.sleep(0.3)
 
-    @PIM.wait_idle
+    @PIM.guard
     def cancel(self) -> None:
         """取消通话（呼叫中未接通时）"""
         btn = self._find_toolbar_button("取消")
         btn.Click(ratioX=_rand_ratio(), ratioY=_rand_ratio())
         time.sleep(0.3)
 
-    @PIM.wait_idle
+    @PIM.guard
     def hangup(self) -> None:
         """挂断通话（通话中）"""
         btn = self._find_toolbar_button("挂断")
         btn.Click(ratioX=_rand_ratio(), ratioY=_rand_ratio())
         time.sleep(0.3)
 
-    @PIM.wait_idle
+    @PIM.guard
     def end_call(self) -> None:
         """结束通话（自动识别取消/挂断）"""
         try:
@@ -2839,14 +2838,14 @@ class VoipCallWindow:
         btn.Click(ratioX=_rand_ratio(), ratioY=_rand_ratio())
         time.sleep(0.3)
 
-    @PIM.wait_idle
+    @PIM.guard
     def switch_to_video(self) -> None:
         """切换到视频通话（通话中可用）"""
         btn = self._find_toolbar_button("切换到视频通话")
         btn.Click(ratioX=_rand_ratio(), ratioY=_rand_ratio())
         time.sleep(0.3)
 
-    @PIM.wait_idle
+    @PIM.guard
     def pin(self) -> None:
         """置顶窗口"""
         self._ensure_exists()
@@ -2857,7 +2856,7 @@ class VoipCallWindow:
             btn.Click(ratioX=_rand_ratio(), ratioY=_rand_ratio())
             time.sleep(0.2)
 
-    @PIM.wait_idle
+    @PIM.guard
     def minimize(self) -> None:
         """最小化通话窗口"""
         self._ensure_exists()
@@ -2868,7 +2867,7 @@ class VoipCallWindow:
             btn.Click(ratioX=_rand_ratio(), ratioY=_rand_ratio())
             time.sleep(0.2)
 
-    @PIM.wait_idle
+    @PIM.guard
     def maximize(self) -> None:
         """最大化通话窗口"""
         self._ensure_exists()
@@ -2879,7 +2878,7 @@ class VoipCallWindow:
             btn.Click(ratioX=_rand_ratio(), ratioY=_rand_ratio())
             time.sleep(0.2)
 
-    @PIM.wait_idle
+    @PIM.guard
     def close(self) -> None:
         """关闭通话窗口"""
         self._ensure_exists()
@@ -3034,7 +3033,7 @@ class NoteEditorWindow(WeixinWindow):
         )
         return doc.GroupControl(AutomationId=self.MAIN_CONTAINER_ID)
 
-    @PIM.wait_idle
+    @PIM.guard
     def focus_editor(self, force_click: bool = True) -> None:
         """
         使编辑器获得焦点。
@@ -3074,7 +3073,7 @@ class NoteEditorWindow(WeixinWindow):
                 return text if text else ""
         return ""
 
-    @PIM.wait_idle
+    @PIM.guard
     def set_content(self, text: str) -> None:
         """
         设置编辑器内容（覆盖现有内容）。
@@ -3093,7 +3092,7 @@ class NoteEditorWindow(WeixinWindow):
         else:
             raise RuntimeError("编辑器不支持 ValuePattern")
 
-    @PIM.wait_idle
+    @PIM.guard
     def type_text(self, text: str) -> None:
         """
         在编辑器中输入文本（追加到当前光标位置）。
@@ -3107,7 +3106,7 @@ class NoteEditorWindow(WeixinWindow):
         editor.SendKeys(text)
         time.sleep(0.2)
 
-    @PIM.wait_idle
+    @PIM.guard
     def clear(self) -> None:
         """清空编辑器内容"""
         self.focus_editor()
@@ -3116,7 +3115,7 @@ class NoteEditorWindow(WeixinWindow):
             editor.SendKeys("{Ctrl}a{Del}")
             time.sleep(0.2)
 
-    @PIM.wait_idle
+    @PIM.guard
     def select_all(self) -> None:
         """全选编辑器内容"""
         self.focus_editor()
@@ -3127,7 +3126,7 @@ class NoteEditorWindow(WeixinWindow):
     # 底部工具栏渲染在 WebView 内部，不暴露为 UI Automation 控件，
     # 因此通过键盘快捷键操作格式。
 
-    @PIM.wait_idle
+    @PIM.guard
     def begin_voice_input(self) -> None:
         """
         开始语音输入：按下 Ctrl+Win 不松开。
@@ -3143,7 +3142,7 @@ class NoteEditorWindow(WeixinWindow):
         ctypes.windll.user32.keybd_event(VK_LWIN, 0, KEYEVENTF_KEYDOWN, 0)
         time.sleep(0.1)
 
-    @PIM.wait_idle
+    @PIM.guard
     def end_voice_input(self) -> None:
         """
         结束语音输入：释放 Ctrl+Win 按键。
@@ -3157,7 +3156,7 @@ class NoteEditorWindow(WeixinWindow):
         ctypes.windll.user32.keybd_event(VK_CONTROL, 0, KEYEVENTF_KEYUP, 0)
         time.sleep(0.1)
 
-    @PIM.wait_idle
+    @PIM.guard
     def add_file(self, file_path: str) -> None:
         """
         通过 Ctrl+O 打开文件选择对话框，输入路径并确认添加文件。
@@ -3185,63 +3184,63 @@ class NoteEditorWindow(WeixinWindow):
         dlg.SendKeys("{Alt}O")
         time.sleep(0.5)
 
-    @PIM.wait_idle
+    @PIM.guard
     def bold(self) -> None:
         """加粗（Ctrl+B）"""
         self.focus_editor(force_click=False)
         self._editor.SendKeys("{Ctrl}B")
         time.sleep(0.1)
 
-    @PIM.wait_idle
+    @PIM.guard
     def italic(self) -> None:
         """斜体（Ctrl+I）"""
         self.focus_editor(force_click=False)
         self._editor.SendKeys("{Ctrl}I")
         time.sleep(0.1)
 
-    @PIM.wait_idle
+    @PIM.guard
     def underline(self) -> None:
         """下划线（Ctrl+U）"""
         self.focus_editor(force_click=False)
         self._editor.SendKeys("{Ctrl}U")
         time.sleep(0.1)
 
-    @PIM.wait_idle
+    @PIM.guard
     def highlight(self) -> None:
         """高亮（Ctrl+Shift+H）"""
         self.focus_editor(force_click=False)
         self._editor.SendKeys("{Ctrl}{Shift}H")
         time.sleep(0.1)
 
-    @PIM.wait_idle
+    @PIM.guard
     def undo(self) -> None:
         """撤销（Ctrl+Z）"""
         self.focus_editor(force_click=False)
         self._editor.SendKeys("{Ctrl}z")
         time.sleep(0.1)
 
-    @PIM.wait_idle
+    @PIM.guard
     def redo(self) -> None:
         """重做（Ctrl+Y）"""
         self.focus_editor(force_click=False)
         self._editor.SendKeys("{Ctrl}y")
         time.sleep(0.1)
 
-    @PIM.wait_idle
+    @PIM.guard
     def new_line(self) -> None:
         """换行（Enter）"""
         self.focus_editor()
         self._editor.SendKeys("{Enter}")
         time.sleep(0.1)
 
-    @PIM.wait_idle
+    @PIM.guard
     def save(self) -> None:
         """保存笔记（Ctrl+S）"""
         self.focus_editor(force_click=False)
         self._editor.SendKeys("{Ctrl}s")
         time.sleep(0.3)
 
-    @PIM.wait_idle
+    @PIM.guard
     def add_tags(self, *tags: str) -> None:
         """
         添加标签。
@@ -3273,14 +3272,14 @@ class NoteEditorWindow(WeixinWindow):
         auto.SendKeys("{Esc}")
         time.sleep(0.2)
 
-    @PIM.wait_idle
+    @PIM.guard
     def paste(self) -> None:
         """粘贴剪贴板内容（Ctrl+V）"""
         self.focus_editor()
         self._editor.SendKeys("{Ctrl}v")
         time.sleep(0.2)
 
-    @PIM.wait_idle
+    @PIM.guard
     def paste_file(self, file_path: str) -> None:
         """
         通过剪贴板粘贴文件到笔记中。
@@ -3340,7 +3339,7 @@ class FileManager(WeixinWindow):
             return self._win
         return None
 
-    @PIM.wait_idle
+    @PIM.guard
     def open(self, filter_type: str = "") -> bool:
         """
         打开聊天文件管理器窗口。
@@ -3397,7 +3396,7 @@ class FileManager(WeixinWindow):
         time.sleep(0.5)
         return True
 
-    @PIM.wait_idle
+    @PIM.guard
     def close(self, method: str = "event") -> None:
         """
         关闭聊天文件管理器窗口。
@@ -3489,7 +3488,7 @@ class FileManager(WeixinWindow):
             time.sleep(0.3)
         return None
 
-    @PIM.wait_idle
+    @PIM.guard
     def save_file_as(self, file_cell, file_path: str) -> bool:
         """
         对文件列表中的某个文件执行"另存为"操作。
@@ -3560,7 +3559,7 @@ class FileManager(WeixinWindow):
             auto.SendKeys("{Esc}", waitTime=0.3)
             return False
 
-    @PIM.wait_idle
+    @PIM.guard
     def download_to(self, file_cell, file_path: str) -> bool:
         """
         对文件列表中的某个文件执行"下载到"操作。
@@ -3628,7 +3627,7 @@ class FileManager(WeixinWindow):
             auto.SendKeys("{Esc}", waitTime=0.3)
             return False
 
-    @PIM.wait_idle
+    @PIM.guard
     def delete_file(self, file_cell) -> bool:
         """
         删除文件列表中的某个文件。
@@ -3684,7 +3683,7 @@ class FileManager(WeixinWindow):
             return True
         return False
 
-    @PIM.wait_idle
+    @PIM.guard
     def download_file(self, file_cell, timeout: int = 60) -> bool:
         """
         下载文件列表中的某个文件。
@@ -3985,7 +3984,7 @@ class Session:
                 continue
         return None
 
-    @PIM.wait_idle
+    @PIM.guard
     def click(self, name: str) -> None:
         """通过 AutomationId 精确点击指定会话"""
         item = self._win.ListItemControl(
@@ -4003,13 +4002,13 @@ class Session:
             Name="搜索",
         )
 
-    @PIM.wait_idle
+    @PIM.guard
     def search(self, keyword: str, chat_type: Optional[list[str]] = None) -> None:
         """搜索并打开会话（search_and_select 的别名，失败时抛异常）"""
         if not self.search_and_select(keyword, chat_type):
             raise RuntimeError(f"搜索未找到结果: {keyword}")
 
-    @PIM.wait_idle
+    @PIM.guard
     def open_by_search(self, name: str, chat_type: Optional[list[str]] = None,
                        force_search: bool = False) -> None:
         """
@@ -4054,7 +4053,7 @@ class Session:
         # 列表中没有（或强制搜索），走搜索
         self.search(name, chat_type)
 
-    @PIM.wait_idle
+    @PIM.guard
     def scroll(self, direction: str = "down", clicks: int = 3) -> None:
         """
         滚动会话列表。
@@ -4250,47 +4249,47 @@ class Session:
         self._right_click_session(name)
         self._click_context_menu_item(menu_name)
 
-    @PIM.wait_idle
+    @PIM.guard
     def pin(self, name: str) -> None:
         """置顶会话"""
         self._session_context_action(name, "置顶")
 
-    @PIM.wait_idle
+    @PIM.guard
     def unpin(self, name: str) -> None:
         """取消置顶会话"""
         self._session_context_action(name, "取消置顶")
 
-    @PIM.wait_idle
+    @PIM.guard
     def mark_as_unread(self, name: str) -> None:
         """标为未读"""
         self._session_context_action(name, "标为未读")
 
-    @PIM.wait_idle
+    @PIM.guard
     def mark_as_read(self, name: str) -> None:
         """标为已读"""
         self._session_context_action(name, "标为已读")
 
-    @PIM.wait_idle
+    @PIM.guard
     def mute(self, name: str) -> None:
         """消息免打扰"""
         self._session_context_action(name, "消息免打扰")
 
-    @PIM.wait_idle
+    @PIM.guard
     def unmute(self, name: str) -> None:
         """允许消息通知"""
         self._session_context_action(name, "允许消息通知")
 
-    @PIM.wait_idle
+    @PIM.guard
     def separate(self, name: str) -> None:
         """独立窗口显示"""
         self._session_context_action(name, "独立窗口显示")
 
-    @PIM.wait_idle
+    @PIM.guard
     def hide(self, name: str) -> None:
         """不显示该会话"""
         self._session_context_action(name, "不显示")
 
-    @PIM.wait_idle
+    @PIM.guard
     def close(self, name: str) -> None:
         """关闭指定会话：如果该会话处于激活状态，点击一下取消选中"""
         self.wx.activate()
@@ -4303,7 +4302,7 @@ class Session:
             return
         item.Click(ratioX=_rand_ratio(), ratioY=_rand_ratio())
 
-    @PIM.wait_idle
+    @PIM.guard
     def open(self, name: str) -> None:
         """通过在会话列表中查找并点击来打开指定会话，如果已激活则不操作"""
         self.wx.activate()
@@ -4316,7 +4315,7 @@ class Session:
             pass
         item.Click(ratioX=_rand_ratio(), ratioY=_rand_ratio())
 
-    @PIM.wait_idle
+    @PIM.guard
     def delete(self, name: str) -> None:
         """删除会话（危险操作，会清除聊天记录）"""
         self._session_context_action(name, "删除")
@@ -4327,7 +4326,7 @@ class Session:
             raise RuntimeError("未找到删除确认弹窗")
         confirm_btn.Click(ratioX=_rand_ratio(), ratioY=_rand_ratio())
 
-    @PIM.wait_idle
+    @PIM.guard
     def search_and_select(self, keyword: str, chat_type: Optional[list[str]] = None) -> bool:
         """
         在搜索框中输入关键词并点击第一个匹配结果。
@@ -4357,18 +4356,18 @@ class Session:
                     return True
         return False
 
-    @PIM.wait_idle
+    @PIM.guard
     def cancel_search(self) -> None:
         """取消搜索（按 Esc 退出搜索模式）"""
         self._win.SendKeys("{Esc}")
         time.sleep(0.2)
 
-    @PIM.wait_idle
+    @PIM.guard
     def search_contact(self, keyword: str) -> bool:
         """搜索联系人并打开会话"""
         return self.search_and_select(keyword, chat_type=["联系人"])
 
-    @PIM.wait_idle
+    @PIM.guard
     def search_group(self, keyword: str) -> bool:
         """搜索群聊并打开会话"""
         return self.search_and_select(keyword, chat_type=["群聊"])
@@ -4413,7 +4412,7 @@ class Session:
         self._click_quick_action_button()
         self._click_quick_action_item(item_name)
 
-    @PIM.wait_idle
+    @PIM.guard
     def create_room(self, nickname_list: list[str]) -> None:
         """
         发起群聊。
@@ -4539,7 +4538,7 @@ class Session:
         confirm_btn.Click(ratioX=_rand_ratio(), ratioY=_rand_ratio())
         time.sleep(0.5)
 
-    @PIM.wait_idle
+    @PIM.guard
     def add_friend(self, keyword: str, message: Optional[str] = None, remark: Optional[str] = None,
                    permission: Optional[str] = None, hide_my_posts: bool = False,
                    hide_their_posts: bool = False) -> None:
@@ -4677,7 +4676,7 @@ class Session:
         confirm_btn.Click(ratioX=_rand_ratio(), ratioY=_rand_ratio())
         time.sleep(0.5)
 
-    @PIM.wait_idle
+    @PIM.guard
     def new_note(self) -> "NoteEditorWindow":
         """
         新建笔记，返回笔记编辑窗口对象。
@@ -4967,7 +4966,7 @@ class Chat:
         text = doc_range.GetText(-1)
         return len(text) if text else 0
 
-    @PIM.wait_idle
+    @PIM.guard
     def send_text(self, content: str) -> MessageStatus:
         """
         在当前会话中发送文本消息，返回发送状态。
@@ -4998,7 +4997,7 @@ class Chat:
 
         return self.check_text_message_status(content)
 
-    @PIM.wait_idle
+    @PIM.guard
     def send_file(self, file_path: "str | list[str]") -> MessageStatus:
         """
         在当前会话中发送文件，返回最后一个文件的发送状态。
@@ -5011,7 +5010,7 @@ class Chat:
         """
         return self._send_media(file_path, "文件", self.check_file_message_status)
 
-    @PIM.wait_idle
+    @PIM.guard
     def send_image(self, file_path: "str | list[str]") -> MessageStatus:
         """
         在当前会话中发送图片，返回最后一张图片的发送状态。
@@ -5024,7 +5023,7 @@ class Chat:
         """
         return self._send_media(file_path, "图片", self.check_image_message_status)
 
-    @PIM.wait_idle
+    @PIM.guard
     def send_video(self, file_path: "str | list[str]") -> MessageStatus:
         """
         在当前会话中发送视频，返回最后一个视频的发送状态。
@@ -5099,7 +5098,7 @@ class Chat:
                 except OSError:
                     pass
 
-    @PIM.wait_idle
+    @PIM.guard
     def send_at(self, content: str, at_members: list[str]) -> MessageStatus:
         """
         在当前群聊会话中 @指定成员并发送消息，返回发送状态。
@@ -5283,7 +5282,7 @@ class Chat:
             return ctrl
         return None
 
-    @PIM.wait_idle
+    @PIM.guard
     def send_collection(self, keyword: str) -> bool:
         """
         在当前会话中发送收藏内容。
@@ -5406,7 +5405,7 @@ class Chat:
     EMOJI_CUSTOM_GRID_CLASS = "mmui::EmoticonGridView"
     EMOJI_CUSTOM_ITEM_CLASS = "mmui::FavEmoticonItemView"
 
-    @PIM.wait_idle
+    @PIM.guard
     def send_emotion(self, keyword: str = None, index: int = 1) -> bool:
         """
         在当前会话中发送表情。
@@ -5738,7 +5737,7 @@ class Chat:
     # 发送按钮: ButtonControl, AutomationId="confirm_btn", Name="发送"
     # 取消按钮: ButtonControl, AutomationId="cancel_btn", Name="取消"
 
-    @PIM.wait_idle
+    @PIM.guard
     def send_card(self, receiver_nickname: str) -> bool:
         """
         将当前私聊联系人的名片发送给指定接收者。
@@ -6033,17 +6032,17 @@ class Chat:
         item.Click(ratioX=_rand_ratio(), ratioY=_rand_ratio())
         time.sleep(0.3)
 
-    @PIM.wait_idle
+    @PIM.guard
     def voice_call(self) -> "VoipCallWindow":
         self._click_voip_menu("语音通话")
         return VoipCallWindow()
 
-    @PIM.wait_idle
+    @PIM.guard
     def video_call(self) -> "VoipCallWindow":
         self._click_voip_menu("视频通话")
         return VoipCallWindow()
 
-    @PIM.wait_idle
+    @PIM.guard
     def separate(self) -> "SeparateChat":
         """
         将当前聊天会话打开为独立窗口，返回 SeparateChat 实例。
@@ -6526,7 +6525,7 @@ class Chat:
 
     # ---- 聊天信息面板操作 ----
 
-    @PIM.wait_idle
+    @PIM.guard
     def clear_chat_history(self) -> None:
         """
         清空当前会话的聊天记录（私聊）。
@@ -6569,7 +6568,7 @@ class Chat:
             # 4. 收回聊天信息面板
             self._close_chat_info_panel()
 
-    @PIM.wait_idle
+    @PIM.guard
     def clear_room_chat_history(self) -> None:
         """
         清空当前群聊会话的聊天记录。
@@ -6657,7 +6656,7 @@ class Chat:
             # 6. 收回聊天信息面板
             self._close_chat_info_panel()
 
-    @PIM.wait_idle
+    @PIM.guard
     def exit_room(self) -> None:
         """
         退出当前群聊。
@@ -6738,7 +6737,7 @@ class Chat:
             # 退出群聊后面板可能已自动关闭，尝试收回
             self._close_chat_info_panel()
 
-    @PIM.wait_idle
+    @PIM.guard
     def add_room_members(self, members: list[str]) -> None:
         """
         添加群成员。
@@ -6896,7 +6895,7 @@ class Chat:
         finally:
             self._close_chat_info_panel()
 
-    @PIM.wait_idle
+    @PIM.guard
     def remove_room_members(self, members: list[str]) -> None:
         """
         移除群成员。
@@ -7171,47 +7170,47 @@ class Chat:
         finally:
             self._close_chat_info_panel()
 
-    @PIM.wait_idle
+    @PIM.guard
     def pin_room_chat(self) -> None:
         """置顶当前群聊会话（通过 OCR 识别开关）"""
         self._set_room_ocr_switch("置顶聊天", True)
 
-    @PIM.wait_idle
+    @PIM.guard
     def unpin_room_chat(self) -> None:
         """取消置顶当前群聊会话（通过 OCR 识别开关）"""
         self._set_room_ocr_switch("置顶聊天", False)
 
-    @PIM.wait_idle
+    @PIM.guard
     def mute_room_chat(self) -> None:
         """开启当前群聊的消息免打扰（通过 OCR 识别开关）"""
         self._set_room_ocr_switch("消息免打扰", True)
 
-    @PIM.wait_idle
+    @PIM.guard
     def unmute_room_chat(self) -> None:
         """关闭当前群聊的消息免打扰（通过 OCR 识别开关）"""
         self._set_room_ocr_switch("消息免打扰", False)
 
-    @PIM.wait_idle
+    @PIM.guard
     def add_room_address_book(self) -> None:
         """将当前群聊保存到通讯录（通过 OCR 识别开关）"""
         self._set_room_ocr_switch("保存到通讯录", True)
 
-    @PIM.wait_idle
+    @PIM.guard
     def remove_room_address_book(self) -> None:
         """将当前群聊从通讯录移除（通过 OCR 识别开关）"""
         self._set_room_ocr_switch("保存到通讯录", False)
 
-    @PIM.wait_idle
+    @PIM.guard
     def display_room_member_nickname(self) -> None:
         """显示群成员昵称（通过 OCR 识别开关）"""
         self._set_room_ocr_switch("显示群成员昵称", True)
 
-    @PIM.wait_idle
+    @PIM.guard
     def hidden_room_member_nickname(self) -> None:
         """隐藏群成员昵称（通过 OCR 识别开关）"""
         self._set_room_ocr_switch("显示群成员昵称", False)
 
-    @PIM.wait_idle
+    @PIM.guard
     def fold_room_chat(self) -> None:
         """
         折叠当前群聊会话（通过 OCR 识别开关）。
@@ -7250,7 +7249,7 @@ class Chat:
         finally:
             self._close_chat_info_panel()
 
-    @PIM.wait_idle
+    @PIM.guard
     def unfold_room_chat(self) -> None:
         """
         取消折叠当前群聊会话（通过 OCR 识别开关）。
@@ -7392,7 +7391,7 @@ class Chat:
             auto.Click(switch_x, switch_y)
             time.sleep(0.5)
 
-    @PIM.wait_idle
+    @PIM.guard
     def set_room_info(self, name: str = None, announcement: str = None,
                       remark: str = None, my_nickname: str = None,
                       mute: bool = None, pin: bool = None,
@@ -7669,12 +7668,12 @@ class Chat:
         finally:
             self._close_chat_info_panel()
 
-    @PIM.wait_idle
+    @PIM.guard
     def pin_contact_chat(self) -> None:
         """置顶当前私聊会话（通过 UI Automation 开关）"""
         self._set_chat_info_switch("置顶聊天", True)
 
-    @PIM.wait_idle
+    @PIM.guard
     def unpin_contact_chat(self) -> None:
         """取消置顶当前私聊会话（通过 UI Automation 开关）"""
         self._set_chat_info_switch("置顶聊天", False)
@@ -7705,12 +7704,12 @@ class Chat:
         finally:
             self._close_chat_info_panel()
 
-    @PIM.wait_idle
+    @PIM.guard
     def mute_contact_chat(self) -> None:
         """开启当前私聊的消息免打扰（通过 UI Automation 开关）"""
         self._set_chat_info_switch("消息免打扰", True)
 
-    @PIM.wait_idle
+    @PIM.guard
     def unmute_contact_chat(self) -> None:
         """关闭当前私聊的消息免打扰（通过 UI Automation 开关）"""
         self._set_chat_info_switch("消息免打扰", False)
@@ -7729,7 +7728,7 @@ class Chat:
         else:
             self.unmute_contact_chat()
 
-    @PIM.wait_idle
+    @PIM.guard
     def fold_contact_chat(self) -> None:
         """
         折叠当前私聊会话（通过 UI Automation 开关）。
@@ -7759,7 +7758,7 @@ class Chat:
         finally:
             self._close_chat_info_panel()
 
-    @PIM.wait_idle
+    @PIM.guard
     def unfold_contact_chat(self) -> None:
         """
         取消折叠当前私聊会话（通过 UI Automation 开关）。
@@ -7832,7 +7831,7 @@ class Chat:
         btn.Click(ratioX=_rand_ratio(), ratioY=_rand_ratio())
         time.sleep(0.5)
 
-    @PIM.wait_idle
+    @PIM.guard
     def set_room_name(self, name: str) -> None:
         """
         设置群聊名称。
@@ -7898,7 +7897,7 @@ class Chat:
         finally:
             self._close_chat_info_panel()
 
-    @PIM.wait_idle
+    @PIM.guard
     def set_room_announcement(self, content: str) -> None:
         """
         设置群公告。
@@ -8007,7 +8006,7 @@ class Chat:
         finally:
             self._close_chat_info_panel()
 
-    @PIM.wait_idle
+    @PIM.guard
     def set_room_remark(self, remark: str) -> None:
         """
         设置群聊备注。
@@ -8068,7 +8067,7 @@ class Chat:
         finally:
             self._close_chat_info_panel()
 
-    @PIM.wait_idle
+    @PIM.guard
     def set_room_nickname(self, nickname: str) -> None:
         """
         设置我在本群的昵称。
@@ -8214,7 +8213,7 @@ class Chat:
         except Exception:
             pass
 
-    @PIM.wait_idle
+    @PIM.guard
     def get_contact_profile(self) -> dict:
         """
         获取当前私聊联系人的资料信息。
@@ -8371,7 +8370,7 @@ class Chat:
         finally:
             self._close_chat_info_panel()
 
-    @PIM.wait_idle
+    @PIM.guard
     def set_contact_info(self, *,
                          remark: str = None,
                          labels: list = None,
@@ -8613,7 +8612,7 @@ class Chat:
         finally:
             self._close_chat_info_panel()
 
-    @PIM.wait_idle
+    @PIM.guard
     def set_contact_remark(self, remark: str) -> None:
         """
         设置当前私聊联系人的备注名。
@@ -8673,7 +8672,7 @@ class Chat:
         finally:
             self._close_chat_info_panel()
 
-    @PIM.wait_idle
+    @PIM.guard
     def add_contact_label(self, labels: list) -> None:
         """
         为当前私聊联系人添加标签。
@@ -8767,7 +8766,7 @@ class Chat:
         finally:
             self._close_chat_info_panel()
 
-    @PIM.wait_idle
+    @PIM.guard
     def remove_contact_label(self, labels: list) -> None:
         """
         移除当前私聊联系人的标签。
@@ -8843,7 +8842,7 @@ class Chat:
         finally:
             self._close_chat_info_panel()
 
-    @PIM.wait_idle
+    @PIM.guard
     def add_contact_phone(self, phones: list) -> None:
         """
         为当前私聊联系人添加电话号码（增量添加，不删除已有号码）。
@@ -8949,7 +8948,7 @@ class Chat:
         finally:
             self._close_chat_info_panel()
 
-    @PIM.wait_idle
+    @PIM.guard
     def add_contact_image(self, images: list) -> None:
         """
         为当前私聊联系人添加备注图片（增量添加，不删除已有图片）。
@@ -9034,7 +9033,7 @@ class Chat:
         finally:
             self._close_chat_info_panel()
 
-    @PIM.wait_idle
+    @PIM.guard
     def remove_contact_phone(self, phones: list[str]) -> None:
         """
         移除当前私聊联系人的电话号码。
@@ -9120,7 +9119,7 @@ class Chat:
         finally:
             self._close_chat_info_panel()
 
-    @PIM.wait_idle
+    @PIM.guard
     def remove_contact_image(self, indexes: list[int]) -> None:
         """
         删除当前私聊联系人的备注图片（按序号）。
@@ -9233,7 +9232,7 @@ class Chat:
         finally:
             self._close_chat_info_panel()
 
-    @PIM.wait_idle
+    @PIM.guard
     def set_contact_star(self) -> None:
         """将当前私聊联系人设为星标朋友"""
         self._activate_window()
@@ -9248,7 +9247,7 @@ class Chat:
         finally:
             self._close_chat_info_panel()
 
-    @PIM.wait_idle
+    @PIM.guard
     def cancel_contact_star(self) -> None:
         """取消当前私聊联系人的星标朋友"""
         self._activate_window()
@@ -9263,7 +9262,7 @@ class Chat:
         finally:
             self._close_chat_info_panel()
 
-    @PIM.wait_idle
+    @PIM.guard
     def black_contact(self) -> None:
         """将当前私聊联系人加入黑名单"""
         self._activate_window()
@@ -9286,7 +9285,7 @@ class Chat:
         finally:
             self._close_chat_info_panel()
 
-    @PIM.wait_idle
+    @PIM.guard
     def unblack_contact(self) -> None:
         """将当前私聊联系人移出黑名单"""
         self._activate_window()
@@ -9301,7 +9300,7 @@ class Chat:
         finally:
             self._close_chat_info_panel()
 
-    @PIM.wait_idle
+    @PIM.guard
     def delete_contact(self) -> None:
         """删除当前私聊联系人（不可逆）"""
         self._activate_window()
@@ -9324,7 +9323,7 @@ class Chat:
         finally:
             self._close_chat_info_panel()
 
-    @PIM.wait_idle
+    @PIM.guard
     def get_friend_permission(self) -> dict:
         """
         获取当前私聊联系人的朋友权限设置。
@@ -9401,7 +9400,7 @@ class Chat:
         finally:
             self._close_chat_info_panel()
 
-    @PIM.wait_idle
+    @PIM.guard
     def set_friend_permission(self, permission: str = "all",
                               hide_my_posts: bool = False,
                               hide_their_posts: bool = False) -> None:
@@ -9503,7 +9502,7 @@ class Chat:
         finally:
             self._close_chat_info_panel()
 
-    @PIM.wait_idle
+    @PIM.guard
     def collect_contact_image(self, indexes: list[int]) -> int:
         """
         收藏当前私聊联系人的指定备注图片。
@@ -9614,7 +9613,7 @@ class Chat:
         finally:
             self._close_chat_info_panel()
 
-    @PIM.wait_idle
+    @PIM.guard
     def save_contact_image(self, indexes: list[int], save_path: str) -> int:
         """
         保存当前私聊联系人的指定备注图片到指定目录。
@@ -9806,52 +9805,52 @@ class SeparateChat(Chat, WeixinWindow):
         """激活独立聊天窗口（覆盖 Chat 的主窗口激活）"""
         self.activate()
 
-    @PIM.wait_idle
+    @PIM.guard
     def send_text(self, content: str) -> MessageStatus:
         self.activate()
         return super().send_text(content)
 
-    @PIM.wait_idle
+    @PIM.guard
     def send_file(self, file_path: "str | list[str]") -> MessageStatus:
         self.activate()
         return super().send_file(file_path)
 
-    @PIM.wait_idle
+    @PIM.guard
     def send_image(self, file_path: "str | list[str]") -> MessageStatus:
         self.activate()
         return super().send_image(file_path)
 
-    @PIM.wait_idle
+    @PIM.guard
     def send_video(self, file_path: "str | list[str]") -> MessageStatus:
         self.activate()
         return super().send_video(file_path)
 
-    @PIM.wait_idle
+    @PIM.guard
     def send_at(self, content: str, at_members: list[str]) -> MessageStatus:
         self.activate()
         return super().send_at(content, at_members)
 
-    @PIM.wait_idle
+    @PIM.guard
     def send_collection(self, keyword: str) -> bool:
         self.activate()
         return super().send_collection(keyword)
 
-    @PIM.wait_idle
+    @PIM.guard
     def send_emotion(self, keyword: str = None, index: int = 1) -> bool:
         self.activate()
         return super().send_emotion(keyword, index)
 
-    @PIM.wait_idle
+    @PIM.guard
     def send_card(self, nickname: str) -> bool:
         self.activate()
         return super().send_card(nickname)
 
-    @PIM.wait_idle
+    @PIM.guard
     def voice_call(self) -> "VoipCallWindow":
         self.activate()
         return super().voice_call()
 
-    @PIM.wait_idle
+    @PIM.guard
     def video_call(self) -> "VoipCallWindow":
         self.activate()
         return super().video_call()
@@ -9896,7 +9895,7 @@ class Weixin(WeixinWindow):
     WINDOW_REGEX = "微信|Weixin"
 
     def __init__(self, install_path: Optional[str] = None, wxocr_path: Optional[str] = None,
-                 ocr_engine: str = "wcocr", human_wait: float = 0, block: bool = False):
+                 ocr_engine: str = "wcocr", idle_wait: float = 0, lock_input: bool = False):
         """
         Args:
             install_path: 微信安装路径，None 时自动检测
@@ -9904,15 +9903,15 @@ class Weixin(WeixinWindow):
             ocr_engine:   OCR 引擎选择
                 - "wcocr":    使用微信自带 OCR（默认）
                 - "rapidocr": 使用 RapidOCR
-            human_wait:   人类操作等待时间（秒），大于 0 时自动启动物理输入监控，
+            idle_wait:   人类操作等待时间（秒），大于 0 时自动启动物理输入监控，
                           所有 UI 操作方法执行前会等待用户停止物理键盘/鼠标操作达到该秒数。
                           默认 0 表示不等待。
-            block:        True 时在自动化操作期间锁定物理键盘鼠标（需管理员权限），
+            lock_input:   True 时在自动化操作期间锁定物理键盘鼠标（需管理员权限），
                           默认 False。
         """
         # 物理输入监控
-        if human_wait > 0:
-            PIM(human_wait=human_wait, block=block)
+        if idle_wait > 0:
+            PIM(idle_wait=idle_wait, lock_input=lock_input)
             PIM.start()
         # 事件处理器 (pyee EventEmitter)
         self._ee = EventEmitter()
@@ -10070,7 +10069,7 @@ class Weixin(WeixinWindow):
 
         return result
 
-    @PIM.wait_idle
+    @PIM.guard
     def open_session(self, nickname: str) -> Chat:
         """通过在会话列表中查找并点击来打开指定会话，返回 Chat 对象"""
         self.activate()
@@ -10084,7 +10083,7 @@ class Weixin(WeixinWindow):
             time.sleep(0.3)
         raise RuntimeError(f"打开会话失败: {nickname}")
 
-    @PIM.wait_idle
+    @PIM.guard
     def open_session_by_search(self, nickname: str, chat_type: Optional[list[str]] = None, force_search: bool = False) -> Chat:
         """通过搜索打开指定会话，返回 Chat 对象"""
         self.activate()
@@ -10143,7 +10142,7 @@ class Weixin(WeixinWindow):
         """
         return self.chat_with(share).send_card(nickname)
 
-    @PIM.wait_idle
+    @PIM.guard
     def create_note(self, content: str) -> None:
         """
         创建笔记并写入内容，完成后关闭笔记窗口。
@@ -10157,7 +10156,7 @@ class Weixin(WeixinWindow):
         note.save()
         note.close()
 
-    @PIM.wait_idle
+    @PIM.guard
     def create_room(self, nickname_list: list[str]) -> None:
         """
         发起群聊。
@@ -10516,7 +10515,7 @@ class Weixin(WeixinWindow):
         with open(save_path, "wb") as f:
             f.write(png_bytes)
 
-    # @PIM.wait_idle
+    # @PIM.guard
     # def lock(self) -> None:
     #     """通过点击菜单锁定微信（已弃用，改用快捷键）"""
     #     self.activate()
@@ -10768,8 +10767,7 @@ class Weixin(WeixinWindow):
         """是否注册了任何事件处理器"""
         return bool(self._ee.event_names())
 
-    def add_chat_listen(self, names: "str | list[str] | None" = None,
-                       offscreen: bool = True) -> list[SeparateChat]:
+    def add_chat_listen(self, names: "str | list[str] | None" = None, offscreen: bool = True) -> list[SeparateChat]:
         """
         注册要监听的聊天窗口。
 
