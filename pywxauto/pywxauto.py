@@ -10516,20 +10516,25 @@ class Weixin(WeixinWindow):
         with open(save_path, "wb") as f:
             f.write(png_bytes)
 
-    @PIM.wait_idle
-    def lock(self) -> None:
-        self.activate()
-        more_btn = self.navigator._win.ButtonControl(Name="更多")
-        if not more_btn.Exists(maxSearchSeconds=2):
-            raise RuntimeError("未找到更多按钮")
-        more_btn.Click(ratioX=_rand_ratio(), ratioY=_rand_ratio())
-        time.sleep(0.1)
+    # @PIM.wait_idle
+    # def lock(self) -> None:
+    #     """通过点击菜单锁定微信（已弃用，改用快捷键）"""
+    #     self.activate()
+    #     more_btn = self.navigator._win.ButtonControl(Name="更多")
+    #     if not more_btn.Exists(maxSearchSeconds=2):
+    #         raise RuntimeError("未找到更多按钮")
+    #     more_btn.Click(ratioX=_rand_ratio(), ratioY=_rand_ratio())
+    #     time.sleep(0.1)
+    #
+    #     lock_btn = self._win.ButtonControl(ClassName="mmui::XButton", Name="锁定")
+    #     if not lock_btn.Exists(maxSearchSeconds=2):
+    #         self._win.SendKeys("{Esc}")
+    #         raise RuntimeError("弹出菜单中未找到锁定按钮")
+    #     lock_btn.Click(ratioX=_rand_ratio(), ratioY=_rand_ratio())
 
-        lock_btn = self._win.ButtonControl(ClassName="mmui::XButton", Name="锁定")
-        if not lock_btn.Exists(maxSearchSeconds=2):
-            self._win.SendKeys("{Esc}")
-            raise RuntimeError("弹出菜单中未找到锁定按钮")
-        lock_btn.Click(ratioX=_rand_ratio(), ratioY=_rand_ratio())
+    def lock(self) -> None:
+        """锁定微信（Ctrl+L）"""
+        self.shortcut("锁定")
 
     def shortcut(self, name: str) -> None:
         """
@@ -10552,6 +10557,22 @@ class Weixin(WeixinWindow):
         """
         combo = self._shortcuts.get(name, name)
         send_shortcut(combo)
+
+    def wakeup(self) -> None:
+        """唤醒微信窗口（Ctrl+Alt+W）"""
+        self.shortcut("显示窗口")
+
+    def capture(self) -> None:
+        """截图（Alt+A）"""
+        self.shortcut("截图")
+
+    def voice_input(self) -> None:
+        """语音输入文字（Ctrl+Win）"""
+        self.shortcut("语音输入文字")
+
+    def enter(self) -> None:
+        """发送消息（Enter）"""
+        self.shortcut("发送消息")
 
     def ocr(self, image: bytes | str) -> dict:
         """
