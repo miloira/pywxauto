@@ -752,7 +752,9 @@ def capture_window(hwnd: int, offset_left: int = 0, offset_top: int = 0,
     return buffer.getvalue()
 
 
-def capture_control(hwnd, control) -> bytes:
+def capture_control(hwnd, control,
+                    offset_left: int = 0, offset_top: int = 0,
+                    offset_right: int = 0, offset_bottom: int = 0) -> bytes:
     """
     通过 PrintWindow API 截取微信窗口，然后裁剪出指定控件区域的图像。
 
@@ -760,9 +762,13 @@ def capture_control(hwnd, control) -> bytes:
     对单条消息控件进行截图（控件可能不在前台可见区域）。
 
     Args:
-        hwnd:    微信窗口句柄（主窗口或独立聊天窗口）
-        control: uiautomation 控件对象（如 ListItemControl），
-                 需要有 BoundingRectangle 属性
+        hwnd:          微信窗口句柄（主窗口或独立聊天窗口）
+        control:       uiautomation 控件对象（如 ListItemControl），
+                       需要有 BoundingRectangle 属性
+        offset_left:   左边裁剪像素（正值向内收缩）
+        offset_top:    上边裁剪像素（正值向内收缩）
+        offset_right:  右边裁剪像素（正值向内收缩）
+        offset_bottom: 下边裁剪像素（正值向内收缩）
 
     Returns:
         PNG 格式的 bytes 数据（裁剪后的控件区域图像）
@@ -831,8 +837,13 @@ def capture_control(hwnd, control) -> bytes:
     mfcDC.DeleteDC()
     win32gui.ReleaseDC(hwnd, hwndDC)
 
-    # 裁剪出控件区域
-    img = img.crop((rel_left, rel_top, rel_right, rel_bottom))
+    # 裁剪出控件区域，叠加偏移微调
+    img = img.crop((
+        rel_left + offset_left,
+        rel_top + offset_top,
+        rel_right - offset_right,
+        rel_bottom - offset_bottom,
+    ))
 
     buffer = io.BytesIO()
     img.save(buffer, format="PNG")
@@ -7002,7 +7013,7 @@ class Chat:
         """
         if name == "图片":
             return ImageMessage
-        if name == "视频":
+        if name.startswith("视频"):
             return VideoMessage
         if Chat._ANIMATED_EMOJI_RE.match(name):
             return EmotionMessage
@@ -7042,7 +7053,7 @@ class Chat:
         """
         try:
             if hwnd:
-                png_bytes = capture_control(hwnd, ctrl)
+                png_bytes = capture_control(hwnd, ctrl, offset_right=15)
                 img = Image.open(io.BytesIO(png_bytes))
             else:
                 tmp_path = os.path.join(tempfile.gettempdir(), "_wxuia_msg.png")
@@ -7155,11 +7166,13 @@ class Chat:
         Returns:
             (sender, sender_type) 或 None（无法判断时）
         """
-        # 扫描上部 1/5 ~ 1/3 区域的多行（头像所在区域）
-        scan_rows = [h // 5, h // 4, h // 3]
+        # 扫描消息顶部偏下 50px 处（头像所在区域，固定位置更可靠）
+        scan_rows = [35]
 
         best_left = w   # 左侧最靠边的非白色像素到左边缘的距离（越小越靠边）
+        best_left_y = 0
         best_right = w  # 右侧最靠边的非白色像素到右边缘的距离
+        best_right_y = 0
 
         for scan_y in scan_rows:
             if scan_y >= h:
@@ -7171,6 +7184,7 @@ class Chat:
                 if Chat._is_non_white(r, g, b):
                     if x < best_left:
                         best_left = x
+                        best_left_y = scan_y
                     break
 
             # 从右侧向左扫描
@@ -7180,7 +7194,37 @@ class Chat:
                     dist = w - 1 - x
                     if dist < best_right:
                         best_right = dist
+                        best_right_y = scan_y
                     break
+
+        # ---- 调试：标记扫描点并保存图片 ----
+        try:
+            from PIL import ImageDraw
+            debug_img = img.copy()
+            draw = ImageDraw.Draw(debug_img)
+            marker_size = 6
+            # 左侧扫描点（蓝色）
+            if best_left < w:
+                lx, ly = best_left, best_left_y
+                draw.ellipse(
+                    [lx - marker_size, ly - marker_size,
+                     lx + marker_size, ly + marker_size],
+                    fill="blue", outline="white",
+                )
+                draw.text((lx + 10, ly - 8), f"L({lx},{ly})", fill="blue")
+            # 右侧扫描点（红色）
+            if best_right < w:
+                rx, ry = w - 1 - best_right, best_right_y
+                draw.ellipse(
+                    [rx - marker_size, ry - marker_size,
+                     rx + marker_size, ry + marker_size],
+                    fill="red", outline="white",
+                )
+                draw.text((rx - 80, ry - 8), f"R({rx},{ry})", fill="red")
+            debug_img.save(os.path.join(".", "_debug_edge_scan.png"))
+        except Exception:
+            pass
+        # ---- 调试结束 ----
 
         # 两侧都没找到非白色像素
         if best_left >= w and best_right >= w:
