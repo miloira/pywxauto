@@ -164,16 +164,6 @@ OTHER_MESSAGE = Event.OTHER
 # 消息类 -> 事件类型映射
 _MSG_CLASS_TO_EVENT: dict[type, Event] = {}  # 延迟填充，在类定义之后
 
-# 让拥有 to_dict() 方法的对象支持 json.dumps 直接序列化
-_original_json_default = json.JSONEncoder().default
-
-def _custom_json_default(self, obj: object) -> object:
-    if hasattr(obj, "to_dict"):
-        return obj.to_dict()
-    return _original_json_default(obj)
-
-json.JSONEncoder.default = _custom_json_default
-
 
 # DROPFILES struct: pFiles(uint), x(long), y(long), fNC(int), fWide(bool)
 _DROPFILES_FORMAT = "Illii"
@@ -875,6 +865,38 @@ class RegistryError(Exception):
     pass
 
 
+# ---- 异常体系 ----
+
+class WxAutoError(Exception):
+    """pywxauto 异常基类"""
+    pass
+
+
+class WindowNotFoundError(WxAutoError):
+    """窗口或控件未找到"""
+    pass
+
+
+class ControlTimeoutError(WxAutoError):
+    """控件查找或操作超时"""
+    pass
+
+
+class SendError(WxAutoError):
+    """消息发送失败"""
+    pass
+
+
+class OCRError(WxAutoError):
+    """OCR 识别失败"""
+    pass
+
+
+class LoginError(WxAutoError):
+    """登录相关异常"""
+    pass
+
+
 def ensure_narrator_registry() -> bool:
     """
     检查并修复 UI Automation 所需的注册表项。
@@ -932,23 +954,54 @@ class MessageStatus(Enum):
 class Message:
     """聊天消息基类"""
 
-    def __init__(self, *, sender="", sender_type=SenderType.OTHER,
-                 content="", raw_name="",
-                 status=MessageStatus.UNKNOWN,
+    def __init__(self, *, sender: str = "", sender_type: SenderType = SenderType.OTHER,
+                 content: str = "", raw_name: str = "",
+                 status: MessageStatus = MessageStatus.UNKNOWN,
                  runtime_id: tuple = ()):
-        self.sender = sender
-        self.sender_type = sender_type
-        self.content = content
-        self.raw_name = raw_name
-        self.status = status
-        self.runtime_id: tuple = runtime_id  # UI Automation RuntimeId，控件的唯一标识
+        self.sender: str = sender
+        self.sender_type: SenderType = sender_type
+        self.content: str = content
+        self.raw_name: str = raw_name
+        self.status: MessageStatus = status
+        self.runtime_id: tuple = runtime_id
         self.chat: object = None  # 关联的聊天窗口对象（Chat 或 SeparateChat）
 
     @property
     def type_label(self) -> str:
         return "消息"
 
-    def __repr__(self):
+    def to_dict(self) -> dict:
+        """
+        将消息转换为字典，用于序列化。
+
+        包含所有公开字段（排除 chat、runtime_id 等内部引用）。
+        枚举类型转换为 value 字符串。
+        子类的额外字段自动包含。
+        """
+        result = {
+            "type": self.__class__.__name__,
+            "type_label": self.type_label,
+            "sender": self.sender,
+            "sender_type": self.sender_type.value,
+            "content": self.content,
+            "raw_name": self.raw_name,
+            "status": self.status.value,
+        }
+        # 收集子类的额外字段（排除基类已有的和内部字段）
+        _base_keys = {"sender", "sender_type", "content", "raw_name",
+                      "status", "runtime_id", "chat"}
+        for key, value in self.__dict__.items():
+            if key.startswith("_") or key in _base_keys:
+                continue
+            if key not in result:
+                result[key] = value
+        return result
+
+    def to_json(self, **kwargs) -> str:
+        """将消息序列化为 JSON 字符串"""
+        return json.dumps(self.to_dict(), ensure_ascii=False, **kwargs)
+
+    def __repr__(self) -> str:
         cls = self.__class__.__name__
         status_tag = f", status={self.status.value}" if self.status != MessageStatus.UNKNOWN else ""
         return (f"{cls}(sender_type={self.sender_type.value}, "
@@ -1536,7 +1589,7 @@ class Login(WeixinWindow):
 
     def _ensure_exists(self) -> None:
         if not self._win.Exists(maxSearchSeconds=3):
-            raise RuntimeError("微信登录窗口未找到")
+            raise WindowNotFoundError("微信登录窗口未找到")
 
     @property
     def nickname(self) -> str:
@@ -1594,7 +1647,7 @@ class Login(WeixinWindow):
                 return True
             time.sleep(1)
 
-        raise RuntimeError("登录超时，登录窗口未关闭")
+        raise LoginError("登录超时，登录窗口未关闭")
 
     @PIM.wait_idle
     def switch_account(self) -> None:
@@ -4944,7 +4997,7 @@ class Chat:
         # 发送后校验：输入框应已清空
         remaining = self._get_input_value()
         if remaining:
-            raise RuntimeError(
+            raise SendError(
                 f"发送后输入框未清空: Value={remaining!r}，消息可能未发出"
             )
 
@@ -5032,7 +5085,7 @@ class Chat:
 
             doc_len = self._get_input_doc_length()
             if doc_len == 0:
-                raise RuntimeError(
+                raise SendError(
                     f"{label}粘贴校验失败: 输入框文档长度为 0，{label}可能未粘贴成功"
                 )
 
@@ -5040,7 +5093,7 @@ class Chat:
 
             remaining_len = self._get_input_doc_length()
             if remaining_len > 0:
-                raise RuntimeError(
+                raise SendError(
                     f"发送后输入框未清空: 文档长度={remaining_len}，{label}可能未发出"
                 )
 
@@ -5076,7 +5129,7 @@ class Chat:
         # 发送后校验：输入框应已清空
         remaining = self._get_input_value()
         if remaining:
-            raise RuntimeError(
+            raise SendError(
                 f"发送后输入框未清空: Value={remaining!r}，文件可能未发出"
             )
 
@@ -5321,7 +5374,7 @@ class Chat:
             AutomationId=self.FAV_DETAIL_LIST_ID,
         )
         if check_list.Exists(maxSearchSeconds=1):
-            raise RuntimeError("发送收藏失败，选择面板未关闭")
+            raise SendError("发送收藏失败，选择面板未关闭")
 
         logger.info("收藏发送成功")
         return True
@@ -5431,7 +5484,7 @@ class Chat:
             if emoji_popover.Exists(maxSearchSeconds=1):
                 self._close_emoji_panel()
                 label = "自定义表情" if keyword is None else "表情"
-                raise RuntimeError(f"发送{label}失败，表情面板未关闭")
+                raise SendError(f"发送{label}失败，表情面板未关闭")
 
             logger.info("表情发送成功")
             return True
@@ -6737,7 +6790,7 @@ class Chat:
             ocr_data = self._get_image_text(png_bytes)
 
             if "添加" not in ocr_data:
-                raise RuntimeError("OCR 未识别到'添加'文本")
+                raise OCRError("OCR 未识别到'添加'文本")
 
             info = ocr_data["添加"]
             win_left, win_top, _, _ = win32gui.GetWindowRect(hwnd)
@@ -6904,7 +6957,7 @@ class Chat:
             ocr_data = self._get_image_text(png_bytes)
 
             if "移出" not in ocr_data:
-                raise RuntimeError("OCR 未识别到'移出'文本")
+                raise OCRError("OCR 未识别到'移出'文本")
 
             info = ocr_data["移出"]
             win_left, win_top, _, _ = win32gui.GetWindowRect(hwnd)
@@ -7087,7 +7140,7 @@ class Chat:
         """
         ocr_data, hwnd = self._ocr_window()
         if text not in ocr_data:
-            raise RuntimeError(f"OCR 未识别到'{text}'文本")
+            raise OCRError(f"OCR 未识别到'{text}'文本")
         info = ocr_data[text]
         win_left, win_top, _, _ = win32gui.GetWindowRect(hwnd)
         click_x = int(win_left + info["center"][0])
@@ -7419,7 +7472,7 @@ class Chat:
             if name is not None:
                 png_bytes, ocr_data, win_left, win_top = _fresh_ocr()
                 if "群聊名称" not in ocr_data:
-                    raise RuntimeError("OCR 未识别到'群聊名称'文本")
+                    raise OCRError("OCR 未识别到'群聊名称'文本")
                 info = ocr_data["群聊名称"]
                 click_x = int(win_left + info["center"][0])
                 click_y = int(win_top + info["center"][1] + 1.5 * info["height"])
@@ -7438,7 +7491,7 @@ class Chat:
             if announcement is not None:
                 png_bytes, ocr_data, win_left, win_top = _fresh_ocr()
                 if "群公告" not in ocr_data:
-                    raise RuntimeError("OCR 未识别到'群公告'文本")
+                    raise OCRError("OCR 未识别到'群公告'文本")
                 info = ocr_data["群公告"]
                 click_x = int(win_left + info["center"][0])
                 click_y = int(win_top + info["center"][1] + 1.5 * info["height"])
@@ -7474,7 +7527,7 @@ class Chat:
                 pane_png = capture_window(pane_hwnd, mode=CaptureMode.PRINT_WINDOW)
                 pane_ocr = self._get_image_text(pane_png)
                 if "完成" not in pane_ocr:
-                    raise RuntimeError("OCR 未识别到'完成'按钮")
+                    raise OCRError("OCR 未识别到'完成'按钮")
                 fi = pane_ocr["完成"]
                 pane_left, pane_top, _, _ = win32gui.GetWindowRect(pane_hwnd)
                 auto.Click(int(pane_left + fi["center"][0]),
@@ -7498,7 +7551,7 @@ class Chat:
             if remark is not None:
                 png_bytes, ocr_data, win_left, win_top = _fresh_ocr()
                 if "备注" not in ocr_data:
-                    raise RuntimeError("OCR 未识别到'备注'文本")
+                    raise OCRError("OCR 未识别到'备注'文本")
                 info = ocr_data["备注"]
                 click_x = int(win_left + info["center"][0])
                 click_y = int(win_top + info["center"][1] + 1.5 * info["height"])
@@ -7524,7 +7577,7 @@ class Chat:
                             ocr_key = key
                             break
                 if not ocr_key:
-                    raise RuntimeError("OCR 未识别到'我在本群的昵称'文本")
+                    raise OCRError("OCR 未识别到'我在本群的昵称'文本")
                 info = ocr_data[ocr_key]
                 click_x = int(win_left + info["center"][0])
                 click_y = int(win_top + info["center"][1] + 1.5 * info["height"])
@@ -7843,7 +7896,7 @@ class Chat:
             ocr_data = self._get_image_text(png_bytes)
 
             if "群聊名称" not in ocr_data:
-                raise RuntimeError("OCR 未识别到'群聊名称'文本，请确认聊天信息面板已展开")
+                raise OCRError("OCR 未识别到'群聊名称'文本，请确认聊天信息面板已展开")
 
             info = ocr_data["群聊名称"]
             # 窗口左上角屏幕坐标
@@ -7910,7 +7963,7 @@ class Chat:
 
             # 点击"群公告"文本下方区域
             if "群公告" not in ocr_data:
-                raise RuntimeError("OCR 未识别到'群公告'文本，请确认聊天信息面板已展开")
+                raise OCRError("OCR 未识别到'群公告'文本，请确认聊天信息面板已展开")
             info = ocr_data["群公告"]
             win_left, win_top, _, _ = win32gui.GetWindowRect(hwnd)
             click_x = int(win_left + info["center"][0])
@@ -7930,7 +7983,7 @@ class Chat:
             png_bytes = capture_window(pane_hwnd, mode=CaptureMode.PRINT_WINDOW)
             ocr_data = self._get_image_text(png_bytes)
             if not ocr_data:
-                raise RuntimeError("群公告窗口 OCR 未识别到任何文本")
+                raise OCRError("群公告窗口 OCR 未识别到任何文本")
 
             # 如果之前发布过群公告，需要先点击"编辑群公告"
             if "编辑群公告" in ocr_data:
@@ -7945,7 +7998,7 @@ class Chat:
                 png_bytes = capture_window(pane_hwnd, mode=CaptureMode.PRINT_WINDOW)
                 ocr_data = self._get_image_text(png_bytes)
                 if not ocr_data:
-                    raise RuntimeError("群公告窗口 OCR 未识别到任何文本")
+                    raise OCRError("群公告窗口 OCR 未识别到任何文本")
 
             # 清空输入框并粘贴内容
             announcement_pane.SendKeys("{Ctrl}a{Del}")
@@ -7954,7 +8007,7 @@ class Chat:
 
             # 点击"完成"按钮（OCR 定位）
             if "完成" not in ocr_data:
-                raise RuntimeError(f"OCR 未识别到'完成'按钮，识别到的文本: {list(ocr_data.keys())}")
+                raise OCRError(f"OCR 未识别到'完成'按钮，识别到的文本: {list(ocr_data.keys())}")
             info = ocr_data["完成"]
             pane_left, pane_top, _, _ = win32gui.GetWindowRect(pane_hwnd)
             click_x = int(pane_left + info["center"][0])
@@ -8020,7 +8073,7 @@ class Chat:
             ocr_data = self._get_image_text(png_bytes)
 
             if "备注" not in ocr_data:
-                raise RuntimeError("OCR 未识别到'备注'文本，请确认聊天信息面板已展开")
+                raise OCRError("OCR 未识别到'备注'文本，请确认聊天信息面板已展开")
 
             info = ocr_data["备注"]
             win_left, win_top, _, _ = win32gui.GetWindowRect(hwnd)
@@ -8094,7 +8147,7 @@ class Chat:
                         ocr_key = key
                         break
             if not ocr_key:
-                raise RuntimeError("OCR 未识别到'我在本群的昵称'文本，请确认聊天信息面板已展开")
+                raise OCRError("OCR 未识别到'我在本群的昵称'文本，请确认聊天信息面板已展开")
 
             info = ocr_data[ocr_key]
             win_left, win_top, _, _ = win32gui.GetWindowRect(hwnd)
@@ -10006,13 +10059,13 @@ class Weixin(WeixinWindow):
             install_path, _ = winreg.QueryValueEx(key, "InstallPath")
             winreg.CloseKey(key)
         except FileNotFoundError:
-            raise RuntimeError("未找到微信安装路径，请确认微信已安装")
+            raise LoginError("未找到微信安装路径，请确认微信已安装")
         subprocess.Popen([f"{install_path}\\Weixin.exe"])
 
         # 检测微信窗口是否存在
         if Weixin.is_exists_window(timeout=3, interval=0.1):
             return 
-        raise RuntimeError("微信启动超时，请手动登录后重试")
+        raise LoginError("微信启动超时，请手动登录后重试")
 
     @property
     def is_locked(self) -> bool:
@@ -10628,7 +10681,7 @@ class Weixin(WeixinWindow):
 
     def handle(
         self,
-        events: "str | list[str] | None" = None,
+        events: "Event | list[Event] | None" = None,
         once: bool = False,
     ) -> "callable":
         """
@@ -10638,11 +10691,11 @@ class Weixin(WeixinWindow):
 
         用法::
 
-            @wx.handle(TEXT_MESSAGE)
+            @wx.handle(Event.TEXT)
             def on_text(wx, message):
                 print(message.content)
 
-            @wx.handle([TEXT_MESSAGE, IMAGE_MESSAGE])
+            @wx.handle([Event.TEXT, Event.IMAGE])
             def on_text_or_image(wx, message):
                 print(message.type_label)
 
@@ -10650,13 +10703,12 @@ class Weixin(WeixinWindow):
             def on_all(wx, message):
                 print(message)
 
-            @wx.handle(TEXT_MESSAGE, once=True)  # 只触发一次
+            @wx.handle(Event.TEXT, once=True)  # 只触发一次
             def on_first_text(wx, message):
                 print("第一条文本消息:", message.content)
 
         Args:
-            events: 事件类型常量（如 TEXT_MESSAGE）或列表，
-                    None 或不传表示监听所有消息 (ALL_MESSAGE)
+            events: Event 枚举值或列表，None 表示监听所有消息 (Event.ALL)
             once:   True 时回调只触发一次后自动移除
 
         Returns:
@@ -10680,14 +10732,14 @@ class Weixin(WeixinWindow):
 
     def on(
         self,
-        events: "str | list[str] | None" = None,
+        events: "Event | list[Event] | None" = None,
     ) -> "callable":
         """
         注册消息事件处理器（handle 的别名，once=False）。
 
         用法::
 
-            @wx.on(TEXT_MESSAGE)
+            @wx.on(Event.TEXT)
             def on_text(wx, message):
                 print(message.content)
         """
@@ -10695,7 +10747,7 @@ class Weixin(WeixinWindow):
 
     def once(
         self,
-        events: "str | list[str] | None" = None,
+        events: "Event | list[Event] | None" = None,
     ) -> "callable":
         """
         注册一次性消息事件处理器（handle 的别名，once=True）。
@@ -10704,7 +10756,7 @@ class Weixin(WeixinWindow):
 
         用法::
 
-            @wx.once(TEXT_MESSAGE)
+            @wx.once(Event.TEXT)
             def on_first_text(wx, message):
                 print("第一条文本消息:", message.content)
         """
@@ -10712,14 +10764,14 @@ class Weixin(WeixinWindow):
 
     def off(
         self,
-        events: "str | list[str] | None" = None,
+        events: "Event | list[Event] | None" = None,
         func: "callable | None" = None,
     ) -> None:
         """
         移除事件处理器。
 
         Args:
-            events: 事件类型，None 表示移除所有事件的处理器
+            events: Event 枚举值或列表，None 表示移除所有事件的处理器
             func:   要移除的回调函数，None 表示移除该事件的所有处理器
         """
         if events is None:
