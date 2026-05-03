@@ -1120,9 +1120,44 @@ class TextMessage(Message):
 
 class QuoteMessage(Message):
     """引用消息"""
+
+    # 格式: "{回复内容}引用 {发送者} 的消息 : {被引用内容}\n"
+    _QUOTE_RE = re.compile(
+        r'^(.+?)引用\s+(.+?)\s+的消息\s*:\s*(.+?)[\n\r]*$',
+        re.DOTALL,
+    )
+
+    def __init__(self, *, reply_content="", quote_sender="", quote_content="", **kw):
+        super().__init__(**kw)
+        self.reply_content: str = reply_content
+        self.quote_sender: str = quote_sender
+        self.quote_content: str = quote_content
+
     @property
     def type_label(self) -> str:
         return "引用消息"
+
+    @staticmethod
+    def match(raw_name: str) -> bool:
+        """判断 Name 是否为引用消息格式"""
+        return bool(QuoteMessage._QUOTE_RE.match(raw_name))
+
+    @staticmethod
+    def parse(raw_name: str) -> tuple[str, str, str, str]:
+        """
+        解析引用消息 Name -> (content, reply_content, quote_sender, quote_content)
+
+        Name 格式: "{回复内容}引用 {发送者} 的消息 : {被引用内容}\\n"
+        如: "1引用 milo 的消息 : 1\\n"
+          → reply_content="1", quote_sender="milo", quote_content="1"
+        """
+        m = QuoteMessage._QUOTE_RE.match(raw_name)
+        if m:
+            reply_content = m.group(1).strip()
+            quote_sender = m.group(2).strip()
+            quote_content = m.group(3).strip()
+            return reply_content, reply_content, quote_sender, quote_content
+        return raw_name, raw_name, "", ""
 
 
 class VoiceMessage(Message):
@@ -6923,12 +6958,14 @@ class Chat:
 
             msg_cls = cls_map.get(ui_cls)
 
+            # 引用消息优先级最高：任何类型的 Name 包含"引用 xxx 的消息"都识别为引用消息
+            if QuoteMessage.match(raw_name):
+                msg_cls = QuoteMessage
             # ChatBubbleItemView 是通用气泡，需要二次分类
-            if ui_cls == "mmui::ChatBubbleItemView":
+            elif ui_cls == "mmui::ChatBubbleItemView":
                 msg_cls = self._classify_bubble(raw_name)
-
-            # ChatBubbleReferItemView 复用于引用消息和动画表情，需要二次分类
-            if ui_cls == "mmui::ChatBubbleReferItemView":
+            # ChatBubbleReferItemView 复用于引用消息、图片、视频、动画表情
+            elif ui_cls == "mmui::ChatBubbleReferItemView":
                 msg_cls = self._classify_bubble_refer(raw_name)
 
             if msg_cls is None:
@@ -7441,7 +7478,12 @@ class Chat:
             content, emoji_name = EmotionMessage.parse(actual_name)
             return EmotionMessage(**base, content=content, emoji_name=emoji_name)
 
-        # TextMessage, QuoteMessage, ImageMessage, VideoMessage,
+        if msg_cls is QuoteMessage:
+            content, reply_content, quote_sender, quote_content = QuoteMessage.parse(actual_name)
+            return QuoteMessage(**base, content=content, reply_content=reply_content,
+                                quote_sender=quote_sender, quote_content=quote_content)
+
+        # TextMessage, ImageMessage, VideoMessage,
         # MergeMessage, NoteMessage, OtherMessage
         return msg_cls(**base, content=actual_name)
 
