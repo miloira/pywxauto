@@ -410,8 +410,8 @@ def send_shortcut(combo: str) -> None:
     """
     模拟键盘快捷键。
 
-    将 "Ctrl+Alt+W" 这样的组合键字符串解析为虚拟键码序列，
-    按顺序按下、逆序释放，模拟真实的键盘快捷键操作。
+    将 "Ctrl+Alt+W" 这样的组合键字符串转换为 SendKeys 格式，
+    通过 sendkeys_control 发送。
 
     支持的修饰键: Ctrl, Alt, Shift, Win
     支持的特殊键: Enter, Tab, Esc
@@ -423,20 +423,31 @@ def send_shortcut(combo: str) -> None:
     Raises:
         ValueError: 包含无法识别的按键时抛出
     """
+    # 修饰键映射到 SendKeys 格式
+    _MOD_MAP = {"ctrl": "Ctrl", "alt": "Alt", "shift": "Shift", "win": "Win"}
+    _SPECIAL_MAP = {"enter": "Enter", "tab": "Tab", "esc": "Escape",
+                    "escape": "Escape", "delete": "Delete", "del": "Delete",
+                    "backspace": "Backspace", "home": "Home", "end": "End",
+                    "pageup": "PageUp", "pagedown": "PageDown",
+                    "up": "Up", "down": "Down", "left": "Left", "right": "Right"}
+
     keys = [k.strip().lower() for k in combo.split("+")]
-    vk_codes: list[int] = []
+    modifiers = []
+    main_key = ""
+
     for key in keys:
-        if key in _VK_MAP:
-            vk_codes.append(_VK_MAP[key])
+        if key in _MOD_MAP:
+            modifiers.append(_MOD_MAP[key])
+        elif key in _SPECIAL_MAP:
+            main_key = "{" + _SPECIAL_MAP[key] + "}"
         elif len(key) == 1 and key.isalpha():
-            vk_codes.append(ord(key.upper()))
+            main_key = key
         else:
             raise ValueError(f"无法识别的按键: {key!r}")
 
-    for vk in vk_codes:
-        win32api.keybd_event(vk, 0, 0, 0)
-    for vk in reversed(vk_codes):
-        win32api.keybd_event(vk, 0, win32con.KEYEVENTF_KEYUP, 0)
+    # 构建 SendKeys 格式: {Ctrl}{Shift}a
+    sendkeys_str = "".join("{" + m + "}" for m in modifiers) + main_key
+    sendkeys_control(None, sendkeys_str)
 
 
 def select_all() -> None:
