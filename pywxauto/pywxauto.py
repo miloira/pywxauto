@@ -947,14 +947,14 @@ class Message:
     def __init__(self, *, sender: str = "", sender_type: SenderType = SenderType.OTHER,
                  content: str = "", raw_name: str = "",
                  status: MessageStatus = MessageStatus.UNKNOWN,
-                 runtime_id: tuple = (), bubble_x: int = 0):
+                 runtime_id: tuple = (), bubble_rect: tuple = ()):
         self.sender: str = sender
         self.sender_type: SenderType = sender_type
         self.content: str = content
         self.raw_name: str = raw_name
         self.status: MessageStatus = status
         self.runtime_id: tuple = runtime_id
-        self.bubble_x: int = bubble_x  # 气泡边缘的屏幕 x 坐标
+        self.bubble_rect: tuple = bubble_rect  # 气泡区域屏幕坐标 (left, top, right, bottom)
         self.chat: object = None  # 关联的聊天窗口对象（Chat 或 SeparateChat）
 
     @property
@@ -1099,11 +1099,10 @@ class Message:
         rect = target.BoundingRectangle
         cy = (rect.top + rect.bottom) // 2
 
-        if self.bubble_x > 0:
-            if self.sender_type == SenderType.SELF:
-                cx = self.bubble_x - 30
-            else:
-                cx = self.bubble_x + 30
+        if self.bubble_rect:
+            bl, bt, br, bb = self.bubble_rect
+            cx = (bl + br) // 2
+            cy = (bt + bb) // 2
         else:
             cx = (rect.left + rect.right) // 2
 
@@ -6949,19 +6948,19 @@ class Chat:
 
             # 判断发送者：优先从缓存读取，避免重复截图
             if sender_cache is not None and rid and rid in sender_cache:
-                sender, sender_type, bubble_x = sender_cache[rid]
+                sender, sender_type, bubble_rect = sender_cache[rid]
             else:
-                sender, sender_type, bubble_x = self._detect_sender(
+                sender, sender_type, bubble_rect = self._detect_sender(
                     ctrl, list_center_x, chat_name, hwnd,
                 )
                 # 写入缓存
                 if sender_cache is not None and rid:
-                    sender_cache[rid] = (sender, sender_type, bubble_x)
+                    sender_cache[rid] = (sender, sender_type, bubble_rect)
 
             # 构造具体消息对象
             msg = self._build_message(msg_cls, raw_name, sender, sender_type,
                                       runtime_id=rid)
-            msg.bubble_x = bubble_x
+            msg.bubble_rect = bubble_rect
             msg.chat = self
             messages.append(msg)
         return messages
@@ -7023,33 +7022,59 @@ class Chat:
     def _detect_sender(
         ctrl, list_center_x: int, chat_name: str,
         hwnd: int = 0,
-    ) -> tuple[str, SenderType, int]:
+    ) -> tuple[str, SenderType, tuple]:
         """
-        判断消息发送者、来源类型，并检测气泡边缘的屏幕 x 坐标。
+        判断消息发送者、来源类型，并检测气泡区域坐标。
 
         策略1: 截图后从左右两侧向内扫描非白色像素，判断头像在哪侧
         策略2: 通过气泡颜色（绿色/灰色）判断
+        策略3: 通过控件水平位置判断（适用于图片/视频等无气泡消息）
 
         Returns:
-            (sender, sender_type, bubble_x)
-            bubble_x 为气泡边缘的屏幕 x 坐标，0 表示未检测到
+            (sender, sender_type, bubble_rect)
+            bubble_rect 为气泡区域屏幕坐标 (left, top, right, bottom)，空元组表示未检测到
         """
-        return Chat._detect_sender_by_pixel(ctrl, chat_name, hwnd)
+        sender, sender_type, bubble_rect = Chat._detect_sender_by_pixel(
+            ctrl, chat_name, hwnd,
+        )
+        # 像素分析失败时，用控件位置兜底
+        if sender_type == SenderType.OTHER:
+            sender, sender_type = Chat._detect_sender_by_position(
+                ctrl, list_center_x, chat_name,
+            )
+        return sender, sender_type, bubble_rect
+
+    @staticmethod
+    def _detect_sender_by_position(
+        ctrl, list_center_x: int, chat_name: str,
+    ) -> tuple[str, SenderType]:
+        """
+        策略3: 通过控件水平位置判断发送者。
+
+        微信中对方消息偏左，自己消息偏右。
+        控件中心 x > 列表中心 x → 自己发的
+        控件中心 x < 列表中心 x → 对方发的
+        """
+        try:
+            rect = ctrl.BoundingRectangle
+            ctrl_center_x = (rect.left + rect.right) // 2
+        except Exception:
+            return "", SenderType.OTHER
+
+        if ctrl_center_x > list_center_x:
+            return "我", SenderType.SELF
+        return chat_name, SenderType.FRIEND
 
     @staticmethod
     def _detect_sender_by_pixel(
         ctrl, chat_name: str, hwnd: int = 0,
-    ) -> tuple[str, SenderType, int]:
+    ) -> tuple[str, SenderType, tuple]:
         """
-        通过截图像素分析判断消息发送者，并检测气泡位置。
-
-        先尝试边缘扫描，失败再降级到气泡颜色。
-        确定发送者后，在 h/2 处扫描气泡边缘：
-        - 对方消息：从左侧扫描，找到连续非白色像素即为气泡左边缘
-        - 自己消息：从右侧扫描，找到连续非白色像素即为气泡右边缘
+        通过截图像素分析判断消息发送者，并检测气泡区域。
 
         Returns:
-            (sender, sender_type, bubble_x)
+            (sender, sender_type, bubble_rect)
+            bubble_rect 为气泡区域屏幕坐标 (left, top, right, bottom)，空元组表示未检测到
         """
         try:
             if hwnd:
@@ -7067,81 +7092,144 @@ class Chat:
                         except OSError:
                             pass
         except Exception:
-            return "", SenderType.OTHER, 0
+            return "", SenderType.OTHER, ()
 
         w, h = img.size
 
         # ---- 策略1: 边缘扫描 ----
-        result = Chat._detect_sender_by_edge_scan(img, w, h, chat_name)
-        if result is None:
+        edge_result = Chat._detect_sender_by_edge_scan(img, w, h, chat_name)
+        edge_scan_y, edge_left_x, edge_right_x = -1, -1, -1
+        if edge_result is not None:
+            sender, sender_type, edge_scan_y, edge_left_x, edge_right_x = edge_result
+        else:
             # ---- 策略2: 气泡颜色 ----
-            result = Chat._detect_sender_by_bubble_color(img, w, h, chat_name)
+            sender, sender_type = Chat._detect_sender_by_bubble_color(img, w, h, chat_name)
 
-        sender, sender_type = result
+        # ---- 检测气泡区域 ----
+        bubble_left, bubble_right = Chat._detect_bubble_rect(img, w, h, sender_type)
 
-        # ---- 检测气泡边缘位置 ----
-        bubble_x = Chat._detect_bubble_x(img, w, h, sender_type)
+        # ---- 调试：标记扫描点和气泡区域并保存图片 ----
+        try:
+            from PIL import ImageDraw
+            debug_img = img.copy()
+            draw = ImageDraw.Draw(debug_img)
+            ms = 6  # marker size
+            # 边缘扫描：左侧（蓝色）
+            if edge_left_x >= 0:
+                draw.ellipse(
+                    [edge_left_x - ms, edge_scan_y - ms,
+                     edge_left_x + ms, edge_scan_y + ms],
+                    fill="blue", outline="white",
+                )
+                draw.text((edge_left_x + 10, edge_scan_y - 8),
+                          f"L({edge_left_x},{edge_scan_y})", fill="blue")
+            # 边缘扫描：右侧（红色）
+            if edge_right_x >= 0:
+                draw.ellipse(
+                    [edge_right_x - ms, edge_scan_y - ms,
+                     edge_right_x + ms, edge_scan_y + ms],
+                    fill="red", outline="white",
+                )
+                draw.text((edge_right_x - 90, edge_scan_y - 8),
+                          f"R({edge_right_x},{edge_scan_y})", fill="red")
+            # 气泡区域（绿色矩形）
+            if bubble_left > 0 or bubble_right > 0:
+                scan_y = 38
+                draw.line([(bubble_left, scan_y), (bubble_right, scan_y)],
+                          fill="green", width=2)
+                draw.ellipse(
+                    [bubble_left - ms, scan_y - ms,
+                     bubble_left + ms, scan_y + ms],
+                    fill="green", outline="white",
+                )
+                draw.text((bubble_left + 10, scan_y + 10),
+                          f"BL({bubble_left})", fill="green")
+                draw.ellipse(
+                    [bubble_right - ms, scan_y - ms,
+                     bubble_right + ms, scan_y + ms],
+                    fill="lime", outline="white",
+                )
+                draw.text((bubble_right - 80, scan_y + 10),
+                          f"BR({bubble_right})", fill="lime")
+            # 发送者标注
+            draw.text((5, 5), f"{sender} ({sender_type.value})", fill="yellow")
+            debug_img.save(os.path.join(".", "_debug_edge_scan.png"))
+        except Exception:
+            pass
+        # ---- 调试结束 ----
 
         # 转换为屏幕坐标
-        if bubble_x > 0:
+        bubble_rect = ()
+        if bubble_left > 0 or bubble_right > 0:
             try:
-                bubble_x += ctrl.BoundingRectangle.left
+                ctrl_rect = ctrl.BoundingRectangle
+                bubble_rect = (
+                    bubble_left + ctrl_rect.left,
+                    ctrl_rect.top,
+                    bubble_right + ctrl_rect.left,
+                    ctrl_rect.bottom,
+                )
             except Exception:
                 pass
 
-        return sender, sender_type, bubble_x
+        return sender, sender_type, bubble_rect
 
     @staticmethod
-    def _detect_bubble_x(
+    def _detect_bubble_rect(
         img: "Image.Image", w: int, h: int,
         sender_type: "SenderType",
-    ) -> int:
+    ) -> tuple[int, int]:
         """
-        检测气泡边缘的 x 坐标（相对于控件截图）。
+        检测气泡的左边缘和右边缘 x 坐标（相对于控件截图）。
 
-        在 h/2 高度处扫描：
-        - 对方消息（FRIEND）：从左侧向右扫描，跳过头像区域（前 15% 宽度），
-          找到连续 3 个非白色像素即为气泡左边缘
-        - 自己消息（SELF）：从右侧向左扫描，跳过头像区域（后 15% 宽度），
-          找到连续 3 个非白色像素即为气泡右边缘
+        在 y=38 高度处扫描：
+        - 对方消息（FRIEND）：先从左侧扫描找气泡左边缘，再从右侧扫描找气泡右边缘
+        - 自己消息（SELF）：先从右侧扫描找气泡右边缘，再从左侧扫描找气泡左边缘
 
         Returns:
-            气泡边缘的 x 坐标（相对于控件），0 表示未检测到
+            (bubble_left, bubble_right) 相对于控件的 x 坐标，(0, 0) 表示未检测到
         """
-        scan_y = h // 2
+        scan_y = 38
         if scan_y >= h:
+            return 0, 0
+
+        threshold = 3  # 连续非白色像素数
+        skip_px = 75   # 跳过头像区域的像素
+
+        def _scan_left_to_right(start: int, end: int) -> int:
+            count = 0
+            for x in range(start, end):
+                r, g, b = img.getpixel((x, scan_y))[:3]
+                if Chat._is_non_white(r, g, b):
+                    count += 1
+                    if count >= threshold:
+                        return x - threshold + 1
+                else:
+                    count = 0
             return 0
 
-        consecutive_threshold = 3  # 连续非白色像素数
-        skip_ratio = 0.15  # 跳过头像区域的比例
+        def _scan_right_to_left(start: int, end: int) -> int:
+            count = 0
+            for x in range(start, end, -1):
+                r, g, b = img.getpixel((x, scan_y))[:3]
+                if Chat._is_non_white(r, g, b):
+                    count += 1
+                    if count >= threshold:
+                        return x + threshold - 1
+                else:
+                    count = 0
+            return 0
 
         if sender_type == SenderType.FRIEND:
-            # 对方消息：从左侧扫描，跳过头像
-            start_x = int(w * skip_ratio)
-            count = 0
-            for x in range(start_x, w):
-                r, g, b = img.getpixel((x, scan_y))[:3]
-                if Chat._is_non_white(r, g, b):
-                    count += 1
-                    if count >= consecutive_threshold:
-                        return x - consecutive_threshold + 1
-                else:
-                    count = 0
-
+            bubble_left = _scan_left_to_right(skip_px, w)
+            bubble_right = _scan_right_to_left(w - 1 - skip_px, -1)
         elif sender_type == SenderType.SELF:
-            # 自己消息：从右侧扫描，跳过头像
-            start_x = int(w * (1 - skip_ratio))
-            count = 0
-            for x in range(start_x, -1, -1):
-                r, g, b = img.getpixel((x, scan_y))[:3]
-                if Chat._is_non_white(r, g, b):
-                    count += 1
-                    if count >= consecutive_threshold:
-                        return x + consecutive_threshold - 1
-                else:
-                    count = 0
+            bubble_right = _scan_right_to_left(w - 1 - skip_px, -1)
+            bubble_left = _scan_left_to_right(skip_px, w)
+        else:
+            return 0, 0
 
-        return 0
+        return bubble_left, bubble_right
 
     @staticmethod
     def _is_non_white(r: int, g: int, b: int) -> bool:
@@ -7151,15 +7239,13 @@ class Chat:
     @staticmethod
     def _detect_sender_by_edge_scan(
         img: "Image.Image", w: int, h: int, chat_name: str,
-    ) -> tuple[str, SenderType] | None:
+    ) -> tuple[str, SenderType, int, int, int] | None:
         """
         从左右两侧同时向中间扫描，先找到非白色像素的一侧即为头像侧。
 
-        在截图中间行扫描，左右指针同步推进，
-        哪边先碰到非白色像素就说明头像在哪边。
-
         Returns:
-            (sender, sender_type) 或 None（无法判断时）
+            (sender, sender_type, scan_y, left_x, right_x) 或 None
+            left_x/right_x 为扫描到的 x 坐标，-1 表示未找到
         """
         scan_y = 38
         if scan_y >= h:
@@ -7186,46 +7272,23 @@ class Chat:
             left += 1
             right -= 1
 
-        # ---- 调试：标记扫描点并保存图片 ----
-        try:
-            from PIL import ImageDraw
-            debug_img = img.copy()
-            draw = ImageDraw.Draw(debug_img)
-            marker_size = 6
-            if found_left:
-                draw.ellipse(
-                    [left - marker_size, scan_y - marker_size,
-                     left + marker_size, scan_y + marker_size],
-                    fill="blue", outline="white",
-                )
-                draw.text((left + 10, scan_y - 8), f"L({left},{scan_y})", fill="blue")
-            if found_right:
-                draw.ellipse(
-                    [right - marker_size, scan_y - marker_size,
-                     right + marker_size, scan_y + marker_size],
-                    fill="red", outline="white",
-                )
-                draw.text((right - 80, scan_y - 8), f"R({right},{scan_y})", fill="red")
-            debug_img.save(os.path.join(".", "_debug_edge_scan.png"))
-        except Exception:
-            pass
-        # ---- 调试结束 ----
-
         if not found_left and not found_right:
             return None
 
-        # 同时找到时，比较谁更靠边
+        left_x = left if found_left else -1
+        right_x = right if found_right else -1
+
         if found_left and found_right:
             if left < (w - 1 - right):
-                return chat_name, SenderType.FRIEND
+                return chat_name, SenderType.FRIEND, scan_y, left_x, right_x
             elif (w - 1 - right) < left:
-                return "我", SenderType.SELF
+                return "我", SenderType.SELF, scan_y, left_x, right_x
             else:
-                return None  # 距离相同，无法判断
+                return None
 
         if found_left:
-            return chat_name, SenderType.FRIEND
-        return "我", SenderType.SELF
+            return chat_name, SenderType.FRIEND, scan_y, left_x, right_x
+        return "我", SenderType.SELF, scan_y, left_x, right_x
 
     @staticmethod
     def _detect_sender_by_bubble_color(
@@ -11793,7 +11856,7 @@ class Weixin(WeixinWindow):
         def _watch_chat(chat: SeparateChat, name: str) -> None:
             # 已知消息的 RuntimeId 集合（仅保留当前可见的）
             known_rids: set[tuple] = set()
-            # 发送者缓存：{runtime_id: (sender, sender_type, bubble_x)}
+            # 发送者缓存：{runtime_id: (sender, sender_type, bubble_rect)}
             sender_cache: dict[tuple, tuple] = {}
             first_scan = True
 
