@@ -2081,24 +2081,35 @@ def sendkeys_control(control, text: str) -> None:
     - _background=True:  使用 vm_sendkeys 发送虚拟按键消息
 
     Args:
-        control: uiautomation 控件对象
+        control: uiautomation 控件对象，None 时发送到当前焦点窗口
         text:    SendKeys 格式字符串
     """
     if not _background:
-        control.SendKeys(text)
+        if control is None:
+            auto.SendKeys(text)
+        else:
+            control.SendKeys(text)
     else:
-        hwnd = control.NativeWindowHandle
-        if not hwnd:
-            parent = control
-            while parent:
-                hwnd = parent.NativeWindowHandle
-                if hwnd:
-                    break
-                parent = parent.GetParentControl()
+        hwnd = None
+        if control is not None:
+            hwnd = control.NativeWindowHandle
+            if not hwnd:
+                parent = control
+                while parent:
+                    hwnd = parent.NativeWindowHandle
+                    if hwnd:
+                        break
+                    parent = parent.GetParentControl()
 
         if not hwnd:
-            raise RuntimeError("无法获取控件所属窗口句柄")
+            # 没有控件或找不到句柄，获取当前激活窗口
+            hwnd = win32gui.GetForegroundWindow()
 
+        if not hwnd:
+            raise RuntimeError("无法获取目标窗口句柄")
+
+        # 先设置焦点再发送按键
+        win32gui.SendMessage(hwnd, win32con.WM_SETFOCUS, 0, 0)
         vm_sendkeys(hwnd, text)
 
 
@@ -2585,13 +2596,13 @@ class Login(WeixinWindow):
         edit = self._find_proxy_edit(name)
         click_control(edit)
         time.sleep(0.2)
-        edit.SendKeys("{Ctrl}a{Del}")
+        sendkeys_control(edit, "{Ctrl}a{Del}")
         time.sleep(0.1)
         vp = edit.GetValuePattern()
         if vp:
             vp.SetValue(value)
         else:
-            edit.SendKeys(value)
+            sendkeys_control(edit, value)
         time.sleep(0.2)
 
     def _get_proxy_field(self, name: str) -> str:
@@ -2842,7 +2853,7 @@ class Moment:
             cancel_btn = win.Control(Name="取消", ClassName=cls)
             if cancel_btn.Exists(0, 0):
                 # 已点赞，关闭操作栏
-                auto.SendKeys("{Esc}")
+                sendkeys_control(None, "{Esc}")
                 time.sleep(0.2)
                 return True
 
@@ -2880,7 +2891,7 @@ class Moment:
                 return True
 
         # 未点赞，关闭操作栏
-        auto.SendKeys("{Esc}")
+        sendkeys_control(None, "{Esc}")
         time.sleep(0.2)
         return True
 
@@ -3338,7 +3349,7 @@ class FriendCircle(WeixinWindow):
             if not new_found:
                 lc.SetFocus()
                 time.sleep(0.2)
-                lc.SendKeys("{PageDown}")
+                sendkeys_control(lc, "{PageDown}")
                 time.sleep(1)
                 found_after_scroll = False
                 for raw, _, rid, _ in self._collect_moments(lc):
@@ -3351,7 +3362,7 @@ class FriendCircle(WeixinWindow):
             else:
                 lc.SetFocus()
                 time.sleep(0.2)
-                lc.SendKeys("{PageDown}")
+                sendkeys_control(lc, "{PageDown}")
                 time.sleep(0.5)
 
         return moments[:count]
@@ -3422,7 +3433,7 @@ class FriendCircle(WeixinWindow):
             if not new_found:
                 lc.SetFocus()
                 time.sleep(0.2)
-                lc.SendKeys("{PageDown}")
+                sendkeys_control(lc, "{PageDown}")
                 time.sleep(1)
                 found_after_scroll = False
                 for raw, _, rid, _ in self._collect_moments(lc):
@@ -3435,7 +3446,7 @@ class FriendCircle(WeixinWindow):
             else:
                 lc.SetFocus()
                 time.sleep(0.2)
-                lc.SendKeys("{PageDown}")
+                sendkeys_control(lc, "{PageDown}")
                 time.sleep(0.5)
 
     def like(self, moment: Moment) -> bool:
@@ -3599,7 +3610,7 @@ class FriendCircle(WeixinWindow):
             raise RuntimeError("文件选择对话框未弹出")
 
         # 激活文件名输入框
-        file_dlg.SendKeys("{Alt}N")
+        sendkeys_control(file_dlg, "{Alt}N")
         time.sleep(0.3)
 
         # 输入文件路径
@@ -3617,7 +3628,7 @@ class FriendCircle(WeixinWindow):
         time.sleep(0.3)
 
         # Alt+O 打开
-        file_dlg.SendKeys("{Alt}O")
+        sendkeys_control(file_dlg, "{Alt}O")
         time.sleep(1)
 
     def _set_remind_contacts(self, panel: auto.Control,
@@ -3822,7 +3833,7 @@ class FriendCircle(WeixinWindow):
             for contact in contacts:
                 click_control(search_edit)
                 time.sleep(0.2)
-                search_edit.SendKeys("{Ctrl}a{Del}")
+                sendkeys_control(search_edit, "{Ctrl}a{Del}")
                 time.sleep(0.2)
                 paste(contact)
                 time.sleep(1)
@@ -4523,7 +4534,7 @@ class NoteEditorWindow(WeixinWindow):
         editor = self._editor
         if not editor.Exists(maxSearchSeconds=2):
             raise RuntimeError("未找到笔记编辑器输入控件")
-        editor.SendKeys(text)
+        sendkeys_control(editor, text)
         time.sleep(0.2)
 
     @PIM.guard
@@ -4532,14 +4543,14 @@ class NoteEditorWindow(WeixinWindow):
         self.focus_editor()
         editor = self._editor
         if editor.Exists(maxSearchSeconds=2):
-            editor.SendKeys("{Ctrl}a{Del}")
+            sendkeys_control(editor, "{Ctrl}a{Del}")
             time.sleep(0.2)
 
     @PIM.guard
     def select_all(self) -> None:
         """全选编辑器内容"""
         self.focus_editor()
-        self._editor.SendKeys("{Ctrl}a")
+        sendkeys_control(self._editor, "{Ctrl}a")
         time.sleep(0.1)
 
     # -- 富文本格式快捷键 --
@@ -4584,7 +4595,7 @@ class NoteEditorWindow(WeixinWindow):
         file_path: 文件绝对路径
         """
         self.focus_editor()
-        self._editor.SendKeys("{Ctrl}O")
+        sendkeys_control(self._editor, "{Ctrl}O")
         time.sleep(1)
 
         # 系统文件选择对话框
@@ -4593,7 +4604,7 @@ class NoteEditorWindow(WeixinWindow):
             raise RuntimeError("文件选择对话框未弹出")
 
         # Alt+N 激活文件名输入框，通过 ValuePattern 直接设置路径
-        dlg.SendKeys("{Alt}N")
+        sendkeys_control(dlg, "{Alt}N")
         time.sleep(0.3)
         edit = dlg.ComboBoxControl(AutomationId="1148").EditControl()
         if not edit.Exists(0, 0):
@@ -4601,63 +4612,63 @@ class NoteEditorWindow(WeixinWindow):
         edit.GetValuePattern().SetValue(file_path)
         time.sleep(0.3)
         # Alt+O 点击打开
-        dlg.SendKeys("{Alt}O")
+        sendkeys_control(dlg, "{Alt}O")
         time.sleep(0.5)
 
     @PIM.guard
     def bold(self) -> None:
         """加粗（Ctrl+B）"""
         self.focus_editor(force_click=False)
-        self._editor.SendKeys("{Ctrl}B")
+        sendkeys_control(self._editor, "{Ctrl}B")
         time.sleep(0.1)
 
     @PIM.guard
     def italic(self) -> None:
         """斜体（Ctrl+I）"""
         self.focus_editor(force_click=False)
-        self._editor.SendKeys("{Ctrl}I")
+        sendkeys_control(self._editor, "{Ctrl}I")
         time.sleep(0.1)
 
     @PIM.guard
     def underline(self) -> None:
         """下划线（Ctrl+U）"""
         self.focus_editor(force_click=False)
-        self._editor.SendKeys("{Ctrl}U")
+        sendkeys_control(self._editor, "{Ctrl}U")
         time.sleep(0.1)
 
     @PIM.guard
     def highlight(self) -> None:
         """高亮（Ctrl+Shift+H）"""
         self.focus_editor(force_click=False)
-        self._editor.SendKeys("{Ctrl}{Shift}H")
+        sendkeys_control(self._editor, "{Ctrl}{Shift}H")
         time.sleep(0.1)
 
     @PIM.guard
     def undo(self) -> None:
         """撤销（Ctrl+Z）"""
         self.focus_editor(force_click=False)
-        self._editor.SendKeys("{Ctrl}z")
+        sendkeys_control(self._editor, "{Ctrl}z")
         time.sleep(0.1)
 
     @PIM.guard
     def redo(self) -> None:
         """重做（Ctrl+Y）"""
         self.focus_editor(force_click=False)
-        self._editor.SendKeys("{Ctrl}y")
+        sendkeys_control(self._editor, "{Ctrl}y")
         time.sleep(0.1)
 
     @PIM.guard
     def new_line(self) -> None:
         """换行（Enter）"""
         self.focus_editor()
-        self._editor.SendKeys("{Enter}")
+        sendkeys_control(self._editor, "{Enter}")
         time.sleep(0.1)
 
     @PIM.guard
     def save(self) -> None:
         """保存笔记（Ctrl+S）"""
         self.focus_editor(force_click=False)
-        self._editor.SendKeys("{Ctrl}s")
+        sendkeys_control(self._editor, "{Ctrl}s")
         time.sleep(0.3)
 
     @PIM.guard
@@ -4679,24 +4690,24 @@ class NoteEditorWindow(WeixinWindow):
             if not tag:
                 continue
             # 通过窗口发送 Ctrl+T 打开标签弹窗
-            self._editor.SendKeys("{Ctrl}T")
+            sendkeys_control(self._editor, "{Ctrl}T")
             time.sleep(1)
             # 标签弹窗内的输入框不暴露为 UI Automation 控件，
             # 需要通过窗口级别 SendKeys 输入
-            auto.SendKeys(tag)
+            sendkeys_control(None, tag)
             time.sleep(0.3)
-            auto.SendKeys("{Down}")
-            auto.SendKeys("{Enter}")
+            sendkeys_control(None, "{Down}")
+            sendkeys_control(None, "{Enter}")
             time.sleep(0.3)
         # 按 Esc 关闭标签弹窗
-        auto.SendKeys("{Esc}")
+        sendkeys_control(None, "{Esc}")
         time.sleep(0.2)
 
     @PIM.guard
     def paste(self) -> None:
         """粘贴剪贴板内容（Ctrl+V）"""
         self.focus_editor()
-        self._editor.SendKeys("{Ctrl}v")
+        sendkeys_control(self._editor, "{Ctrl}v")
         time.sleep(0.2)
 
     @PIM.guard
@@ -4972,11 +4983,11 @@ class FileManager(WeixinWindow):
             os.remove(file_path)
 
         # 快捷键保存
-        auto.SendKeys("{Alt}s", waitTime=0.5)
+        sendkeys_control(None, "{Alt}s")
         if not save_dialog.Exists(maxSearchSeconds=2):
             return True
         else:
-            auto.SendKeys("{Esc}", waitTime=0.3)
+            sendkeys_control(None, "{Esc}")
             return False
 
     @PIM.guard
@@ -5040,11 +5051,11 @@ class FileManager(WeixinWindow):
             os.remove(file_path)
 
         # 快捷键保存
-        auto.SendKeys("{Alt}s", waitTime=0.5)
+        sendkeys_control(None, "{Alt}s")
         if not save_dialog.Exists(maxSearchSeconds=2):
             return True
         else:
-            auto.SendKeys("{Esc}", waitTime=0.3)
+            sendkeys_control(None, "{Esc}")
             return False
 
     @PIM.guard
@@ -5524,7 +5535,7 @@ class Session:
             scroll_pattern.SetScrollPercent(-1, 0)
             time.sleep(0.3)
         else:
-            lc.SendKeys("{Home}")
+            sendkeys_control(lc, "{Home}")
             time.sleep(0.3)
 
         all_sessions: list[SessionItem] = []
@@ -5556,7 +5567,7 @@ class Session:
                 if v_percent >= 100 or v_percent < 0:
                     break
 
-            lc.SendKeys("{Down}" * step)
+            sendkeys_control(lc, "{Down}" * step)
             time.sleep(0.1)
 
         return all_sessions
@@ -5586,7 +5597,7 @@ class Session:
         if scroll_pattern:
             scroll_pattern.SetScrollPercent(-1, 0)
         else:
-            lc.SendKeys("{Home}")
+            sendkeys_control(lc, "{Home}")
         time.sleep(0.3)
 
         # 检查顶部是否可见
@@ -5604,7 +5615,7 @@ class Session:
                 if v >= 100 or v < 0:
                     break
 
-            lc.SendKeys("{Down}" * step)
+            sendkeys_control(lc, "{Down}" * step)
 
             if item.Exists(0, 0):
                 return item
@@ -5641,7 +5652,7 @@ class Session:
         )
         if not menu_item.Exists(maxSearchSeconds=1):
             # 关闭菜单
-            self._win.SendKeys("{Esc}")
+            sendkeys_control(self._win, "{Esc}")
             raise RuntimeError(f"菜单中未找到: {menu_name}")
         click_control(menu_item)
         time.sleep(0.3)
@@ -5761,7 +5772,7 @@ class Session:
     @PIM.guard
     def cancel_search(self) -> None:
         """取消搜索（按 Esc 退出搜索模式）"""
-        self._win.SendKeys("{Esc}")
+        sendkeys_control(self._win, "{Esc}")
         time.sleep(0.2)
 
     @PIM.guard
@@ -5883,9 +5894,9 @@ class Session:
             # 清空搜索框并通过键盘输入昵称
             click_control(search_edit)
             time.sleep(0.3)
-            search_edit.SendKeys("{Ctrl}a{Del}")
+            sendkeys_control(search_edit, "{Ctrl}a{Del}")
             time.sleep(0.3)
-            search_edit.SendKeys(nickname, interval=0.05)
+            sendkeys_control(search_edit, nickname)
             time.sleep(1.5)
 
             # 从左侧 SearchContactNewChatView 容器中查找搜索结果列表
@@ -6020,7 +6031,7 @@ class Session:
             if msg_edit.Exists(maxSearchSeconds=1):
                 click_control(msg_edit)
                 time.sleep(0.1)
-                msg_edit.SendKeys("{Ctrl}a{Del}")
+                sendkeys_control(msg_edit, "{Ctrl}a{Del}")
                 time.sleep(0.1)
                 msg_edit.GetValuePattern().SetValue(message)
                 time.sleep(0.2)
@@ -6033,7 +6044,7 @@ class Session:
             if remark_edit.Exists(maxSearchSeconds=1):
                 click_control(remark_edit)
                 time.sleep(0.1)
-                remark_edit.SendKeys("{Ctrl}a{Del}")
+                sendkeys_control(remark_edit, "{Ctrl}a{Del}")
                 time.sleep(0.1)
                 remark_edit.GetValuePattern().SetValue(remark)
                 time.sleep(0.2)
@@ -6222,7 +6233,7 @@ class Chat:
         """清空输入框"""
         field = self._input_field
         if field.Exists(maxSearchSeconds=2):
-            field.SendKeys("{Ctrl}a{Del}")
+            sendkeys_control(field, "{Ctrl}a{Del}")
             time.sleep(0.1)
 
     # -- 发送消息 --
@@ -6389,7 +6400,7 @@ class Chat:
         # paste(content)
 
         # 回车发送
-        self._win.SendKeys("{Enter}")
+        sendkeys_control(self._win, "{Enter}")
 
         # 发送后校验：输入框应已清空
         remaining = self._get_input_value()
@@ -6484,7 +6495,7 @@ class Chat:
                     f"{label}粘贴校验失败: 输入框文档长度为 0，{label}可能未粘贴成功"
                 )
 
-            self._win.SendKeys("{Enter}")
+            sendkeys_control(self._win, "{Enter}")
 
             remaining_len = self._get_input_doc_length()
             if remaining_len > 0:
@@ -6521,7 +6532,7 @@ class Chat:
             paste(content)
             time.sleep(0.2)
 
-        self._win.SendKeys("{Enter}")
+        sendkeys_control(self._win, "{Enter}")
 
         # 发送后校验：输入框应已清空
         remaining = self._get_input_value()
@@ -6852,8 +6863,8 @@ class Chat:
                 click_control(search_edit)
                 time.sleep(0.2)
                 # 清空已有内容后键盘输入，确保触发搜索
-                search_edit.SendKeys("{Ctrl}a", waitTime=0.1)
-                search_edit.SendKeys(keyword, waitTime=0.1)
+                sendkeys_control(search_edit, "{Ctrl}a")
+                sendkeys_control(search_edit, keyword)
                 time.sleep(1.5)  # 等待搜索结果加载（Chromium 渲染）
 
                 # 4. 在搜索结果中点击第 index 个表情
@@ -6950,11 +6961,11 @@ class Chat:
                 AutomationId=self.EMOJI_POPOVER_ID,
             )
             if emoji_popover.Exists(maxSearchSeconds=0.5):
-                emoji_popover.SendKeys("{Esc}")
+                sendkeys_control(emoji_popover, "{Esc}")
                 time.sleep(0.3)
         except Exception:
             # 兜底：向主窗口发送 Esc
-            self._win.SendKeys("{Esc}")
+            sendkeys_control(self._win, "{Esc}")
             time.sleep(0.3)
 
     def _click_emoji_search_tab(self, popover: auto.WindowControl) -> None:
@@ -7277,7 +7288,7 @@ class Chat:
         # 输入接收者昵称（通过剪贴板粘贴，确保触发搜索）
         click_control(search_edit)
         time.sleep(0.3)
-        search_edit.SendKeys("{Ctrl}a{Del}")
+        sendkeys_control(search_edit, "{Ctrl}a{Del}")
         time.sleep(0.2)
         paste(receiver_nickname)
         time.sleep(1.5)
@@ -7347,9 +7358,9 @@ class Chat:
             pass
 
         try:
-            self._win.SendKeys("{Esc}")
+            sendkeys_control(self._win, "{Esc}")
             time.sleep(0.2)
-            self._win.SendKeys("{Esc}")
+            sendkeys_control(self._win, "{Esc}")
             time.sleep(0.2)
         except Exception:
             pass
@@ -7377,9 +7388,9 @@ class Chat:
                 click_control(chat_input)
 
             if member == "所有人":
-                chat_input.SendKeys("@", waitTime=0.3)
+                sendkeys_control(chat_input, "@")
             else:
-                chat_input.SendKeys(f"@{member}", waitTime=0.3)
+                sendkeys_control(chat_input, f"@{member}")
 
             menu = self._win.ListControl(
                 AutomationId="chat_mention_list", searchDepth=4,
@@ -7397,7 +7408,7 @@ class Chat:
             fuzzy = [c for c in controls if member in c.Name]
 
             if full or len(fuzzy) == 1:
-                auto.SendKeys("{Enter}", waitTime=0.5)
+                sendkeys_control(None, "{Enter}")
             elif len(fuzzy) > 1:
                 names = [c.Name for c in fuzzy]
                 raise RuntimeError(f"@群成员模糊匹配到多个: {names}")
@@ -7428,7 +7439,7 @@ class Chat:
             Name=menu_name,
         )
         if not item.Exists(maxSearchSeconds=1):
-            self._win.SendKeys("{Esc}")
+            sendkeys_control(self._win, "{Esc}")
             raise RuntimeError(f"通话菜单中未找到: {menu_name}")
         click_control(item)
         time.sleep(0.3)
@@ -8363,9 +8374,9 @@ class Chat:
 
                 click_control(search_edit)
                 time.sleep(0.3)
-                search_edit.SendKeys("{Ctrl}a{Del}")
+                sendkeys_control(search_edit, "{Ctrl}a{Del}")
                 time.sleep(0.3)
-                search_edit.SendKeys(nickname, interval=0.05)
+                sendkeys_control(search_edit, nickname)
                 time.sleep(1.5)
 
                 # 添加群成员窗口搜索后使用 SearchContactView
@@ -8528,9 +8539,9 @@ class Chat:
 
                 click_control(search_edit)
                 time.sleep(0.3)
-                search_edit.SendKeys("{Ctrl}a{Del}")
+                sendkeys_control(search_edit, "{Ctrl}a{Del}")
                 time.sleep(0.3)
-                search_edit.SendKeys(nickname, interval=0.05)
+                sendkeys_control(search_edit, nickname)
                 time.sleep(1.5)
 
                 # 移除群成员窗口使用 SearchGroupMemberView 而非 SearchContactNewChatView
@@ -8997,10 +9008,10 @@ class Chat:
                 click_y = int(win_top + info["center"][1] + 1.5 * info["height"])
                 auto.Click(click_x, click_y)
                 time.sleep(0.2)
-                self._win.SendKeys("{Ctrl}a{Del}")
+                sendkeys_control(self._win, "{Ctrl}a{Del}")
                 time.sleep(0.1)
                 paste(name)
-                self._win.SendKeys("{Enter}")
+                sendkeys_control(self._win, "{Enter}")
                 update_btn = self._win.ButtonControl(Name="修改")
                 if update_btn.Exists(maxSearchSeconds=2):
                     click_control(update_btn)
@@ -9038,7 +9049,7 @@ class Chat:
                     pane_png = capture_window(pane_hwnd, mode=CaptureMode.PRINT_WINDOW)
                     pane_ocr = self._get_image_text(pane_png)
 
-                announcement_pane.SendKeys("{Ctrl}a{Del}")
+                sendkeys_control(announcement_pane, "{Ctrl}a{Del}")
                 paste(announcement)
 
                 time.sleep(0.5)
@@ -9076,10 +9087,10 @@ class Chat:
                 click_y = int(win_top + info["center"][1] + 1.5 * info["height"])
                 auto.Click(click_x, click_y)
                 time.sleep(0.2)
-                self._win.SendKeys("{Ctrl}a{Del}")
+                sendkeys_control(self._win, "{Ctrl}a{Del}")
                 time.sleep(0.1)
                 paste(remark)
-                self._win.SendKeys("{Enter}")
+                sendkeys_control(self._win, "{Enter}")
                 time.sleep(0.5)
 
             # -- 我在本群的昵称 --
@@ -9102,10 +9113,10 @@ class Chat:
                 click_y = int(win_top + info["center"][1] + 1.5 * info["height"])
                 auto.Click(click_x, click_y)
                 time.sleep(0.2)
-                self._win.SendKeys("{Ctrl}a{Del}")
+                sendkeys_control(self._win, "{Ctrl}a{Del}")
                 time.sleep(0.1)
                 paste(my_nickname)
-                self._win.SendKeys("{Enter}")
+                sendkeys_control(self._win, "{Enter}")
                 update_btn = self._win.ButtonControl(Name="修改")
                 if update_btn.Exists(maxSearchSeconds=2):
                     click_control(update_btn)
@@ -9421,12 +9432,12 @@ class Chat:
             auto.Click(click_x, click_y)
 
             time.sleep(0.2)
-            self._win.SendKeys("{Ctrl}a{Del}")
+            sendkeys_control(self._win, "{Ctrl}a{Del}")
             time.sleep(0.1)
 
             # 通过剪贴板粘贴名称
             paste(name)
-            self._win.SendKeys("{Enter}")
+            sendkeys_control(self._win, "{Enter}")
 
             # 点击搜索框 完成保存
             update_bth = self._win.ButtonControl(Name="修改")
@@ -9513,7 +9524,7 @@ class Chat:
                     raise OCRError("群公告窗口 OCR 未识别到任何文本")
 
             # 清空输入框并粘贴内容
-            announcement_pane.SendKeys("{Ctrl}a{Del}")
+            sendkeys_control(announcement_pane, "{Ctrl}a{Del}")
             paste(content)
             time.sleep(0.5)
 
@@ -9594,12 +9605,12 @@ class Chat:
             auto.Click(click_x, click_y)
 
             time.sleep(0.2)
-            self._win.SendKeys("{Ctrl}a{Del}")
+            sendkeys_control(self._win, "{Ctrl}a{Del}")
             time.sleep(0.1)
 
             # 通过剪贴板粘贴文本
             paste(remark)
-            self._win.SendKeys("{Enter}")
+            sendkeys_control(self._win, "{Enter}")
 
             logger.info(f"设置群聊备注成功: {self.current_name} -> {remark}")
 
@@ -9667,12 +9678,12 @@ class Chat:
             auto.Click(click_x, click_y)
 
             time.sleep(0.2)
-            self._win.SendKeys("{Ctrl}a{Del}")
+            sendkeys_control(self._win, "{Ctrl}a{Del}")
             time.sleep(0.1)
 
             # 通过剪贴板粘贴文本
             paste(nickname)
-            self._win.SendKeys("{Enter}")
+            sendkeys_control(self._win, "{Enter}")
 
             # 点击"修改"按钮完成保存
             update_btn = self._win.ButtonControl(Name="修改")
@@ -9722,18 +9733,18 @@ class Chat:
             Name=menu_name,
         )
         if not menu_item.Exists(maxSearchSeconds=2):
-            self._win.SendKeys("{Esc}")
+            sendkeys_control(self._win, "{Esc}")
             raise RuntimeError(f"未找到'{menu_name}'菜单项")
         click_control(menu_item)
 
     def _cleanup_profile(self) -> None:
         """关闭可能残留的弹窗和面板，并收回聊天信息面板"""
         try:
-            self._win.SendKeys("{Esc}")
+            sendkeys_control(self._win, "{Esc}")
             time.sleep(0.2)
-            self._win.SendKeys("{Esc}")
+            sendkeys_control(self._win, "{Esc}")
             time.sleep(0.2)
-            self._win.SendKeys("{Esc}")
+            sendkeys_control(self._win, "{Esc}")
             time.sleep(0.2)
         except Exception:
             pass
@@ -9952,7 +9963,7 @@ class Chat:
                 )
                 if remark_edit.Exists(maxSearchSeconds=2):
                     click_control(remark_edit)
-                    remark_edit.SendKeys("{Ctrl}a{Del}")
+                    sendkeys_control(remark_edit, "{Ctrl}a{Del}")
                     if remark:
                         paste(remark)
 
@@ -10001,14 +10012,14 @@ class Chat:
                             )
                             if tag_edit.Exists(maxSearchSeconds=2):
                                 click_control(tag_edit)
-                                tag_edit.SendKeys("{Ctrl}a{Del}")
+                                sendkeys_control(tag_edit, "{Ctrl}a{Del}")
                                 paste(label)
                                 label_item = remark_pop.ListItemControl(
                                     Name=label, searchDepth=8,
                                 )
                                 if label_item.Exists(maxSearchSeconds=1):
                                     click_control(label_item)
-                                tag_edit.SendKeys("{Ctrl}a{Del}")
+                                sendkeys_control(tag_edit, "{Ctrl}a{Del}")
 
                         title_text = remark_pop.TextControl(
                             ClassName="mmui::XTextView",
@@ -10067,7 +10078,7 @@ class Chat:
                                     vp.SetValue(phone)
                                 else:
                                     paste(phone)
-                                phone_edit.SendKeys("{Tab}")
+                                sendkeys_control(phone_edit, "{Tab}")
 
             # ---- 4. 描述 ----
             if description is not None:
@@ -10077,7 +10088,7 @@ class Chat:
                 if desc_edit.Exists(maxSearchSeconds=2):
                     _scroll_to_bottom()
                     click_control(desc_edit)
-                    desc_edit.SendKeys("{Ctrl}a{Del}")
+                    sendkeys_control(desc_edit, "{Ctrl}a{Del}")
                     if description:
                         paste(description[:200])
 
@@ -10108,7 +10119,7 @@ class Chat:
                             ClassName="mmui::XMenuView", Name="删除",
                         )
                         if not del_item.Exists(maxSearchSeconds=1):
-                            self._win.SendKeys("{Esc}")
+                            sendkeys_control(self._win, "{Esc}")
                             break
                         click_control(del_item)
 
@@ -10123,13 +10134,13 @@ class Chat:
                     dlg = auto.WindowControl(ClassName="#32770")
                     if not dlg.Exists(maxSearchSeconds=5):
                         break
-                    dlg.SendKeys("{Alt}N")
+                    sendkeys_control(dlg, "{Alt}N")
                     edit = dlg.ComboBoxControl(AutomationId="1148").EditControl()
                     if not edit.Exists(0, 0):
                         edit = dlg.EditControl(AutomationId="1148")
                     if edit.Exists(maxSearchSeconds=2):
                         edit.GetValuePattern().SetValue(os.path.abspath(img_path))
-                        dlg.SendKeys("{Alt}O")
+                        sendkeys_control(dlg, "{Alt}O")
                         time.sleep(0.5)
 
             # ---- 点击"完成"保存 ----
@@ -10184,7 +10195,7 @@ class Chat:
 
             click_control(remark_edit)
             time.sleep(0.2)
-            remark_edit.SendKeys("{Ctrl}a{Del}")
+            sendkeys_control(remark_edit, "{Ctrl}a{Del}")
             time.sleep(0.1)
 
             paste(remark)
@@ -10268,7 +10279,7 @@ class Chat:
 
                 click_control(tag_edit)
                 time.sleep(0.2)
-                tag_edit.SendKeys("{Ctrl}a{Del}")
+                sendkeys_control(tag_edit, "{Ctrl}a{Del}")
                 time.sleep(0.1)
 
                 paste(label)
@@ -10284,7 +10295,7 @@ class Chat:
                 else:
                     logger.info(f"搜索结果中未找到标签，跳过: {label}")
 
-                tag_edit.SendKeys("{Ctrl}a{Del}")
+                sendkeys_control(tag_edit, "{Ctrl}a{Del}")
                 time.sleep(0.2)
 
             ok_btn = remark_pop.ButtonControl(
@@ -10466,7 +10477,7 @@ class Chat:
                 else:
                     paste(phone)
                 time.sleep(0.3)
-                phone_edit.SendKeys("{Tab}")
+                sendkeys_control(phone_edit, "{Tab}")
                 time.sleep(0.3)
 
             ok_btn = remark_pop.ButtonControl(
@@ -10532,7 +10543,7 @@ class Chat:
                 if not dlg.Exists(maxSearchSeconds=5):
                     raise RuntimeError("文件选择对话框未弹出")
 
-                dlg.SendKeys("{Alt}N")
+                sendkeys_control(dlg, "{Alt}N")
                 time.sleep(0.3)
                 edit = dlg.ComboBoxControl(AutomationId="1148").EditControl()
                 if not edit.Exists(0, 0):
@@ -10544,7 +10555,7 @@ class Chat:
                 edit.GetValuePattern().SetValue(abs_path)
                 time.sleep(0.3)
 
-                dlg.SendKeys("{Alt}O")
+                sendkeys_control(dlg, "{Alt}O")
                 time.sleep(1)
 
             ok_btn = remark_pop.ButtonControl(
@@ -10732,7 +10743,7 @@ class Chat:
                     Name="删除",
                 )
                 if not del_item.Exists(maxSearchSeconds=1):
-                    self._win.SendKeys("{Esc}")
+                    sendkeys_control(self._win, "{Esc}")
                     continue
 
                 click_control(del_item)
@@ -11114,7 +11125,7 @@ class Chat:
                     Name="收藏",
                 )
                 if not collect_item.Exists(maxSearchSeconds=1):
-                    self._win.SendKeys("{Esc}")
+                    sendkeys_control(self._win, "{Esc}")
                     logger.warning(f"右键菜单中未找到'收藏'，跳过第{idx}张")
                     continue
 
@@ -11227,7 +11238,7 @@ class Chat:
                     Name="另存为...",
                 )
                 if not save_item.Exists(maxSearchSeconds=1):
-                    self._win.SendKeys("{Esc}")
+                    sendkeys_control(self._win, "{Esc}")
                     continue
 
                 click_control(save_item)
@@ -11242,24 +11253,24 @@ class Chat:
 
                 edit = dlg.EditControl(AutomationId="1001")
                 if not edit.Exists(maxSearchSeconds=2):
-                    dlg.SendKeys("{Esc}")
+                    sendkeys_control(dlg, "{Esc}")
                     continue
 
                 vp = edit.GetValuePattern()
                 original_name = vp.Value if vp else ""
                 if not original_name:
-                    dlg.SendKeys("{Esc}")
+                    sendkeys_control(dlg, "{Esc}")
                     continue
                 full_path = os.path.join(save_dir, original_name)
                 vp.SetValue(full_path)
                 time.sleep(0.3)
 
-                dlg.SendKeys("{Alt}S")
+                sendkeys_control(dlg, "{Alt}S")
                 time.sleep(1)
 
                 # 如果弹出覆盖确认，按 Y 确认
                 if dlg.Exists(maxSearchSeconds=0.5):
-                    dlg.SendKeys("{Alt}Y")
+                    sendkeys_control(dlg, "{Alt}Y")
                     time.sleep(0.5)
 
                 saved += 1
