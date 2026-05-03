@@ -998,6 +998,20 @@ class Message:
         return (f"{cls}(sender_type={self.sender_type.value}, "
                 f"sender={self.sender!r}, content={self.content!r}{status_tag})")
 
+    def __str__(self) -> str:
+        cls = self.__class__.__name__
+        # 收集所有公开属性（排除内部引用）
+        _skip = {"chat", "runtime_id", "raw_name", "bubble_rect"}
+        parts = []
+        for key, value in self.__dict__.items():
+            if key.startswith("_") or key in _skip:
+                continue
+            if isinstance(value, Enum):
+                parts.append(f"{key}={value.value}")
+            else:
+                parts.append(f"{key}={value!r}")
+        return f"{cls}({', '.join(parts)})"
+
     def _find_ctrl(self) -> "auto.Control | None":
         """
         通过 runtime_id 在消息列表中查找对应的控件。
