@@ -216,6 +216,97 @@ class Event(str, Enum):
 _MSG_CLASS_TO_EVENT: dict[type, Event] = {}  # 延迟填充，在类定义之后
 
 
+import win32gui
+import win32api
+import win32con
+import fnmatch
+
+
+def vm_click(hwnd, x, y, button="left", click="once"):
+    """
+    向指定窗口发送虚拟鼠标点击（不需要窗口在前台）。
+
+    Args:
+        hwnd:   窗口句柄
+        x:      客户区 x 坐标
+        y:      客户区 y 坐标
+        button: 鼠标键 - "left"(默认) / "right" / "middle"
+        click:  点击方式 - "once"(默认) / "double"
+    """
+    lparam = win32api.MAKELONG(x, y)
+
+    msg_map = {
+        "left": {
+            "down": win32con.WM_LBUTTONDOWN,
+            "up": win32con.WM_LBUTTONUP,
+            "dblclk": win32con.WM_LBUTTONDBLCLK,
+            "mk": win32con.MK_LBUTTON,
+        },
+        "right": {
+            "down": win32con.WM_RBUTTONDOWN,
+            "up": win32con.WM_RBUTTONUP,
+            "dblclk": win32con.WM_RBUTTONDBLCLK,
+            "mk": win32con.MK_RBUTTON,
+        },
+        "middle": {
+            "down": win32con.WM_MBUTTONDOWN,
+            "up": win32con.WM_MBUTTONUP,
+            "dblclk": win32con.WM_MBUTTONDBLCLK,
+            "mk": win32con.MK_MBUTTON,
+        },
+    }
+
+    msgs = msg_map.get(button)
+    if not msgs:
+        raise ValueError(f"无效的 button 参数: {button!r}，可选: left/right/middle")
+
+    if click == "once":
+        win32gui.SendMessage(hwnd, msgs["down"], msgs["mk"], lparam)
+        win32gui.SendMessage(hwnd, msgs["up"], 0, lparam)
+    elif click == "double":
+        win32gui.SendMessage(hwnd, msgs["down"], msgs["mk"], lparam)
+        win32gui.SendMessage(hwnd, msgs["up"], 0, lparam)
+        win32gui.SendMessage(hwnd, msgs["down"], msgs["mk"], lparam)
+        win32gui.SendMessage(hwnd, msgs["up"], 0, lparam)
+    else:
+        raise ValueError(f"无效的 click 参数: {click!r}，可选: once/double")
+
+
+def click(control, button="left", click="once"):
+    """
+    通过 SendMessage 点击 uiautomation 控件（不需要窗口在前台）。
+
+    从控件的 BoundingRectangle 计算中心点，
+    再转换为相对于顶层窗口客户区的坐标，发送虚拟点击。
+
+    Args:
+        control: uiautomation 控件对象
+        button:  鼠标键 - "left"(默认) / "right" / "middle"
+        click:   点击方式 - "once"(默认) / "double"
+    """
+    # 获取控件在屏幕上的绝对坐标
+    rect = control.BoundingRectangle
+    screen_x = (rect.left + rect.right) // 2
+    screen_y = (rect.top + rect.bottom) // 2
+
+    # 获取顶层窗口句柄
+    hwnd = control.NativeWindowHandle
+    if not hwnd:
+        # 控件本身没有句柄，向上查找顶层窗口
+        parent = control
+        while parent:
+            hwnd = parent.NativeWindowHandle
+            if hwnd:
+                break
+            parent = parent.GetParentControl()
+
+    if not hwnd:
+        raise RuntimeError("无法获取控件所属窗口句柄")
+
+    # 屏幕坐标转换为窗口客户区坐标
+    client_x, client_y = win32gui.ScreenToClient(hwnd, (screen_x, screen_y))
+
+    vm_click(hwnd, client_x, client_y, button=button, click=click)
 
 
 def query_reg_install_path(reg_path: str) -> Optional[str]:
@@ -315,8 +406,6 @@ def find_window_by_name(name_pattern: str) -> list[int]:
     return result
 
 
-
-
 def send_shortcut(combo: str) -> None:
     """
     模拟键盘快捷键。
@@ -356,8 +445,6 @@ def select_all() -> None:
 
 def copy() -> None:
     send_shortcut("Ctrl+C")
-
-
 
 
 class PIM:
@@ -588,8 +675,6 @@ def get_clipboard() -> str:
         win32clipboard.CloseClipboard()
 
 
-
-
 def save_clipboard() -> Optional[tuple[int, object]]:
     """
     保存当前剪贴板中的一条数据（按优先级匹配格式）。
@@ -675,6 +760,237 @@ class CaptureMode(Enum):
     """窗口截图模式"""
     BITBLT = "bitblt"            # 从屏幕 DC 拷贝，速度快，但截不到被遮挡/最小化的窗口
     PRINT_WINDOW = "print_window"  # 通过 PrintWindow API，支持被遮挡/最小化的窗口
+
+
+def vm_move(hwnd: int, x: int, y: int) -> None:
+    """
+    向指定窗口发送虚拟鼠标移动消息（不需要窗口在前台）。
+
+    Args:
+        hwnd: 窗口句柄
+        x:    客户区 x 坐标
+        y:    客户区 y 坐标
+    """
+    lparam = win32api.MAKELONG(x, y)
+    win32gui.SendMessage(hwnd, win32con.WM_MOUSEMOVE, 0, lparam)
+
+
+def vm_scroll(hwnd: int, x: int, y: int, delta: int) -> None:
+    """
+    向指定窗口发送虚拟鼠标滚轮消息（不需要窗口在前台）。
+
+    Args:
+        hwnd:  窗口句柄
+        x:     客户区 x 坐标
+        y:     客户区 y 坐标
+        delta: 滚动量，正值向上滚，负值向下滚（单位与 MOUSEEVENTF_WHEEL 一致，120=一格）
+    """
+    lparam = win32api.MAKELONG(x, y)
+    wparam = win32api.MAKELONG(0, delta)
+    win32gui.SendMessage(hwnd, win32con.WM_MOUSEWHEEL, wparam, lparam)
+
+
+# 特殊键名 -> (WM_KEYDOWN/WM_KEYUP 的 wParam 虚拟键码)
+_SENDKEYS_MAP = {
+    "{Enter}": win32con.VK_RETURN,
+    "{Tab}": win32con.VK_TAB,
+    "{Esc}": win32con.VK_ESCAPE,
+    "{Escape}": win32con.VK_ESCAPE,
+    "{Del}": win32con.VK_DELETE,
+    "{Delete}": win32con.VK_DELETE,
+    "{Back}": win32con.VK_BACK,
+    "{Backspace}": win32con.VK_BACK,
+    "{Home}": win32con.VK_HOME,
+    "{End}": win32con.VK_END,
+    "{Up}": win32con.VK_UP,
+    "{Down}": win32con.VK_DOWN,
+    "{Left}": win32con.VK_LEFT,
+    "{Right}": win32con.VK_RIGHT,
+    "{PageUp}": win32con.VK_PRIOR,
+    "{PageDown}": win32con.VK_NEXT,
+    "{Space}": win32con.VK_SPACE,
+    "{F1}": win32con.VK_F1,
+    "{F2}": win32con.VK_F2,
+    "{F3}": win32con.VK_F3,
+    "{F4}": win32con.VK_F4,
+    "{F5}": win32con.VK_F5,
+}
+
+
+def _parse_sendkeys(text: str) -> list:
+    """
+    解析 SendKeys 格式字符串为操作序列。
+
+    支持格式：
+    - 普通字符: "abc" → 逐个发送 WM_CHAR
+    - 特殊键: "{Enter}", "{Esc}", "{Del}" 等 → WM_KEYDOWN + WM_KEYUP
+    - 组合键: "{Ctrl}a" → Ctrl 按下 + a + Ctrl 释放
+    - 连续特殊键: "{Ctrl}a{Del}" → Ctrl+a, Del
+
+    Returns:
+        操作列表，每项为 ("char", ch) 或 ("key", vk) 或 ("mod_down", vk) 或 ("mod_up", vk)
+    """
+    ops = []
+    i = 0
+    mod_stack = []  # 当前按住的修饰键
+
+    while i < len(text):
+        if text[i] == '{':
+            end = text.find('}', i)
+            if end == -1:
+                # 没有匹配的 }，当普通字符处理
+                ops.append(("char", text[i]))
+                i += 1
+                continue
+            token = text[i:end + 1]
+            i = end + 1
+
+            # 修饰键
+            token_lower = token.lower()
+            if token_lower == "{ctrl}":
+                ops.append(("mod_down", win32con.VK_CONTROL))
+                mod_stack.append(win32con.VK_CONTROL)
+                continue
+            elif token_lower == "{alt}":
+                ops.append(("mod_down", win32con.VK_MENU))
+                mod_stack.append(win32con.VK_MENU)
+                continue
+            elif token_lower == "{shift}":
+                ops.append(("mod_down", win32con.VK_SHIFT))
+                mod_stack.append(win32con.VK_SHIFT)
+                continue
+
+            # 特殊键
+            vk = _SENDKEYS_MAP.get(token)
+            if vk is not None:
+                ops.append(("key", vk))
+                # 特殊键按完后释放所有修饰键
+                while mod_stack:
+                    ops.append(("mod_up", mod_stack.pop()))
+            else:
+                # 未知 token，当普通字符发送
+                for ch in token:
+                    ops.append(("char", ch))
+        else:
+            ops.append(("char", text[i]))
+            # 普通字符输入后释放所有修饰键
+            if mod_stack:
+                while mod_stack:
+                    ops.append(("mod_up", mod_stack.pop()))
+            i += 1
+
+    # 释放残留的修饰键
+    while mod_stack:
+        ops.append(("mod_up", mod_stack.pop()))
+
+    return ops
+
+
+def vm_sendkeys(hwnd: int, text: str) -> None:
+    """
+    向指定窗口发送虚拟按键消息（不需要窗口在前台）。
+
+    支持 uiautomation SendKeys 格式的子集：
+    - 普通字符: "abc" → WM_CHAR
+    - 特殊键: "{Enter}", "{Esc}", "{Del}", "{Home}", "{End}" 等 → WM_KEYDOWN/WM_KEYUP
+    - 组合键: "{Ctrl}a" → Ctrl+A, "{Ctrl}{Shift}a" → Ctrl+Shift+A
+    - 连续操作: "{Ctrl}a{Del}" → 全选后删除
+
+    Args:
+        hwnd: 窗口句柄
+        text: SendKeys 格式字符串
+    """
+    ops = _parse_sendkeys(text)
+    for op_type, value in ops:
+        if op_type == "char":
+            code = ord(value)
+            if code > 127:
+                # 非 ASCII 字符（中文等）使用 WM_IME_CHAR，兼容性更好
+                win32gui.SendMessage(hwnd, 0x0286, code, 0)  # WM_IME_CHAR
+            else:
+                win32gui.SendMessage(hwnd, win32con.WM_CHAR, code, 0)
+        elif op_type == "key":
+            win32gui.SendMessage(hwnd, win32con.WM_KEYDOWN, value, 0)
+            win32gui.SendMessage(hwnd, win32con.WM_KEYUP, value, 0)
+        elif op_type == "mod_down":
+            win32gui.SendMessage(hwnd, win32con.WM_KEYDOWN, value, 0)
+        elif op_type == "mod_up":
+            win32gui.SendMessage(hwnd, win32con.WM_KEYUP, value, 0)
+
+
+def scroll_at_screen(x: int, y: int, delta: int) -> None:
+    """
+    在屏幕指定坐标处滚动鼠标滚轮。
+
+    根据模块级 _background 标志选择方式：
+    - _background=False: 物理移动鼠标 + mouse_event 滚轮
+    - _background=True:  通过 SendMessage 发送 WM_MOUSEWHEEL
+
+    Args:
+        x:     屏幕 x 坐标
+        y:     屏幕 y 坐标
+        delta: 滚动量（负值向下，正值向上），如 -120*5 表示向下滚 5 格
+    """
+    if not _background:
+        win32api.SetCursorPos((x, y))
+        time.sleep(0.1)
+        win32api.mouse_event(win32con.MOUSEEVENTF_WHEEL, x, y, delta, 0)
+    else:
+        hwnd = win32gui.WindowFromPoint((x, y))
+        if hwnd:
+            client_x, client_y = win32gui.ScreenToClient(hwnd, (x, y))
+            vm_scroll(hwnd, client_x, client_y, delta)
+
+
+def vm_click(hwnd: int, x: int, y: int,
+             button: str = "left", click: str = "once") -> None:
+    """
+    向指定窗口发送虚拟鼠标点击（不需要窗口在前台）。
+
+    Args:
+        hwnd:   窗口句柄
+        x:      客户区 x 坐标
+        y:      客户区 y 坐标
+        button: 鼠标键 - "left"(默认) / "right" / "middle"
+        click:  点击方式 - "once"(默认) / "double"
+    """
+    lparam = win32api.MAKELONG(x, y)
+
+    msg_map = {
+        "left": {
+            "down": win32con.WM_LBUTTONDOWN,
+            "up": win32con.WM_LBUTTONUP,
+            "dblclk": win32con.WM_LBUTTONDBLCLK,
+            "mk": win32con.MK_LBUTTON,
+        },
+        "right": {
+            "down": win32con.WM_RBUTTONDOWN,
+            "up": win32con.WM_RBUTTONUP,
+            "dblclk": win32con.WM_RBUTTONDBLCLK,
+            "mk": win32con.MK_RBUTTON,
+        },
+        "middle": {
+            "down": win32con.WM_MBUTTONDOWN,
+            "up": win32con.WM_MBUTTONUP,
+            "dblclk": win32con.WM_MBUTTONDBLCLK,
+            "mk": win32con.MK_MBUTTON,
+        },
+    }
+
+    msgs = msg_map.get(button)
+    if not msgs:
+        raise ValueError(f"无效的 button: {button!r}，可选: left/right/middle")
+
+    if click == "once":
+        win32gui.SendMessage(hwnd, msgs["down"], msgs["mk"], lparam)
+        win32gui.SendMessage(hwnd, msgs["up"], 0, lparam)
+    elif click == "double":
+        win32gui.SendMessage(hwnd, msgs["down"], msgs["mk"], lparam)
+        win32gui.SendMessage(hwnd, msgs["up"], 0, lparam)
+        win32gui.SendMessage(hwnd, msgs["down"], msgs["mk"], lparam)
+        win32gui.SendMessage(hwnd, msgs["up"], 0, lparam)
+    else:
+        raise ValueError(f"无效的 click: {click!r}，可选: once/double")
 
 
 def capture_window(hwnd: int, offset_left: int = 0, offset_top: int = 0,
@@ -1117,10 +1433,31 @@ class Message:
             bl, bt, br, bb = self.bubble_rect
             cx = (bl + br) // 2
             cy = (bt + bb) // 2
+        elif self.sender_type == SenderType.SELF:
+            # 自己的消息偏右
+            cx = rect.right - rect.width() // 4
+        elif self.sender_type == SenderType.FRIEND:
+            # 对方的消息偏左
+            cx = rect.left + rect.width() // 4
         else:
             cx = (rect.left + rect.right) // 2
 
-        auto.SetCursorPos(cx, cy)
+        if not _background:
+            auto.SetCursorPos(cx, cy)
+        else:
+            # 后台模式：通过 SendMessage 发送虚拟鼠标移动
+            hwnd = target.NativeWindowHandle
+            if not hwnd:
+                parent = target
+                while parent:
+                    hwnd = parent.NativeWindowHandle
+                    if hwnd:
+                        break
+                    parent = parent.GetParentControl()
+            if hwnd:
+                client_x, client_y = win32gui.ScreenToClient(hwnd, (cx, cy))
+                vm_move(hwnd, client_x, client_y)
+
         time.sleep(0.3)
         return True
 
@@ -1518,7 +1855,7 @@ class TransferMessage(Message):
         if not ctrl:
             return False
 
-        ctrl.Click()
+        click_control(ctrl)
         time.sleep(1)
 
         win = self.chat._win
@@ -1594,7 +1931,7 @@ class RedPacketMessage(Message):
         if not ctrl:
             return {}
 
-        ctrl.Click(ratioX=_rand_ratio(), ratioY=_rand_ratio())
+        click_control(ctrl)
         time.sleep(0.5)
 
         # 查找"拆开"按钮
@@ -1605,7 +1942,7 @@ class RedPacketMessage(Message):
             searchDepth=10,
         )
         if open_btn.Exists(maxSearchSeconds=3):
-            open_btn.Click(ratioX=_rand_ratio(), ratioY=_rand_ratio())
+            click_control(open_btn)
 
         # 等待红包结果窗口出现，截图 OCR 识别
         result = {}
@@ -1697,6 +2034,115 @@ def _rand_ratio() -> float:
     return random.uniform(0.2, 0.6)
 
 
+# 全局后台模式标志，由 Weixin.__init__ 设置
+_background: bool = False
+
+
+def move_to_control(control) -> None:
+    """
+    将鼠标移动到 uiautomation 控件中心。
+
+    根据模块级 _background 标志选择方式：
+    - _background=False: 使用 auto.SetCursorPos 移动真实鼠标
+    - _background=True:  使用 SendMessage 发送 WM_MOUSEMOVE（不移动真实鼠标）
+
+    Args:
+        control: uiautomation 控件对象
+    """
+    rect = control.BoundingRectangle
+    screen_x = (rect.left + rect.right) // 2
+    screen_y = (rect.top + rect.bottom) // 2
+
+    if not _background:
+        auto.SetCursorPos(screen_x, screen_y)
+    else:
+        hwnd = control.NativeWindowHandle
+        if not hwnd:
+            parent = control
+            while parent:
+                hwnd = parent.NativeWindowHandle
+                if hwnd:
+                    break
+                parent = parent.GetParentControl()
+
+        if not hwnd:
+            raise RuntimeError("无法获取控件所属窗口句柄")
+
+        client_x, client_y = win32gui.ScreenToClient(hwnd, (screen_x, screen_y))
+        vm_move(hwnd, client_x, client_y)
+
+
+def sendkeys_control(control, text: str) -> None:
+    """
+    向 uiautomation 控件发送按键。
+
+    根据模块级 _background 标志选择方式：
+    - _background=False: 使用 uiautomation 的 SendKeys
+    - _background=True:  使用 vm_sendkeys 发送虚拟按键消息
+
+    Args:
+        control: uiautomation 控件对象
+        text:    SendKeys 格式字符串
+    """
+    if not _background:
+        control.SendKeys(text)
+    else:
+        hwnd = control.NativeWindowHandle
+        if not hwnd:
+            parent = control
+            while parent:
+                hwnd = parent.NativeWindowHandle
+                if hwnd:
+                    break
+                parent = parent.GetParentControl()
+
+        if not hwnd:
+            raise RuntimeError("无法获取控件所属窗口句柄")
+
+        vm_sendkeys(hwnd, text)
+
+
+def click_control(control, button: str = "left", click: str = "once") -> None:
+    """
+    点击 uiautomation 控件。
+
+    根据模块级 _background 标志选择点击方式：
+    - _background=False: 使用 uiautomation 的 Click（需要窗口在前台）
+    - _background=True:  使用 SendMessage 发送虚拟鼠标消息（不需要窗口在前台）
+
+    Args:
+        control: uiautomation 控件对象
+        button:  鼠标键 - "left"(默认) / "right" / "middle"
+        click:   点击方式 - "once"(默认) / "double"
+    """
+    if not _background:
+        if click == "double":
+            control.DoubleClick()
+        elif button == "right":
+            control.RightClick(ratioX=_rand_ratio(), ratioY=_rand_ratio())
+        else:
+            control.Click(ratioX=_rand_ratio(), ratioY=_rand_ratio())
+    else:
+        rect = control.BoundingRectangle
+        screen_x = (rect.left + rect.right) // 2
+        screen_y = (rect.top + rect.bottom) // 2
+
+        hwnd = control.NativeWindowHandle
+        if not hwnd:
+            parent = control
+            while parent:
+                hwnd = parent.NativeWindowHandle
+                if hwnd:
+                    break
+                parent = parent.GetParentControl()
+
+        if not hwnd:
+            raise RuntimeError("无法获取控件所属窗口句柄")
+
+        client_x, client_y = win32gui.ScreenToClient(hwnd, (screen_x, screen_y))
+        vm_click(hwnd, client_x, client_y, button=button, click=click)
+
+
 class WeixinWindow:
     """
     微信窗口基类，封装通用的窗口操作。
@@ -1750,7 +2196,7 @@ class WeixinWindow:
                 ClassName=self._PIN_BTN_CLASS, Name="置顶",
             )
             if btn.Exists(0, 0):
-                btn.Click(simulateMove=simulate_move)
+                click_control(btn)
 
     @PIM.guard
     def unpin(self, event: bool = True, simulate_move: bool = True) -> None:
@@ -1763,7 +2209,7 @@ class WeixinWindow:
                 ClassName=self._PIN_BTN_CLASS, Name="取消置顶",
             )
             if btn.Exists(0, 0):
-                btn.Click(simulateMove=simulate_move)
+                click_control(btn)
 
     @PIM.guard
     def minimize(self, event: bool = True, simulate_move: bool = True) -> None:
@@ -1777,8 +2223,7 @@ class WeixinWindow:
             )
             if not btn.Exists(maxSearchSeconds=1):
                 raise RuntimeError("未找到最小化按钮")
-            btn.Click(ratioX=_rand_ratio(), ratioY=_rand_ratio(),
-                      simulateMove=simulate_move)
+            click_control(btn)
 
     @PIM.guard
     def maximize(self, event: bool = True, simulate_move: bool = True) -> None:
@@ -1795,8 +2240,7 @@ class WeixinWindow:
                     ClassName=self._BTN_CLASS, Name=name,
                 )
                 if btn.Exists(0, 0):
-                    btn.Click(ratioX=_rand_ratio(), ratioY=_rand_ratio(),
-                              simulateMove=simulate_move)
+                    click_control(btn)
                     return
             raise RuntimeError("未找到最大化/还原按钮")
 
@@ -1820,8 +2264,7 @@ class WeixinWindow:
             )
             if not btn.Exists(maxSearchSeconds=1):
                 raise RuntimeError("未找到关闭按钮")
-            btn.Click(ratioX=_rand_ratio(), ratioY=_rand_ratio(),
-                      simulateMove=simulate_move)
+            click_control(btn)
 
 
 class Login(WeixinWindow):
@@ -1918,7 +2361,7 @@ class Login(WeixinWindow):
         )
         if not btn.Exists(maxSearchSeconds=2):
             raise RuntimeError("未找到'进入微信'按钮")
-        btn.Click(ratioX=_rand_ratio(), ratioY=_rand_ratio())
+        click_control(btn)
 
         # 等待登录窗口消失
         for _ in range(timeout):
@@ -1944,7 +2387,7 @@ class Login(WeixinWindow):
         )
         if not btn.Exists(maxSearchSeconds=2):
             raise RuntimeError("未找到'切换账号'按钮")
-        btn.Click(ratioX=_rand_ratio(), ratioY=_rand_ratio())
+        click_control(btn)
         time.sleep(0.5)
 
     @PIM.guard
@@ -1962,7 +2405,7 @@ class Login(WeixinWindow):
         )
         if not btn.Exists(maxSearchSeconds=2):
             raise RuntimeError("未找到'仅传输文件'按钮")
-        btn.Click(ratioX=_rand_ratio(), ratioY=_rand_ratio())
+        click_control(btn)
         time.sleep(0.5)
 
     # ---- 网络代理设置相关控件信息 ----
@@ -2022,7 +2465,7 @@ class Login(WeixinWindow):
         )
         if not btn.Exists(maxSearchSeconds=2):
             raise RuntimeError("未找到'网络代理设置'按钮")
-        btn.Click(ratioX=_rand_ratio(), ratioY=_rand_ratio())
+        click_control(btn)
         time.sleep(0.5)
 
         # 等待代理设置页面出现
@@ -2048,7 +2491,7 @@ class Login(WeixinWindow):
         )
         if not btn.Exists(maxSearchSeconds=2):
             raise RuntimeError("未找到'返回'按钮")
-        btn.Click(ratioX=_rand_ratio(), ratioY=_rand_ratio())
+        click_control(btn)
         time.sleep(0.5)
 
     @property
@@ -2089,7 +2532,7 @@ class Login(WeixinWindow):
         )
         if not sw.Exists(maxSearchSeconds=2):
             raise RuntimeError("未找到'使用代理'开关")
-        sw.Click(ratioX=_rand_ratio(), ratioY=_rand_ratio())
+        click_control(sw)
         time.sleep(0.5)
 
     @PIM.guard
@@ -2109,7 +2552,7 @@ class Login(WeixinWindow):
         )
         if not sw.Exists(maxSearchSeconds=2):
             raise RuntimeError("未找到'使用代理'开关")
-        sw.Click(ratioX=_rand_ratio(), ratioY=_rand_ratio())
+        click_control(sw)
         time.sleep(0.5)
 
     def _find_proxy_edit(self, name: str) -> auto.EditControl:
@@ -2140,7 +2583,7 @@ class Login(WeixinWindow):
     def _set_proxy_field(self, name: str, value: str) -> None:
         """设置代理表单字段的值"""
         edit = self._find_proxy_edit(name)
-        edit.Click(ratioX=0.5, ratioY=0.5)
+        click_control(edit)
         time.sleep(0.2)
         edit.SendKeys("{Ctrl}a{Del}")
         time.sleep(0.1)
@@ -2234,7 +2677,7 @@ class Login(WeixinWindow):
         )
         if not btn.Exists(maxSearchSeconds=2):
             raise RuntimeError("未找到'保存'按钮")
-        btn.Click(ratioX=_rand_ratio(), ratioY=_rand_ratio())
+        click_control(btn)
         time.sleep(0.5)
 
     @PIM.guard
@@ -2262,8 +2705,7 @@ class Login(WeixinWindow):
             )
             if not btn.Exists(maxSearchSeconds=1):
                 raise RuntimeError("未找到关闭按钮")
-            btn.Click(ratioX=_rand_ratio(), ratioY=_rand_ratio(),
-                      simulateMove=simulate_move)
+            click_control(btn)
         time.sleep(0.3)
 
     def __str__(self) -> str:
@@ -2333,7 +2775,7 @@ class SessionItem:
         if session.wx:
             session.wx.activate()
         item = session._ensure_session_visible(self.name)
-        item.DoubleClick(ratioX=_rand_ratio(), ratioY=_rand_ratio())
+        click_control(item, click="double")
         time.sleep(0.5)
         return SeparateChat(session.wx, self.name)
 
@@ -2349,7 +2791,7 @@ class SessionItem:
         confirm_btn = session._win.ButtonControl(Name="删除", ClassName="mmui::XOutlineButton")
         if not confirm_btn.Exists(maxSearchSeconds=2):
             raise RuntimeError("未找到删除确认弹窗")
-        confirm_btn.Click(ratioX=_rand_ratio(), ratioY=_rand_ratio())
+        click_control(confirm_btn)
 
     def open(self) -> None:
         """打开该会话"""
@@ -2407,7 +2849,7 @@ class Moment:
         # 未点赞，点击"赞"
         btn = win.TextControl(Name="赞", ClassName="mmui::XTextView")
         if btn.Exists(0, 0):
-            btn.Click()
+            click_control(btn)
             time.sleep(0.3)
             return True
 
@@ -2433,7 +2875,7 @@ class Moment:
         for cls in ("mmui::XTextView", "mmui::XButton"):
             cancel_btn = win.Control(Name="取消", ClassName=cls)
             if cancel_btn.Exists(0, 0):
-                cancel_btn.Click()
+                click_control(cancel_btn)
                 time.sleep(0.3)
                 return True
 
@@ -2524,7 +2966,7 @@ class Moment:
             Name="刷新",
         )
         if refresh_btn.Exists(maxSearchSeconds=2):
-            refresh_btn.Click(ratioX=_rand_ratio(), ratioY=_rand_ratio())
+            click_control(refresh_btn)
             time.sleep(2)
 
         if self.scroll_offset <= 0:
@@ -2591,7 +3033,7 @@ class Moment:
 
         btn = win.TextControl(Name=button_name, ClassName="mmui::XTextView")
         if btn.Exists(0, 0):
-            btn.Click()
+            click_control(btn)
             time.sleep(0.3)
             return True
         return False
@@ -2864,7 +3306,7 @@ class FriendCircle(WeixinWindow):
                 Name="刷新",
             )
             if refresh_btn.Exists(maxSearchSeconds=2):
-                refresh_btn.Click(ratioX=_rand_ratio(), ratioY=_rand_ratio())
+                click_control(refresh_btn)
                 time.sleep(2)
 
         lc = self._find_sns_list()
@@ -2950,7 +3392,7 @@ class FriendCircle(WeixinWindow):
                 Name="刷新",
             )
             if refresh_btn.Exists(maxSearchSeconds=2):
-                refresh_btn.Click(ratioX=_rand_ratio(), ratioY=_rand_ratio())
+                click_control(refresh_btn)
                 time.sleep(2)
 
         lc = self._find_sns_list()
@@ -3076,15 +3518,24 @@ class FriendCircle(WeixinWindow):
             rect = publish_tab.BoundingRectangle
             cx = rect.left + int(rect.width() * _rand_ratio())
             cy = rect.top + int(rect.height() * _rand_ratio())
-            win32api.SetCursorPos((cx, cy))
-            time.sleep(0.1)
-            win32api.mouse_event(win32con.MOUSEEVENTF_LEFTDOWN, cx, cy, 0, 0)
-            time.sleep(2)
-            win32api.mouse_event(win32con.MOUSEEVENTF_LEFTUP, cx, cy, 0, 0)
+            if not _background:
+                win32api.SetCursorPos((cx, cy))
+                time.sleep(0.1)
+                win32api.mouse_event(win32con.MOUSEEVENTF_LEFTDOWN, cx, cy, 0, 0)
+                time.sleep(2)
+                win32api.mouse_event(win32con.MOUSEEVENTF_LEFTUP, cx, cy, 0, 0)
+            else:
+                hwnd_tmp = win32gui.WindowFromPoint((cx, cy))
+                if hwnd_tmp:
+                    client_x, client_y = win32gui.ScreenToClient(hwnd_tmp, (cx, cy))
+                    lparam = win32api.MAKELONG(client_x, client_y)
+                    win32gui.SendMessage(hwnd_tmp, win32con.WM_LBUTTONDOWN, win32con.MK_LBUTTON, lparam)
+                    time.sleep(2)
+                    win32gui.SendMessage(hwnd_tmp, win32con.WM_LBUTTONUP, 0, lparam)
             time.sleep(1)
         else:
             # 默认发布：左键点击"发表"按钮
-            publish_tab.Click(ratioX=_rand_ratio(), ratioY=_rand_ratio())
+            click_control(publish_tab)
             time.sleep(1)
 
         # 等待发布面板出现
@@ -3191,7 +3642,7 @@ class FriendCircle(WeixinWindow):
         )
         if not remind_btn.Exists(maxSearchSeconds=2):
             raise RuntimeError("未找到'提醒谁看'按钮")
-        remind_btn.Click(ratioX=_rand_ratio(), ratioY=_rand_ratio())
+        click_control(remind_btn)
         time.sleep(0.5)
 
         # 复用 SessionPickerWindow 选择逻辑
@@ -3250,7 +3701,7 @@ class FriendCircle(WeixinWindow):
         )
         if not privacy_btn.Exists(maxSearchSeconds=2):
             raise RuntimeError("未找到'谁可以看'隐私按钮")
-        privacy_btn.Click(ratioX=_rand_ratio(), ratioY=_rand_ratio())
+        click_control(privacy_btn)
         time.sleep(0.5)
 
         # 隐私选项面板覆盖在发布面板上方，但不在 panel 子树中，
@@ -3263,7 +3714,7 @@ class FriendCircle(WeixinWindow):
         )
         if not radio.Exists(maxSearchSeconds=2):
             raise RuntimeError(f"未找到隐私选项 '{permission}'")
-        radio.Click(ratioX=_rand_ratio(), ratioY=_rand_ratio())
+        click_control(radio)
         time.sleep(0.5)
 
         # "谁可以看"和"不给谁看"需要选择联系人/标签
@@ -3281,7 +3732,7 @@ class FriendCircle(WeixinWindow):
         )
         if not confirm_btn.Exists(maxSearchSeconds=2):
             raise RuntimeError("未找到隐私设置'确定'按钮")
-        confirm_btn.Click(ratioX=_rand_ratio(), ratioY=_rand_ratio())
+        click_control(confirm_btn)
         time.sleep(0.5)
 
     def _select_in_session_picker(
@@ -3325,7 +3776,7 @@ class FriendCircle(WeixinWindow):
                 searchDepth=5,
             )
             if label_tab.Exists(maxSearchSeconds=2):
-                label_tab.Click(ratioX=_rand_ratio(), ratioY=_rand_ratio())
+                click_control(label_tab)
                 time.sleep(0.5)
 
                 # 标签列表中直接勾选（标签数量通常不多，无需搜索）
@@ -3340,9 +3791,7 @@ class FriendCircle(WeixinWindow):
                             searchDepth=2,
                         )
                         if label_item.Exists(maxSearchSeconds=2):
-                            label_item.Click(
-                                ratioX=_rand_ratio(), ratioY=_rand_ratio(),
-                            )
+                            click_control(label_item)
                             time.sleep(0.3)
                         else:
                             logger.warning("未找到标签 '%s'", label_name)
@@ -3356,7 +3805,7 @@ class FriendCircle(WeixinWindow):
                 searchDepth=5,
             )
             if friend_tab.Exists(maxSearchSeconds=2):
-                friend_tab.Click(ratioX=_rand_ratio(), ratioY=_rand_ratio())
+                click_control(friend_tab)
                 time.sleep(0.5)
 
             # 通过搜索逐个选择联系人
@@ -3371,7 +3820,7 @@ class FriendCircle(WeixinWindow):
             not_found: list[str] = []
 
             for contact in contacts:
-                search_edit.Click(ratioX=_rand_ratio(), ratioY=_rand_ratio())
+                click_control(search_edit)
                 time.sleep(0.2)
                 search_edit.SendKeys("{Ctrl}a{Del}")
                 time.sleep(0.2)
@@ -3393,7 +3842,7 @@ class FriendCircle(WeixinWindow):
                     searchDepth=2,
                 )
                 if matched.Exists(maxSearchSeconds=2):
-                    matched.Click(ratioX=_rand_ratio(), ratioY=_rand_ratio())
+                    click_control(matched)
                     time.sleep(0.3)
                 else:
                     first_result = result_list.CheckBoxControl(
@@ -3405,9 +3854,7 @@ class FriendCircle(WeixinWindow):
                             "未精确匹配 '%s'，选择第一个结果: '%s'",
                             contact, first_result.Name,
                         )
-                        first_result.Click(
-                            ratioX=_rand_ratio(), ratioY=_rand_ratio(),
-                        )
+                        click_control(first_result)
                         time.sleep(0.3)
                     else:
                         logger.warning("搜索 '%s' 无结果", contact)
@@ -3423,7 +3870,7 @@ class FriendCircle(WeixinWindow):
         )
         if not confirm_btn.Exists(maxSearchSeconds=2):
             raise RuntimeError("未找到'完成'按钮")
-        confirm_btn.Click(ratioX=_rand_ratio(), ratioY=_rand_ratio())
+        click_control(confirm_btn)
         time.sleep(0.5)
 
     @PIM.guard
@@ -3463,7 +3910,7 @@ class FriendCircle(WeixinWindow):
 
         # 右键"发表"按钮弹出菜单
         publish_tab = self._find_toolbar_button(self.PUBLISH_TAB_NAME)
-        publish_tab.RightClick(ratioX=_rand_ratio(), ratioY=_rand_ratio())
+        click_control(publish_tab, button="right")
         time.sleep(0.5)
 
         if has_media:
@@ -3474,7 +3921,7 @@ class FriendCircle(WeixinWindow):
             )
             if not menu_item.Exists(maxSearchSeconds=2):
                 raise RuntimeError("未找到'选照片或视频'菜单项")
-            menu_item.Click(ratioX=_rand_ratio(), ratioY=_rand_ratio())
+            click_control(menu_item)
             time.sleep(1)
 
             # 选择第一个文件
@@ -3501,7 +3948,7 @@ class FriendCircle(WeixinWindow):
                     if not add_cell.Exists(maxSearchSeconds=3):
                         raise RuntimeError("未找到'添加图片'按钮")
 
-                    add_cell.Click(ratioX=_rand_ratio(), ratioY=_rand_ratio())
+                    click_control(add_cell)
                     time.sleep(1)
 
                     self._select_file_in_dialog(img_path)
@@ -3513,7 +3960,7 @@ class FriendCircle(WeixinWindow):
             )
             if not menu_item.Exists(maxSearchSeconds=2):
                 raise RuntimeError("未找到'发表文字'菜单项")
-            menu_item.Click(ratioX=_rand_ratio(), ratioY=_rand_ratio())
+            click_control(menu_item)
             time.sleep(1)
 
             panel = self._win.GroupControl(
@@ -3540,7 +3987,7 @@ class FriendCircle(WeixinWindow):
 
         # 点击"发表"
         publish_btn = self._find_publish_button(panel)
-        publish_btn.Click(ratioX=_rand_ratio(), ratioY=_rand_ratio())
+        click_control(publish_btn)
 
         # 等待发布面板消失
         for _ in range(30):
@@ -3592,7 +4039,7 @@ class FriendCircle(WeixinWindow):
         """
         self._open_sns_window()
         btn = self._find_toolbar_button("刷新")
-        btn.Click(ratioX=_rand_ratio(), ratioY=_rand_ratio())
+        click_control(btn)
         time.sleep(2)
 
     def __str__(self) -> str:
@@ -3770,35 +4217,35 @@ class VoipCallWindow:
     def toggle_mic(self) -> None:
         """切换麦克风开关"""
         btn = self._find_toolbar_button("麦克风已开", "麦克风已关")
-        btn.Click(ratioX=_rand_ratio(), ratioY=_rand_ratio())
+        click_control(btn)
         time.sleep(0.3)
 
     @PIM.guard
     def toggle_speaker(self) -> None:
         """切换扬声器开关"""
         btn = self._find_toolbar_button("扬声器已开", "扬声器已关")
-        btn.Click(ratioX=_rand_ratio(), ratioY=_rand_ratio())
+        click_control(btn)
         time.sleep(0.3)
 
     @PIM.guard
     def toggle_camera(self) -> None:
         """切换摄像头开关（仅视频通话）"""
         btn = self._find_toolbar_button("摄像头已开", "摄像头已关", "无摄像头")
-        btn.Click(ratioX=_rand_ratio(), ratioY=_rand_ratio())
+        click_control(btn)
         time.sleep(0.3)
 
     @PIM.guard
     def cancel(self) -> None:
         """取消通话（呼叫中未接通时）"""
         btn = self._find_toolbar_button("取消")
-        btn.Click(ratioX=_rand_ratio(), ratioY=_rand_ratio())
+        click_control(btn)
         time.sleep(0.3)
 
     @PIM.guard
     def hangup(self) -> None:
         """挂断通话（通话中）"""
         btn = self._find_toolbar_button("挂断")
-        btn.Click(ratioX=_rand_ratio(), ratioY=_rand_ratio())
+        click_control(btn)
         time.sleep(0.3)
 
     @PIM.guard
@@ -3808,14 +4255,14 @@ class VoipCallWindow:
             btn = self._find_toolbar_button("取消", "挂断")
         except RuntimeError:
             raise RuntimeError("未找到取消或挂断按钮")
-        btn.Click(ratioX=_rand_ratio(), ratioY=_rand_ratio())
+        click_control(btn)
         time.sleep(0.3)
 
     @PIM.guard
     def switch_to_video(self) -> None:
         """切换到视频通话（通话中可用）"""
         btn = self._find_toolbar_button("切换到视频通话")
-        btn.Click(ratioX=_rand_ratio(), ratioY=_rand_ratio())
+        click_control(btn)
         time.sleep(0.3)
 
     @PIM.guard
@@ -3826,7 +4273,7 @@ class VoipCallWindow:
             ClassName="mmui::PinnedButton", Name="置顶",
         )
         if btn.Exists(0, 0):
-            btn.Click(ratioX=_rand_ratio(), ratioY=_rand_ratio())
+            click_control(btn)
             time.sleep(0.2)
 
     @PIM.guard
@@ -3837,7 +4284,7 @@ class VoipCallWindow:
             ClassName="mmui::XButton", Name="最小化",
         )
         if btn.Exists(0, 0):
-            btn.Click(ratioX=_rand_ratio(), ratioY=_rand_ratio())
+            click_control(btn)
             time.sleep(0.2)
 
     @PIM.guard
@@ -3848,7 +4295,7 @@ class VoipCallWindow:
             ClassName="mmui::XButton", Name="最大化",
         )
         if btn.Exists(0, 0):
-            btn.Click(ratioX=_rand_ratio(), ratioY=_rand_ratio())
+            click_control(btn)
             time.sleep(0.2)
 
     @PIM.guard
@@ -3859,7 +4306,7 @@ class VoipCallWindow:
             ClassName="mmui::XButton", Name="关闭",
         )
         if btn.Exists(0, 0):
-            btn.Click(ratioX=_rand_ratio(), ratioY=_rand_ratio())
+            click_control(btn)
             time.sleep(0.2)
 
     def __str__(self) -> str:
@@ -3941,7 +4388,7 @@ class NoteEditorWindow(WeixinWindow):
         self._ensure_exists()
         btn = self._win.ButtonControl(Name="置顶")
         if btn.Exists(0, 0):
-            btn.Click(ratioX=_rand_ratio(), ratioY=_rand_ratio())
+            click_control(btn)
             time.sleep(0.2)
 
     def unpin(self, **kwargs) -> None:
@@ -3949,7 +4396,7 @@ class NoteEditorWindow(WeixinWindow):
         self._ensure_exists()
         btn = self._win.ButtonControl(Name="取消置顶")
         if btn.Exists(0, 0):
-            btn.Click(ratioX=_rand_ratio(), ratioY=_rand_ratio())
+            click_control(btn)
             time.sleep(0.2)
 
     @property
@@ -3982,7 +4429,7 @@ class NoteEditorWindow(WeixinWindow):
             if btn.Exists(0, 0):
                 rect = btn.BoundingRectangle
                 if rect.width() > 0 and rect.height() > 0:
-                    btn.Click(ratioX=_rand_ratio(), ratioY=_rand_ratio())
+                    click_control(btn)
                     time.sleep(0.2)
                     return
         wp = self._win.GetWindowPattern()
@@ -4020,7 +4467,7 @@ class NoteEditorWindow(WeixinWindow):
         if force_click:
             container = self._main_container
             if container.Exists(maxSearchSeconds=2):
-                container.Click(ratioX=0.5, ratioY=0.3)
+                click_control(container)
                 time.sleep(0.3)
 
     @property
@@ -4337,7 +4784,7 @@ class FileManager(WeixinWindow):
         if not chat_file_btn.Exists(maxSearchSeconds=3):
             raise RuntimeError("未找到'聊天文件'按钮")
 
-        chat_file_btn.Click(simulateMove=False)
+        click_control(chat_file_btn)
         time.sleep(1)
 
         # 验证文件管理器窗口已打开
@@ -4365,7 +4812,7 @@ class FileManager(WeixinWindow):
         if not filter_btn.Exists(maxSearchSeconds=3):
             raise RuntimeError(f"未找到'{filter_name}'筛选按钮")
 
-        filter_btn.Click(simulateMove=False)
+        click_control(filter_btn)
         time.sleep(0.5)
         return True
 
@@ -4393,7 +4840,7 @@ class FileManager(WeixinWindow):
         try:
             close_btn = fm_win.ButtonControl(Name="关闭")
             if close_btn.Exists(maxSearchSeconds=1):
-                close_btn.Click(simulateMove=False)
+                click_control(close_btn)
                 time.sleep(0.5)
                 if not fm_win.Exists(maxSearchSeconds=1):
                     return True
@@ -4485,7 +4932,7 @@ class FileManager(WeixinWindow):
             os.makedirs(dir_path, exist_ok=True)
 
         # 1. 右键点击文件项
-        file_cell.RightClick(simulateMove=False, waitTime=0.3)
+        click_control(file_cell, button="right")
         time.sleep(0.5)
 
         # 2. 定位右键菜单
@@ -4503,7 +4950,7 @@ class FileManager(WeixinWindow):
         if not save_as_item:
             raise RuntimeError("未找到'另存为'菜单项")
 
-        save_as_item.Click(simulateMove=False, waitTime=0.3)
+        click_control(save_as_item)
         time.sleep(1)
 
         # 3. 查找 Windows 文件保存对话框（聊天文件窗口的子窗口）
@@ -4553,7 +5000,7 @@ class FileManager(WeixinWindow):
             os.makedirs(dir_path, exist_ok=True)
 
         # 1. 右键点击文件项
-        file_cell.RightClick(simulateMove=False, waitTime=0.3)
+        click_control(file_cell, button="right")
         time.sleep(0.5)
 
         # 2. 定位右键菜单
@@ -4571,7 +5018,7 @@ class FileManager(WeixinWindow):
         if not download_to_item:
             raise RuntimeError("未找到'下载到'菜单项")
 
-        download_to_item.Click(simulateMove=False, waitTime=0.3)
+        click_control(download_to_item)
         time.sleep(1)
 
         # 3. 查找 Windows 文件保存对话框（聊天文件窗口的子窗口）
@@ -4621,7 +5068,7 @@ class FileManager(WeixinWindow):
             raise RuntimeError("聊天文件窗口未打开")
 
         # 1. 右键点击文件项
-        file_cell.RightClick(simulateMove=False, waitTime=0.3)
+        click_control(file_cell, button="right")
         time.sleep(0.5)
 
         # 2. 定位右键菜单
@@ -4639,7 +5086,7 @@ class FileManager(WeixinWindow):
         if not delete_item:
             raise RuntimeError("未找到'删除'菜单项")
 
-        delete_item.Click(simulateMove=False, waitTime=0.3)
+        click_control(delete_item)
         time.sleep(0.5)
 
         # 在确认对话框中查找"删除"或"确定"按钮并点击
@@ -4651,7 +5098,7 @@ class FileManager(WeixinWindow):
             ClassName="mmui::XOutlineButton", Name="删除",
         )
         if delete_btn.Exists(maxSearchSeconds=2):
-            delete_btn.Click(simulateMove=False)
+            click_control(delete_btn)
             time.sleep(0.5)
             return True
         return False
@@ -4681,7 +5128,7 @@ class FileManager(WeixinWindow):
             raise RuntimeError("聊天文件窗口未打开")
 
         # 1. 右键点击文件项
-        file_cell.RightClick(simulateMove=False, waitTime=0.3)
+        click_control(file_cell, button="right")
         time.sleep(0.5)
 
         # 2. 定位右键菜单
@@ -4699,7 +5146,7 @@ class FileManager(WeixinWindow):
         if not download_item:
             raise RuntimeError("未找到'下载'菜单项，文件可能已下载")
 
-        download_item.Click(simulateMove=False, waitTime=0.3)
+        click_control(download_item)
         time.sleep(0.5)
 
         # 3. 轮询文件状态，等待下载完成
@@ -4883,7 +5330,7 @@ class Navigator:
         else:
             btn = self._tabbar.ButtonControl(ClassName="mmui::MainTabBarSettingView", Name=self.TABS[tab_name], searchDepth=1)
 
-        btn.Click(ratioX=_rand_ratio(), ratioY=_rand_ratio())
+        click_control(btn)
 
     def __str__(self) -> str:
         tabs = ", ".join(self.TABS.keys())
@@ -4971,7 +5418,7 @@ class Session:
         )
         if not item.Exists(maxSearchSeconds=2):
             raise RuntimeError(f"会话列表中未找到: {name}")
-        item.Click(ratioX=_rand_ratio(), ratioY=_rand_ratio())
+        click_control(item)
         time.sleep(0.3)
 
     def _get_search_edit(self) -> auto.EditControl:
@@ -5024,7 +5471,8 @@ class Session:
                         return
                 except Exception:
                     pass
-                item.Click(ratioX=_rand_ratio(), ratioY=_rand_ratio())
+                click(item)
+                # item.Click(ratioX=_rand_ratio(), ratioY=_rand_ratio())
                 time.sleep(0.3)
                 return
 
@@ -5175,7 +5623,7 @@ class Session:
     def _right_click_session(self, name: str) -> None:
         """右键点击指定会话，弹出上下文菜单"""
         item = self._ensure_session_visible(name)
-        item.RightClick(ratioX=_rand_ratio(), ratioY=_rand_ratio())
+        click_control(item, button="right")
 
     def _click_context_menu_item(self, menu_name: str) -> None:
         """
@@ -5195,7 +5643,7 @@ class Session:
             # 关闭菜单
             self._win.SendKeys("{Esc}")
             raise RuntimeError(f"菜单中未找到: {menu_name}")
-        menu_item.Click(ratioX=_rand_ratio(), ratioY=_rand_ratio())
+        click_control(menu_item)
         time.sleep(0.3)
 
     def _session_context_action(self, name: str, menu_name: str) -> None:
@@ -5255,7 +5703,7 @@ class Session:
                 return
         except Exception:
             return
-        item.Click(ratioX=_rand_ratio(), ratioY=_rand_ratio())
+        click_control(item)
 
     @PIM.guard
     def open(self, name: str) -> None:
@@ -5268,7 +5716,7 @@ class Session:
                 return
         except Exception:
             pass
-        item.Click(ratioX=_rand_ratio(), ratioY=_rand_ratio())
+        click_control(item)
 
     @PIM.guard
     def delete(self, name: str) -> None:
@@ -5279,7 +5727,7 @@ class Session:
         )
         if not confirm_btn.Exists(maxSearchSeconds=2):
             raise RuntimeError("未找到删除确认弹窗")
-        confirm_btn.Click(ratioX=_rand_ratio(), ratioY=_rand_ratio())
+        click_control(confirm_btn)
 
     @PIM.guard
     def search_and_select(self, keyword: str, chat_type: Optional[list[str]] = None) -> bool:
@@ -5292,7 +5740,7 @@ class Session:
         """
         chat_type = chat_type or ["联系人", "群聊", "功能"]
         edit = self._get_search_edit()
-        edit.Click(ratioX=_rand_ratio(), ratioY=_rand_ratio())
+        click_control(edit)
         edit.GetValuePattern().SetValue(keyword)
         time.sleep(0.5)
 
@@ -5305,7 +5753,7 @@ class Session:
             if category_item.Exists(0, 0):
                 result_item = category_item.GetNextSiblingControl()
                 if result_item:
-                    result_item.Click(ratioX=_rand_ratio(), ratioY=_rand_ratio())
+                    click_control(result_item)
                     time.sleep(0.3)
                     return True
         return False
@@ -5335,7 +5783,7 @@ class Session:
         )
         if not btn.Exists(maxSearchSeconds=2):
             raise RuntimeError("未找到快捷操作按钮")
-        btn.Click(ratioX=_rand_ratio(), ratioY=_rand_ratio())
+        click_control(btn)
         time.sleep(0.3)
 
     def _click_quick_action_item(self, item_name: str) -> None:
@@ -5358,7 +5806,7 @@ class Session:
             # 关闭菜单
             self._click_quick_action_button()
             raise RuntimeError(f"快捷操作菜单中未找到: {item_name}")
-        item.Click()
+        click_control(item)
         time.sleep(0.3)
 
     def _quick_action(self, item_name: str) -> None:
@@ -5433,7 +5881,7 @@ class Session:
                 raise RuntimeError("发起群聊窗口中未找到搜索框")
 
             # 清空搜索框并通过键盘输入昵称
-            search_edit.Click(ratioX=_rand_ratio(), ratioY=_rand_ratio())
+            click_control(search_edit)
             time.sleep(0.3)
             search_edit.SendKeys("{Ctrl}a{Del}")
             time.sleep(0.3)
@@ -5463,7 +5911,7 @@ class Session:
             if not contact_row.Exists(maxSearchSeconds=3):
                 raise RuntimeError(f"未找到联系人: {nickname}")
 
-            contact_row.Click(ratioX=_rand_ratio(), ratioY=_rand_ratio())
+            click_control(contact_row)
             time.sleep(0.5)
 
         # --- 第4步：点击完成按钮 ---
@@ -5489,7 +5937,7 @@ class Session:
         )
         if not confirm_btn.Exists(maxSearchSeconds=3):
             raise RuntimeError("未找到完成按钮")
-        confirm_btn.Click(ratioX=_rand_ratio(), ratioY=_rand_ratio())
+        click_control(confirm_btn)
         time.sleep(0.5)
 
     @PIM.guard
@@ -5540,7 +5988,7 @@ class Session:
         )
         if not search_edit.Exists(maxSearchSeconds=2):
             raise RuntimeError("添加朋友窗口中未找到搜索框")
-        search_edit.Click(ratioX=_rand_ratio(), ratioY=_rand_ratio())
+        click_control(search_edit)
         time.sleep(0.2)
         search_edit.GetValuePattern().SetValue(keyword)
         time.sleep(0.3)
@@ -5549,14 +5997,14 @@ class Session:
         )
         if not search_btn.Exists(maxSearchSeconds=1):
             raise RuntimeError("未找到搜索按钮")
-        search_btn.Click(ratioX=_rand_ratio(), ratioY=_rand_ratio())
+        click_control(search_btn)
         time.sleep(1)
 
         # --- 第2步：点击"添加到通讯录" ---
         add_btn = add_friend_win.ButtonControl(Name="添加到通讯录")
         if not add_btn.Exists(maxSearchSeconds=3):
             raise RuntimeError("未找到'添加到通讯录'按钮，可能搜索无结果")
-        add_btn.Click(ratioX=_rand_ratio(), ratioY=_rand_ratio())
+        click_control(add_btn)
         time.sleep(1)
 
         # --- 第3步：填写申请表单 ---
@@ -5570,7 +6018,7 @@ class Session:
                 ClassName="mmui::XValidatorTextEdit", Name="发送添加朋友申请",
             )
             if msg_edit.Exists(maxSearchSeconds=1):
-                msg_edit.Click(ratioX=_rand_ratio(), ratioY=_rand_ratio())
+                click_control(msg_edit)
                 time.sleep(0.1)
                 msg_edit.SendKeys("{Ctrl}a{Del}")
                 time.sleep(0.1)
@@ -5583,7 +6031,7 @@ class Session:
                 ClassName="mmui::XLineEdit", Name="修改备注",
             )
             if remark_edit.Exists(maxSearchSeconds=1):
-                remark_edit.Click(ratioX=_rand_ratio(), ratioY=_rand_ratio())
+                click_control(remark_edit)
                 time.sleep(0.1)
                 remark_edit.SendKeys("{Ctrl}a{Del}")
                 time.sleep(0.1)
@@ -5597,7 +6045,7 @@ class Session:
                 Name="仅聊天",
             )
             if perm_item.Exists(maxSearchSeconds=1):
-                perm_item.Click(ratioX=_rand_ratio(), ratioY=_rand_ratio())
+                click_control(perm_item)
                 time.sleep(0.2)
 
         # 设置朋友圈和状态开关
@@ -5608,7 +6056,7 @@ class Session:
             if sw.Exists(maxSearchSeconds=1):
                 toggle = sw.GetTogglePattern()
                 if toggle and toggle.ToggleState == 0:
-                    sw.Click(ratioX=0.5, ratioY=0.5)
+                    click_control(sw)
                     time.sleep(0.2)
 
         if hide_their_posts:
@@ -5618,7 +6066,7 @@ class Session:
             if sw.Exists(maxSearchSeconds=1):
                 toggle = sw.GetTogglePattern()
                 if toggle and toggle.ToggleState == 0:
-                    sw.Click(ratioX=0.5, ratioY=0.5)
+                    click_control(sw)
                     time.sleep(0.2)
 
         # --- 第4步：点击确定 ---
@@ -5627,7 +6075,7 @@ class Session:
         )
         if not confirm_btn.Exists(maxSearchSeconds=1):
             raise RuntimeError("未找到确定按钮")
-        confirm_btn.Click(ratioX=_rand_ratio(), ratioY=_rand_ratio())
+        click_control(confirm_btn)
         time.sleep(0.5)
 
     @PIM.guard
@@ -6154,7 +6602,7 @@ class Chat:
         if not fav_btn.Exists(maxSearchSeconds=2):
             raise RuntimeError("未找到'发送收藏'按钮")
 
-        fav_btn.Click(ratioX=_rand_ratio(), ratioY=_rand_ratio())
+        click_control(fav_btn)
         time.sleep(0.5)
 
         # 等待收藏面板出现
@@ -6174,7 +6622,7 @@ class Chat:
             Name=self.FAV_CANCEL_NAME,
         )
         if cancel_btn.Exists(maxSearchSeconds=1):
-            cancel_btn.Click(ratioX=_rand_ratio(), ratioY=_rand_ratio())
+            click_control(cancel_btn)
             time.sleep(0.3)
 
     def _find_fav_search_edit(self) -> auto.EditControl:
@@ -6271,7 +6719,7 @@ class Chat:
 
         # 2. 在搜索框中输入关键词
         search_edit = self._find_fav_search_edit()
-        search_edit.Click(ratioX=_rand_ratio(), ratioY=_rand_ratio())
+        click_control(search_edit)
         time.sleep(0.3)
         search_edit.GetValuePattern().SetValue(keyword)
         time.sleep(1)  # 等待搜索结果加载
@@ -6292,7 +6740,7 @@ class Chat:
             self._close_collection_panel()
             raise RuntimeError(f"未找到匹配的收藏项: {keyword}")
 
-        matched_item.Click(ratioX=_rand_ratio(), ratioY=_rand_ratio())
+        click_control(matched_item)
         time.sleep(0.3)
 
         # 5. 点击"发送"按钮
@@ -6313,7 +6761,7 @@ class Chat:
             self._close_collection_panel()
             raise RuntimeError("'发送'按钮未启用，可能收藏项未正确选中")
 
-        send_btn.Click(ratioX=_rand_ratio(), ratioY=_rand_ratio())
+        click_control(send_btn)
         time.sleep(0.5)
 
         # 6. 验证面板已关闭（表示发送成功）
@@ -6401,7 +6849,7 @@ class Chat:
 
                 # 3. 在搜索框中输入关键词
                 search_edit = self._find_emoji_search_edit(popover)
-                search_edit.Click(ratioX=_rand_ratio(), ratioY=_rand_ratio())
+                click_control(search_edit)
                 time.sleep(0.2)
                 # 清空已有内容后键盘输入，确保触发搜索
                 search_edit.SendKeys("{Ctrl}a", waitTime=0.1)
@@ -6483,7 +6931,7 @@ class Chat:
         if not emoji_btn.Exists(maxSearchSeconds=2):
             raise RuntimeError("未找到'发送表情'按钮")
 
-        emoji_btn.Click(ratioX=_rand_ratio(), ratioY=_rand_ratio())
+        click_control(emoji_btn)
         time.sleep(0.5)
 
         # 等待表情弹窗出现
@@ -6526,7 +6974,7 @@ class Chat:
         if not search_tab.Exists(maxSearchSeconds=2):
             raise RuntimeError("未找到'搜索表情'标签")
 
-        search_tab.Click()
+        click_control(search_tab)
 
     def _find_emoji_search_edit(
         self, popover: auto.WindowControl,
@@ -6763,7 +7211,7 @@ class Chat:
         )
         if not btn.Exists(maxSearchSeconds=2):
             raise RuntimeError("未找到'聊天信息'按钮")
-        btn.Click(ratioX=_rand_ratio(), ratioY=_rand_ratio())
+        click_control(btn)
 
     def _click_contact_avatar(self) -> None:
         """点击聊天信息面板中的联系人头像"""
@@ -6773,7 +7221,7 @@ class Chat:
         )
         if not avatar.Exists(maxSearchSeconds=3):
             raise RuntimeError("未找到联系人头像")
-        avatar.Click(ratioX=_rand_ratio(), ratioY=_rand_ratio())
+        click_control(avatar)
 
     def _click_profile_more_button(self) -> None:
         """点击资料面板右上角的"更多"按钮（排除导航栏的同名按钮）"""
@@ -6789,7 +7237,7 @@ class Chat:
                     and child.Name == "更多"):
                 child_rect = child.BoundingRectangle
                 if child_rect.left > win_center_x:
-                    child.Click(ratioX=_rand_ratio(), ratioY=_rand_ratio())
+                    click_control(child)
                     return
 
         raise RuntimeError("未找到资料面板'更多'按钮")
@@ -6802,7 +7250,7 @@ class Chat:
         )
         if not menu_item.Exists(maxSearchSeconds=2):
             raise RuntimeError("未找到'把他推荐给朋友'菜单项")
-        menu_item.Click(ratioX=_rand_ratio(), ratioY=_rand_ratio())
+        click_control(menu_item)
 
     def _search_and_select_receiver(self, receiver_nickname: str) -> None:
         """在"微信发送给"弹窗中搜索并勾选接收者"""
@@ -6827,7 +7275,7 @@ class Chat:
             raise RuntimeError("弹窗中未找到搜索框")
 
         # 输入接收者昵称（通过剪贴板粘贴，确保触发搜索）
-        search_edit.Click(ratioX=_rand_ratio(), ratioY=_rand_ratio())
+        click_control(search_edit)
         time.sleep(0.3)
         search_edit.SendKeys("{Ctrl}a{Del}")
         time.sleep(0.2)
@@ -6865,7 +7313,7 @@ class Chat:
             raise RuntimeError("未找到'发送'按钮")
 
         # 移动鼠标到搜索结果上，再按空格键选中
-        contact_row.Click(ratioX=_rand_ratio(), ratioY=_rand_ratio())
+        click_control(contact_row)
 
         # 选中后等待面板刷新完成，再点击之前预获取的发送按钮
         # 等待按钮变为可用
@@ -6879,7 +7327,7 @@ class Chat:
         else:
             raise RuntimeError("'发送'按钮未启用，可能接收者未正确选中")
 
-        send_btn.Click(ratioX=_rand_ratio(), ratioY=_rand_ratio())
+        click_control(send_btn)
         time.sleep(0.5)
 
     def _cleanup_send_card(self) -> None:
@@ -6893,7 +7341,7 @@ class Chat:
                     AutomationId="cancel_btn",
                 )
                 if cancel_btn.Exists(maxSearchSeconds=0.5):
-                    cancel_btn.Click(ratioX=_rand_ratio(), ratioY=_rand_ratio())
+                    click_control(cancel_btn)
                     time.sleep(0.3)
         except Exception:
             pass
@@ -6926,10 +7374,7 @@ class Chat:
             if not member:
                 continue
             if not chat_input.HasKeyboardFocus:
-                chat_input.Click(
-                    waitTime=0.1,
-                    ratioX=_rand_ratio(), ratioY=_rand_ratio(),
-                )
+                click_control(chat_input)
 
             if member == "所有人":
                 chat_input.SendKeys("@", waitTime=0.3)
@@ -6971,7 +7416,7 @@ class Chat:
         btn = self._win.ButtonControl(AutomationId="voip_button")
         if not btn.Exists(maxSearchSeconds=2):
             raise RuntimeError("未找到通话按钮")
-        btn.Click(ratioX=_rand_ratio(), ratioY=_rand_ratio())
+        click_control(btn)
         time.sleep(0.3)
 
         menu_win = self._win.WindowControl(ClassName="mmui::XMenu")
@@ -6985,7 +7430,7 @@ class Chat:
         if not item.Exists(maxSearchSeconds=1):
             self._win.SendKeys("{Esc}")
             raise RuntimeError(f"通话菜单中未找到: {menu_name}")
-        item.Click(ratioX=_rand_ratio(), ratioY=_rand_ratio())
+        click_control(item)
         time.sleep(0.3)
 
     @PIM.guard
@@ -7021,7 +7466,7 @@ class Chat:
         if not item.Exists(maxSearchSeconds=2):
             raise RuntimeError(f"会话列表中未找到: {contact_name}")
         
-        item.DoubleClick(ratioX=_rand_ratio(), ratioY=_rand_ratio())
+        click_control(item, click="double")
         time.sleep(0.5)
 
         # 等待独立窗口出现并返回
@@ -7655,7 +8100,7 @@ class Chat:
             )
             if not clear_btn.Exists(maxSearchSeconds=3):
                 raise RuntimeError("未找到'清空聊天记录'按钮")
-            clear_btn.Click(ratioX=_rand_ratio(), ratioY=_rand_ratio())
+            click_control(clear_btn)
             time.sleep(0.5)
 
             # 3. 确认弹窗中点击"清空"
@@ -7665,7 +8110,7 @@ class Chat:
             )
             if not confirm_btn.Exists(maxSearchSeconds=3):
                 raise RuntimeError("未找到'清空'确认按钮")
-            confirm_btn.Click(ratioX=_rand_ratio(), ratioY=_rand_ratio())
+            click_control(confirm_btn)
             time.sleep(0.3)
 
             logger.info(f"清空聊天记录成功: {self.current_name}")
@@ -7716,11 +8161,7 @@ class Chat:
             cy = rect.top + rect.height() // 2
             # 多次滚动确保到达底部
             for _ in range(10):
-                win32api.SetCursorPos((cx, cy))
-                time.sleep(0.1)
-                win32api.mouse_event(
-                    win32con.MOUSEEVENTF_WHEEL, cx, cy, -120 * 5, 0,
-                )
+                scroll_at_screen(cx, cy, -120 * 5)
                 time.sleep(0.3)
 
             time.sleep(0.5)
@@ -7753,7 +8194,7 @@ class Chat:
             )
             if not confirm_btn.Exists(maxSearchSeconds=3):
                 raise RuntimeError("未找到'清空'确认按钮")
-            confirm_btn.Click(ratioX=_rand_ratio(), ratioY=_rand_ratio())
+            click_control(confirm_btn)
             time.sleep(0.3)
 
             logger.info(f"清空群聊聊天记录成功: {self.current_name}")
@@ -7802,11 +8243,7 @@ class Chat:
             cx = rect.left + rect.width() // 2
             cy = rect.top + rect.height() // 2
             for _ in range(10):
-                win32api.SetCursorPos((cx, cy))
-                time.sleep(0.1)
-                win32api.mouse_event(
-                    win32con.MOUSEEVENTF_WHEEL, cx, cy, -120 * 5, 0,
-                )
+                scroll_at_screen(cx, cy, -120 * 5)
                 time.sleep(0.3)
 
             # 4. 使用 OCR 图像识别定位"退出群聊"
@@ -7836,7 +8273,7 @@ class Chat:
             )
             if not confirm_btn.Exists(maxSearchSeconds=3):
                 raise RuntimeError("未找到'确定'确认按钮")
-            confirm_btn.Click(ratioX=_rand_ratio(), ratioY=_rand_ratio())
+            click_control(confirm_btn)
             logger.info(f"退出群聊成功: {self.current_name}")
 
         finally:
@@ -7924,7 +8361,7 @@ class Chat:
                 if not search_edit.Exists(maxSearchSeconds=2):
                     raise RuntimeError("未找到搜索框")
 
-                search_edit.Click(ratioX=_rand_ratio(), ratioY=_rand_ratio())
+                click_control(search_edit)
                 time.sleep(0.3)
                 search_edit.SendKeys("{Ctrl}a{Del}")
                 time.sleep(0.3)
@@ -7954,7 +8391,7 @@ class Chat:
                 if not contact_row.Exists(maxSearchSeconds=3):
                     raise RuntimeError(f"未找到联系人: {nickname}")
 
-                contact_row.Click(ratioX=_rand_ratio(), ratioY=_rand_ratio())
+                click_control(contact_row)
                 time.sleep(0.5)
 
             # 点击完成按钮
@@ -7978,13 +8415,13 @@ class Chat:
             )
             if not confirm_btn.Exists(maxSearchSeconds=3):
                 raise RuntimeError("未找到'添加'按钮")
-            confirm_btn.Click(ratioX=_rand_ratio(), ratioY=_rand_ratio())
+            click_control(confirm_btn)
 
             time.sleep(0.5)
 
             # 非好友会邀请失败
             if self._win.TextControl(Name="未能邀请").Exists(0, 0):
-                self._win.ButtonControl(Name="我知道了").Click(ratioX=_rand_ratio(), ratioY=_rand_ratio())
+                click_control(self._win.ButtonControl(Name="我知道了"))
 
             # 等待操作窗口消失后再收起聊天信息面板
             for _ in range(30):
@@ -8089,7 +8526,7 @@ class Chat:
                 if not search_edit.Exists(maxSearchSeconds=2):
                     raise RuntimeError("未找到搜索框")
 
-                search_edit.Click(ratioX=_rand_ratio(), ratioY=_rand_ratio())
+                click_control(search_edit)
                 time.sleep(0.3)
                 search_edit.SendKeys("{Ctrl}a{Del}")
                 time.sleep(0.3)
@@ -8121,7 +8558,7 @@ class Chat:
                 if not contact_row.Exists(maxSearchSeconds=3):
                     raise RuntimeError(f"未找到成员: {nickname}")
 
-                contact_row.Click(ratioX=_rand_ratio(), ratioY=_rand_ratio())
+                click_control(contact_row)
                 time.sleep(0.5)
 
             # 点击"移出"按钮（非"完成"）
@@ -8145,7 +8582,7 @@ class Chat:
             )
             if not confirm_btn.Exists(maxSearchSeconds=3):
                 raise RuntimeError("未找到'移出'按钮")
-            confirm_btn.Click(ratioX=_rand_ratio(), ratioY=_rand_ratio())
+            click_control(confirm_btn)
             time.sleep(0.5)
 
             # 确认弹窗中点击"确定"
@@ -8154,7 +8591,7 @@ class Chat:
                 ClassName="mmui::XOutlineButton",
             )
             if ok_btn.Exists(maxSearchSeconds=3):
-                ok_btn.Click(ratioX=_rand_ratio(), ratioY=_rand_ratio())
+                click_control(ok_btn)
                 time.sleep(0.3)
 
             # 等待操作窗口消失后再收起聊天信息面板
@@ -8193,11 +8630,7 @@ class Chat:
         cx = rect.left + rect.width() // 2
         cy = rect.top + rect.height() // 2
         for _ in range(10):
-            win32api.SetCursorPos((cx, cy))
-            time.sleep(0.1)
-            win32api.mouse_event(
-                win32con.MOUSEEVENTF_WHEEL, cx, cy, -120 * 5, 0,
-            )
+            scroll_at_screen(cx, cy, -120 * 5)
             time.sleep(0.3)
         time.sleep(0.5)
         return member_info_view
@@ -8570,7 +9003,7 @@ class Chat:
                 self._win.SendKeys("{Enter}")
                 update_btn = self._win.ButtonControl(Name="修改")
                 if update_btn.Exists(maxSearchSeconds=2):
-                    update_btn.Click(ratioX=_rand_ratio(), ratioY=_rand_ratio())
+                    click_control(update_btn)
                 time.sleep(0.5)
 
             # -- 群公告 --
@@ -8675,7 +9108,7 @@ class Chat:
                 self._win.SendKeys("{Enter}")
                 update_btn = self._win.ButtonControl(Name="修改")
                 if update_btn.Exists(maxSearchSeconds=2):
-                    update_btn.Click(ratioX=_rand_ratio(), ratioY=_rand_ratio())
+                    click_control(update_btn)
                 time.sleep(0.5)
 
             # ---- 第二组：开关（滚动到底部，每个开关独立截图 OCR） ----
@@ -8755,7 +9188,7 @@ class Chat:
         try:
             sw, is_on = self._get_chat_info_switch(name)
             if is_on != enable:
-                sw.Click(ratioX=_rand_ratio(), ratioY=_rand_ratio())
+                click_control(sw)
                 time.sleep(0.3)
                 action = "开启" if enable else "关闭"
                 logger.info(f"{action}{name}成功: {self.current_name}")
@@ -8852,13 +9285,13 @@ class Chat:
             # 检查消息免打扰是否开启，未开启则先开启
             mute_sw, mute_on = self._get_chat_info_switch("消息免打扰")
             if not mute_on:
-                mute_sw.Click(ratioX=_rand_ratio(), ratioY=_rand_ratio())
+                click_control(mute_sw)
                 time.sleep(0.5)
 
             # 设置折叠该聊天
             fold_sw, fold_on = self._get_chat_info_switch("折叠该聊天")
             if not fold_on:
-                fold_sw.Click(ratioX=_rand_ratio(), ratioY=_rand_ratio())
+                click_control(fold_sw)
                 time.sleep(0.3)
                 logger.info(f"折叠聊天成功: {self.current_name}")
         finally:
@@ -8886,7 +9319,7 @@ class Chat:
             if fold_sw.Exists(maxSearchSeconds=2):
                 toggle = fold_sw.GetTogglePattern()
                 if toggle and toggle.ToggleState == 1:
-                    fold_sw.Click(ratioX=_rand_ratio(), ratioY=_rand_ratio())
+                    click_control(fold_sw)
                     time.sleep(0.3)
                     logger.info(f"取消折叠聊天成功: {self.current_name}")
         finally:
@@ -8934,7 +9367,7 @@ class Chat:
         )
         if not btn.Exists(maxSearchSeconds=3):
             raise RuntimeError(f"未找到'{item_name}'按钮")
-        btn.Click(ratioX=_rand_ratio(), ratioY=_rand_ratio())
+        click_control(btn)
         time.sleep(0.5)
 
     @PIM.guard
@@ -8997,7 +9430,7 @@ class Chat:
 
             # 点击搜索框 完成保存
             update_bth = self._win.ButtonControl(Name="修改")
-            update_bth.Click(ratioX=_rand_ratio(), ratioY=_rand_ratio())
+            click_control(update_bth)
             logger.info(f"设置群聊名称成功: {name}")
 
         finally:
@@ -9243,7 +9676,7 @@ class Chat:
 
             # 点击"修改"按钮完成保存
             update_btn = self._win.ButtonControl(Name="修改")
-            update_btn.Click(ratioX=_rand_ratio(), ratioY=_rand_ratio())
+            click_control(update_btn)
 
             logger.info(f"设置群内昵称成功: {self.current_name} -> {nickname}")
 
@@ -9291,7 +9724,7 @@ class Chat:
         if not menu_item.Exists(maxSearchSeconds=2):
             self._win.SendKeys("{Esc}")
             raise RuntimeError(f"未找到'{menu_name}'菜单项")
-        menu_item.Click(ratioX=_rand_ratio(), ratioY=_rand_ratio())
+        click_control(menu_item)
 
     def _cleanup_profile(self) -> None:
         """关闭可能残留的弹窗和面板，并收回聊天信息面板"""
@@ -9314,7 +9747,7 @@ class Chat:
                 Name="聊天信息",
             )
             if btn.Exists(0, 0):
-                btn.Click(ratioX=_rand_ratio(), ratioY=_rand_ratio())
+                click_control(btn)
                 time.sleep(0.2)
         except Exception:
             pass
@@ -9518,7 +9951,7 @@ class Chat:
                     Name="修改备注名",
                 )
                 if remark_edit.Exists(maxSearchSeconds=2):
-                    remark_edit.Click(ratioX=_rand_ratio(), ratioY=_rand_ratio())
+                    click_control(remark_edit)
                     remark_edit.SendKeys("{Ctrl}a{Del}")
                     if remark:
                         paste(remark)
@@ -9532,11 +9965,7 @@ class Chat:
                 cx = rect.left + rect.width() // 2
                 cy = rect.top + rect.height() // 2
                 lines = max(rect.height() // 40, 10)
-                win32api.SetCursorPos((cx, cy))
-                time.sleep(0.1)
-                win32api.mouse_event(
-                    win32con.MOUSEEVENTF_WHEEL, cx, cy, -120 * lines, 0,
-                )
+                scroll_at_screen(cx, cy, -120 * lines)
                 time.sleep(0.3)
 
             # ---- 2. 标签（覆盖式） ----
@@ -9557,28 +9986,28 @@ class Chat:
                     to_remove = [l for l in existing_labels if l not in target_set]
 
                     if to_add or to_remove:
-                        tag_btn.Click(ratioX=_rand_ratio(), ratioY=_rand_ratio())
+                        click_control(tag_btn)
 
                         for label in to_remove:
                             label_item = remark_pop.ListItemControl(
                                 Name=label, searchDepth=8,
                             )
                             if label_item.Exists(maxSearchSeconds=1):
-                                label_item.Click(ratioX=_rand_ratio(), ratioY=_rand_ratio())
+                                click_control(label_item)
 
                         for label in to_add:
                             tag_edit = remark_pop.EditControl(
                                 ClassName="mmui::XValidatorTextEdit", Name="搜索",
                             )
                             if tag_edit.Exists(maxSearchSeconds=2):
-                                tag_edit.Click(ratioX=_rand_ratio(), ratioY=_rand_ratio())
+                                click_control(tag_edit)
                                 tag_edit.SendKeys("{Ctrl}a{Del}")
                                 paste(label)
                                 label_item = remark_pop.ListItemControl(
                                     Name=label, searchDepth=8,
                                 )
                                 if label_item.Exists(maxSearchSeconds=1):
-                                    label_item.Click(ratioX=_rand_ratio(), ratioY=_rand_ratio())
+                                    click_control(label_item)
                                 tag_edit.SendKeys("{Ctrl}a{Del}")
 
                         title_text = remark_pop.TextControl(
@@ -9586,7 +10015,7 @@ class Chat:
                             Name="设置备注和标签",
                         )
                         if title_text.Exists(0, 0):
-                            title_text.Click(ratioX=0.5, ratioY=0.5)
+                            click_control(title_text)
 
             # ---- 3. 电话（覆盖式） ----
             if phones is not None:
@@ -9609,7 +10038,7 @@ class Chat:
                             if num_view:
                                 del_btn = num_view.ButtonControl(Name="删除电话")
                                 if del_btn.Exists(0, 0):
-                                    del_btn.Click(ratioX=_rand_ratio(), ratioY=_rand_ratio())
+                                    click_control(del_btn)
                                     continue
                         break
 
@@ -9622,7 +10051,7 @@ class Chat:
                                 Name="添加电话", AutomationId="button",
                             )
                             if add_btn.Exists(maxSearchSeconds=1):
-                                add_btn.Click(ratioX=_rand_ratio(), ratioY=_rand_ratio())
+                                click_control(add_btn)
 
                         empty_field = phone_area.TextControl(
                             ClassName="mmui::XLineField", Name="填写电话",
@@ -9632,7 +10061,7 @@ class Chat:
                                 ClassName="mmui::XLineEdit",
                             )
                             if phone_edit.Exists(0, 0):
-                                phone_edit.Click(ratioX=_rand_ratio(), ratioY=_rand_ratio())
+                                click_control(phone_edit)
                                 vp = phone_edit.GetValuePattern()
                                 if vp:
                                     vp.SetValue(phone)
@@ -9647,7 +10076,7 @@ class Chat:
                 )
                 if desc_edit.Exists(maxSearchSeconds=2):
                     _scroll_to_bottom()
-                    desc_edit.Click(ratioX=_rand_ratio(), ratioY=_rand_ratio())
+                    click_control(desc_edit)
                     desc_edit.SendKeys("{Ctrl}a{Del}")
                     if description:
                         paste(description[:200])
@@ -9671,7 +10100,7 @@ class Chat:
                         )
                         if not img_btn.Exists(0, 0):
                             break
-                        img_btn.RightClick(ratioX=_rand_ratio(), ratioY=_rand_ratio())
+                        click_control(img_btn, button="right")
                         menu_win = self._win.WindowControl(ClassName="mmui::XMenu")
                         if not menu_win.Exists(maxSearchSeconds=2):
                             break
@@ -9681,7 +10110,7 @@ class Chat:
                         if not del_item.Exists(maxSearchSeconds=1):
                             self._win.SendKeys("{Esc}")
                             break
-                        del_item.Click(ratioX=_rand_ratio(), ratioY=_rand_ratio())
+                        click_control(del_item)
 
                 for img_path in images:
                     add_img_btn = remark_pop.GroupControl(
@@ -9690,7 +10119,7 @@ class Chat:
                     )
                     if not add_img_btn.Exists(maxSearchSeconds=2):
                         break
-                    add_img_btn.Click(ratioX=_rand_ratio(), ratioY=_rand_ratio())
+                    click_control(add_img_btn)
                     dlg = auto.WindowControl(ClassName="#32770")
                     if not dlg.Exists(maxSearchSeconds=5):
                         break
@@ -9708,7 +10137,7 @@ class Chat:
                 ClassName="mmui::XOutlineButton", Name="完成",
             )
             if ok_btn.Exists(maxSearchSeconds=2):
-                ok_btn.Click(ratioX=_rand_ratio(), ratioY=_rand_ratio())
+                click_control(ok_btn)
 
             logger.info(f"设置联系人信息成功: {self.current_name}")
 
@@ -9753,7 +10182,7 @@ class Chat:
             if not remark_edit.Exists(maxSearchSeconds=3):
                 raise RuntimeError("未找到'修改备注名'编辑框")
 
-            remark_edit.Click(ratioX=_rand_ratio(), ratioY=_rand_ratio())
+            click_control(remark_edit)
             time.sleep(0.2)
             remark_edit.SendKeys("{Ctrl}a{Del}")
             time.sleep(0.1)
@@ -9767,7 +10196,7 @@ class Chat:
             )
             if not ok_btn.Exists(maxSearchSeconds=2):
                 raise RuntimeError("未找到'完成'按钮")
-            ok_btn.Click(ratioX=_rand_ratio(), ratioY=_rand_ratio())
+            click_control(ok_btn)
             time.sleep(0.3)
 
             logger.info(f"设置备注成功: {self.current_name} -> {remark}")
@@ -9823,10 +10252,10 @@ class Chat:
                 logger.info(f"所有标签已存在，跳过: {self.current_name} -> {labels}")
                 cancel_btn = remark_pop.ButtonControl(Name="取消")
                 if cancel_btn.Exists(maxSearchSeconds=1):
-                    cancel_btn.Click(ratioX=_rand_ratio(), ratioY=_rand_ratio())
+                    click_control(cancel_btn)
                 return
 
-            tag_btn.Click(ratioX=_rand_ratio(), ratioY=_rand_ratio())
+            click_control(tag_btn)
             time.sleep(0.3)
 
             for label in new_labels:
@@ -9837,7 +10266,7 @@ class Chat:
                 if not tag_edit.Exists(maxSearchSeconds=3):
                     raise RuntimeError("未找到标签搜索输入框")
 
-                tag_edit.Click(ratioX=_rand_ratio(), ratioY=_rand_ratio())
+                click_control(tag_edit)
                 time.sleep(0.2)
                 tag_edit.SendKeys("{Ctrl}a{Del}")
                 time.sleep(0.1)
@@ -9850,7 +10279,7 @@ class Chat:
                     searchDepth=8,
                 )
                 if label_item.Exists(maxSearchSeconds=1):
-                    label_item.Click(ratioX=_rand_ratio(), ratioY=_rand_ratio())
+                    click_control(label_item)
                     time.sleep(0.3)
                 else:
                     logger.info(f"搜索结果中未找到标签，跳过: {label}")
@@ -9862,7 +10291,7 @@ class Chat:
                 ClassName="mmui::XOutlineButton",
                 Name="完成",
             )
-            ok_btn.Click(ratioX=_rand_ratio(), ratioY=_rand_ratio())
+            click_control(ok_btn)
             time.sleep(0.3)
             logger.info(f"添加标签成功: {self.current_name} -> {labels}")
 
@@ -9917,10 +10346,10 @@ class Chat:
                 logger.info(f"标签均不存在，跳过: {self.current_name} -> {labels}")
                 cancel_btn = remark_pop.ButtonControl(Name="取消")
                 if cancel_btn.Exists(maxSearchSeconds=1):
-                    cancel_btn.Click(ratioX=_rand_ratio(), ratioY=_rand_ratio())
+                    click_control(cancel_btn)
                 return
 
-            tag_btn.Click(ratioX=_rand_ratio(), ratioY=_rand_ratio())
+            click_control(tag_btn)
             time.sleep(0.3)
 
             for label in to_remove:
@@ -9929,7 +10358,7 @@ class Chat:
                     searchDepth=8,
                 )
                 if label_item.Exists(maxSearchSeconds=2):
-                    label_item.Click(ratioX=_rand_ratio(), ratioY=_rand_ratio())
+                    click_control(label_item)
                     time.sleep(0.3)
                 else:
                     logger.warning(f"列表中未找到标签项: {label}")
@@ -9938,7 +10367,7 @@ class Chat:
                 ClassName="mmui::XOutlineButton",
                 Name="完成",
             )
-            ok_btn.Click(ratioX=_rand_ratio(), ratioY=_rand_ratio())
+            click_control(ok_btn)
             time.sleep(0.3)
             logger.info(f"移除标签成功: {self.current_name} -> {labels}")
 
@@ -9997,7 +10426,7 @@ class Chat:
                 logger.info(f"所有电话号码已存在，跳过: {self.current_name} -> {phones}")
                 cancel_btn = remark_pop.ButtonControl(Name="取消")
                 if cancel_btn.Exists(maxSearchSeconds=1):
-                    cancel_btn.Click(ratioX=_rand_ratio(), ratioY=_rand_ratio())
+                    click_control(cancel_btn)
                 return
 
             for phone in new_phones:
@@ -10012,7 +10441,7 @@ class Chat:
                     )
                     if not add_btn.Exists(maxSearchSeconds=2):
                         raise RuntimeError("未找到'添加电话'按钮")
-                    add_btn.Click(ratioX=_rand_ratio(), ratioY=_rand_ratio())
+                    click_control(add_btn)
                     time.sleep(0.3)
 
                 empty_field = phone_area.TextControl(
@@ -10028,7 +10457,7 @@ class Chat:
                 if not phone_edit.Exists(maxSearchSeconds=2):
                     raise RuntimeError("未找到电话号码编辑框")
 
-                phone_edit.Click(ratioX=_rand_ratio(), ratioY=_rand_ratio())
+                click_control(phone_edit)
                 time.sleep(0.2)
 
                 vp = phone_edit.GetValuePattern()
@@ -10044,7 +10473,7 @@ class Chat:
                 ClassName="mmui::XOutlineButton",
                 Name="完成",
             )
-            ok_btn.Click(ratioX=_rand_ratio(), ratioY=_rand_ratio())
+            click_control(ok_btn)
             time.sleep(0.3)
             logger.info(f"添加电话号码成功: {self.current_name} -> {phones}")
 
@@ -10085,11 +10514,7 @@ class Chat:
                 cx = rect.left + rect.width() // 2
                 cy = rect.top + rect.height() // 2
                 lines = max(rect.height() // 40, 10)
-                win32api.SetCursorPos((cx, cy))
-                time.sleep(0.1)
-                win32api.mouse_event(
-                    win32con.MOUSEEVENTF_WHEEL, cx, cy, -120 * lines, 0,
-                )
+                scroll_at_screen(cx, cy, -120 * lines)
                 time.sleep(0.3)
 
             for img_path in images:
@@ -10100,7 +10525,7 @@ class Chat:
                 if not add_img_btn.Exists(maxSearchSeconds=2):
                     raise RuntimeError("未找到'添加图片'按钮")
 
-                add_img_btn.Click(ratioX=_rand_ratio(), ratioY=_rand_ratio())
+                click_control(add_img_btn)
                 time.sleep(1)
 
                 dlg = auto.WindowControl(ClassName="#32770")
@@ -10128,7 +10553,7 @@ class Chat:
             )
             if not ok_btn.Exists(maxSearchSeconds=2):
                 raise RuntimeError("未找到'完成'按钮")
-            ok_btn.Click(ratioX=_rand_ratio(), ratioY=_rand_ratio())
+            click_control(ok_btn)
             time.sleep(0.3)
 
             logger.info(f"添加备注图片成功: {self.current_name} -> {images}")
@@ -10189,7 +10614,7 @@ class Chat:
                 logger.info(f"电话号码均不存在，跳过: {self.current_name} -> {phones}")
                 cancel_btn = remark_pop.ButtonControl(Name="取消")
                 if cancel_btn.Exists(maxSearchSeconds=1):
-                    cancel_btn.Click(ratioX=_rand_ratio(), ratioY=_rand_ratio())
+                    click_control(cancel_btn)
                 return
 
             for phone in to_remove:
@@ -10204,7 +10629,7 @@ class Chat:
                         if num_view:
                             del_btn = num_view.ButtonControl(Name="删除电话")
                             if del_btn.Exists(maxSearchSeconds=1):
-                                del_btn.Click(ratioX=_rand_ratio(), ratioY=_rand_ratio())
+                                click_control(del_btn)
                                 time.sleep(0.3)
                             else:
                                 logger.warning(f"未找到删除按钮: {phone}")
@@ -10215,7 +10640,7 @@ class Chat:
                 ClassName="mmui::XOutlineButton",
                 Name="完成",
             )
-            ok_btn.Click(ratioX=_rand_ratio(), ratioY=_rand_ratio())
+            click_control(ok_btn)
             time.sleep(0.3)
             logger.info(f"移除电话号码成功: {self.current_name} -> {phones}")
 
@@ -10257,11 +10682,7 @@ class Chat:
                 cx = rect.left + rect.width() // 2
                 cy = rect.top + rect.height() // 2
                 lines = max(rect.height() // 40, 10)
-                win32api.SetCursorPos((cx, cy))
-                time.sleep(0.1)
-                win32api.mouse_event(
-                    win32con.MOUSEEVENTF_WHEEL, cx, cy, -120 * lines, 0,
-                )
+                scroll_at_screen(cx, cy, -120 * lines)
                 time.sleep(0.3)
 
             img_list = remark_pop.GroupControl(
@@ -10270,7 +10691,7 @@ class Chat:
             if not img_list.Exists(maxSearchSeconds=2):
                 cancel_btn = remark_pop.ButtonControl(Name="取消")
                 if cancel_btn.Exists(maxSearchSeconds=1):
-                    cancel_btn.Click(ratioX=_rand_ratio(), ratioY=_rand_ratio())
+                    click_control(cancel_btn)
                 return
 
             # 收集所有图片项
@@ -10282,7 +10703,7 @@ class Chat:
             if not img_items:
                 cancel_btn = remark_pop.ButtonControl(Name="取消")
                 if cancel_btn.Exists(maxSearchSeconds=1):
-                    cancel_btn.Click(ratioX=_rand_ratio(), ratioY=_rand_ratio())
+                    click_control(cancel_btn)
                 return
 
             # 按从大到小排序删除，避免删除后序号偏移
@@ -10299,7 +10720,7 @@ class Chat:
                 if not img_btn.Exists(0, 0):
                     continue
 
-                img_btn.RightClick(ratioX=_rand_ratio(), ratioY=_rand_ratio())
+                click_control(img_btn, button="right")
                 time.sleep(0.5)
 
                 menu_win = self._win.WindowControl(ClassName="mmui::XMenu")
@@ -10314,7 +10735,7 @@ class Chat:
                     self._win.SendKeys("{Esc}")
                     continue
 
-                del_item.Click(ratioX=_rand_ratio(), ratioY=_rand_ratio())
+                click_control(del_item)
                 time.sleep(0.3)
                 deleted += 1
 
@@ -10324,13 +10745,13 @@ class Chat:
                     Name="完成",
                 )
                 if ok_btn.Exists(maxSearchSeconds=2):
-                    ok_btn.Click(ratioX=_rand_ratio(), ratioY=_rand_ratio())
+                    click_control(ok_btn)
                     time.sleep(0.3)
                 logger.info(f"删除备注图片成功: {self.current_name} -> 删除{deleted}张")
             else:
                 cancel_btn = remark_pop.ButtonControl(Name="取消")
                 if cancel_btn.Exists(maxSearchSeconds=1):
-                    cancel_btn.Click(ratioX=_rand_ratio(), ratioY=_rand_ratio())
+                    click_control(cancel_btn)
 
         except Exception:
             self._cleanup_profile()
@@ -10379,7 +10800,7 @@ class Chat:
 
             confirm_btn = self._win.ButtonControl(Name="确定")
             if confirm_btn.Exists(maxSearchSeconds=3):
-                confirm_btn.Click(ratioX=_rand_ratio(), ratioY=_rand_ratio())
+                click_control(confirm_btn)
                 time.sleep(0.3)
                 logger.info(f"加入黑名单成功: {self.current_name}")
             else:
@@ -10417,7 +10838,7 @@ class Chat:
 
             confirm_btn = self._win.ButtonControl(Name="删除")
             if confirm_btn.Exists(maxSearchSeconds=3):
-                confirm_btn.Click(ratioX=_rand_ratio(), ratioY=_rand_ratio())
+                click_control(confirm_btn)
                 time.sleep(0.3)
                 logger.info(f"删除联系人成功: {self.current_name}")
             else:
@@ -10494,7 +10915,7 @@ class Chat:
 
             cancel_btn = perm_pop.ButtonControl(Name="取消")
             if cancel_btn.Exists(maxSearchSeconds=1):
-                cancel_btn.Click(ratioX=_rand_ratio(), ratioY=_rand_ratio())
+                click_control(cancel_btn)
             time.sleep(0.3)
 
             logger.info(f"获取朋友权限成功: {self.current_name} -> {result}")
@@ -10554,7 +10975,7 @@ class Chat:
                     already_selected = True
 
             if not already_selected:
-                target_item.Click(ratioX=_rand_ratio(), ratioY=_rand_ratio())
+                click_control(target_item)
                 time.sleep(0.3)
                 changed = True
 
@@ -10568,7 +10989,7 @@ class Chat:
                     if toggle:
                         current = toggle.ToggleState == 1
                         if current != hide_my_posts:
-                            hide_my_sw.Click(ratioX=0.5, ratioY=0.5)
+                            click_control(hide_my_sw)
                             time.sleep(0.2)
                             changed = True
 
@@ -10581,7 +11002,7 @@ class Chat:
                     if toggle:
                         current = toggle.ToggleState == 1
                         if current != hide_their_posts:
-                            hide_their_sw.Click(ratioX=0.5, ratioY=0.5)
+                            click_control(hide_their_sw)
                             time.sleep(0.2)
                             changed = True
 
@@ -10591,12 +11012,12 @@ class Chat:
                     Name="完成",
                 )
                 if ok_btn.Exists(maxSearchSeconds=2):
-                    ok_btn.Click(ratioX=_rand_ratio(), ratioY=_rand_ratio())
+                    click_control(ok_btn)
                     time.sleep(0.3)
             else:
                 cancel_btn = perm_pop.ButtonControl(Name="取消")
                 if cancel_btn.Exists(maxSearchSeconds=1):
-                    cancel_btn.Click(ratioX=_rand_ratio(), ratioY=_rand_ratio())
+                    click_control(cancel_btn)
                     time.sleep(0.2)
 
             logger.info(f"设置朋友权限成功: {self.current_name} -> permission={permission}, "
@@ -10644,11 +11065,7 @@ class Chat:
                 cx = rect.left + rect.width() // 2
                 cy = rect.top + rect.height() // 2
                 lines = max(rect.height() // 40, 10)
-                win32api.SetCursorPos((cx, cy))
-                time.sleep(0.1)
-                win32api.mouse_event(
-                    win32con.MOUSEEVENTF_WHEEL, cx, cy, -120 * lines, 0,
-                )
+                scroll_at_screen(cx, cy, -120 * lines)
                 time.sleep(0.3)
 
             img_list = remark_pop.GroupControl(
@@ -10657,7 +11074,7 @@ class Chat:
             if not img_list.Exists(maxSearchSeconds=2):
                 cancel_btn = remark_pop.ButtonControl(Name="取消")
                 if cancel_btn.Exists(maxSearchSeconds=1):
-                    cancel_btn.Click(ratioX=_rand_ratio(), ratioY=_rand_ratio())
+                    click_control(cancel_btn)
                 return 0
 
             # 收集所有图片项
@@ -10669,7 +11086,7 @@ class Chat:
             if not img_items:
                 cancel_btn = remark_pop.ButtonControl(Name="取消")
                 if cancel_btn.Exists(maxSearchSeconds=1):
-                    cancel_btn.Click(ratioX=_rand_ratio(), ratioY=_rand_ratio())
+                    click_control(cancel_btn)
                 return 0
 
             collected = 0
@@ -10685,7 +11102,7 @@ class Chat:
                 if not img_btn.Exists(0, 0):
                     continue
 
-                img_btn.RightClick(ratioX=_rand_ratio(), ratioY=_rand_ratio())
+                click_control(img_btn, button="right")
                 time.sleep(0.5)
 
                 menu_win = self._win.WindowControl(ClassName="mmui::XMenu")
@@ -10701,14 +11118,14 @@ class Chat:
                     logger.warning(f"右键菜单中未找到'收藏'，跳过第{idx}张")
                     continue
 
-                collect_item.Click(ratioX=_rand_ratio(), ratioY=_rand_ratio())
+                click_control(collect_item)
                 time.sleep(0.5)
                 collected += 1
 
             # 收藏不修改数据，点"取消"关闭弹窗
             cancel_btn = remark_pop.ButtonControl(Name="取消")
             if cancel_btn.Exists(maxSearchSeconds=1):
-                cancel_btn.Click(ratioX=_rand_ratio(), ratioY=_rand_ratio())
+                click_control(cancel_btn)
 
             logger.info(f"收藏备注图片成功: {self.current_name} -> 收藏{collected}张")
             return collected
@@ -10760,11 +11177,7 @@ class Chat:
                 cx = rect.left + rect.width() // 2
                 cy = rect.top + rect.height() // 2
                 lines = max(rect.height() // 40, 10)
-                win32api.SetCursorPos((cx, cy))
-                time.sleep(0.1)
-                win32api.mouse_event(
-                    win32con.MOUSEEVENTF_WHEEL, cx, cy, -120 * lines, 0,
-                )
+                scroll_at_screen(cx, cy, -120 * lines)
                 time.sleep(0.3)
 
             img_list = remark_pop.GroupControl(
@@ -10773,7 +11186,7 @@ class Chat:
             if not img_list.Exists(maxSearchSeconds=2):
                 cancel_btn = remark_pop.ButtonControl(Name="取消")
                 if cancel_btn.Exists(maxSearchSeconds=1):
-                    cancel_btn.Click(ratioX=_rand_ratio(), ratioY=_rand_ratio())
+                    click_control(cancel_btn)
                 return 0
 
             # 收集所有图片项
@@ -10785,7 +11198,7 @@ class Chat:
             if not img_items:
                 cancel_btn = remark_pop.ButtonControl(Name="取消")
                 if cancel_btn.Exists(maxSearchSeconds=1):
-                    cancel_btn.Click(ratioX=_rand_ratio(), ratioY=_rand_ratio())
+                    click_control(cancel_btn)
                 return 0
 
             saved = 0
@@ -10802,7 +11215,7 @@ class Chat:
                 if not img_btn.Exists(0, 0):
                     continue
 
-                img_btn.RightClick(ratioX=_rand_ratio(), ratioY=_rand_ratio())
+                click_control(img_btn, button="right")
                 time.sleep(0.5)
 
                 menu_win = self._win.WindowControl(ClassName="mmui::XMenu")
@@ -10817,7 +11230,7 @@ class Chat:
                     self._win.SendKeys("{Esc}")
                     continue
 
-                save_item.Click(ratioX=_rand_ratio(), ratioY=_rand_ratio())
+                click_control(save_item)
                 time.sleep(1)
 
                 # 等待系统文件保存对话框
@@ -10854,7 +11267,7 @@ class Chat:
             # 点击"取消"关闭弹窗（保存图片不需要点完成）
             cancel_btn = remark_pop.ButtonControl(Name="取消")
             if cancel_btn.Exists(maxSearchSeconds=1):
-                cancel_btn.Click(ratioX=_rand_ratio(), ratioY=_rand_ratio())
+                click_control(cancel_btn)
 
             logger.info(f"保存备注图片成功: {self.current_name} -> {save_dir} ({saved}张)")
             return saved
@@ -11008,7 +11421,8 @@ class Weixin(WeixinWindow):
     }
 
     def __init__(self, install_path: Optional[str] = None, wxocr_path: Optional[str] = None,
-                 ocr_engine: str = "wcocr", idle_wait: float = 0, lock_input: bool = False):
+                 ocr_engine: str = "wcocr", idle_wait: float = 0, lock_input: bool = False,
+                 background: bool = False):
         """
         Args:
             install_path: 微信安装路径，None 时自动检测
@@ -11021,7 +11435,14 @@ class Weixin(WeixinWindow):
                           默认 0 表示不等待。
             lock_input:   True 时在自动化操作期间锁定物理键盘鼠标（需管理员权限），
                           默认 False。
+            background:   True 时使用后台模式（通过 SendMessage 发送虚拟鼠标/键盘消息，
+                          不需要窗口在前台），默认 False。
         """
+        self.background: bool = background
+
+        # 设置模块级后台模式标志
+        global _background
+        _background = background
         # 物理输入监控
         if idle_wait > 0:
             PIM(idle_wait=idle_wait, lock_input=lock_input)
@@ -11675,6 +12096,22 @@ class Weixin(WeixinWindow):
     def enter(self) -> None:
         """发送消息（Enter）"""
         self.shortcut("发送消息")
+
+    def click(self, control, button: str = "left",
+              click: str = "once") -> None:
+        """
+        点击 uiautomation 控件。
+
+        根据 self.background 属性选择点击方式：
+        - background=False: 使用 uiautomation 的 Click（需要窗口在前台）
+        - background=True:  使用 SendMessage 发送虚拟鼠标消息（不需要窗口在前台）
+
+        Args:
+            control: uiautomation 控件对象
+            button:  鼠标键 - "left"(默认) / "right" / "middle"
+            click:   点击方式 - "once"(默认) / "double"
+        """
+        click_control(control, button=button, click=click)
 
     # ---- 朋友圈快捷方法 ----
 
