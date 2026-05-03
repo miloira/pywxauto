@@ -11714,6 +11714,11 @@ class Weixin(WeixinWindow):
         raise LoginError("微信启动超时，请手动登录后重试")
 
     @property
+    def is_online(self) -> bool:
+        """微信是否在线（主窗口是否存在）"""
+        return self._win.Exists(0, 0)
+
+    @property
     def is_locked(self) -> bool:
         txt = self._win.TextControl(ClassName="mmui::XTextView", Name="Windows 微信已被锁定")
         return txt.Exists(0, 0)
@@ -12201,6 +12206,55 @@ class Weixin(WeixinWindow):
         png_bytes = capture_window(hwnd)
         with open(save_path, "wb") as f:
             f.write(png_bytes)
+
+    def check_new_msg(self) -> int:
+        """
+        通过对导航栏微信图标截图 OCR 识别未读消息数量。
+
+        对导航栏的"微信"按钮进行截图，识别红色角标上的数字。
+        截图保存为 _debug_check_new_msg.png 方便调试。
+
+        Returns:
+            未读消息数量，0 表示无新消息
+        """
+        hwnd = self._win.NativeWindowHandle
+        if not hwnd:
+            return 0
+
+        # 获取导航栏微信按钮控件
+        tabbar = self.navigator._tabbar
+        wx_btn = tabbar.ButtonControl(
+            ClassName="mmui::XTabBarItem",
+            Name="微信",
+            searchDepth=5,
+        )
+        if not wx_btn.Exists(0, 0):
+            return 0
+
+        # 截图微信按钮区域
+        try:
+            png_bytes = capture_control(hwnd, wx_btn, offset_right=20)
+            with open("_debug_check_new_msg.png", "wb") as f:
+                f.write(png_bytes)
+        except Exception:
+            return 0
+
+        # OCR 识别角标数字
+        try:
+            ocr_result = self.get_image_text(png_bytes)
+        except Exception:
+            return 0
+
+        # 从 OCR 结果中提取数字
+        for text in ocr_result:
+            text = text.strip()
+            if text.isdigit():
+                return int(text)
+            # 处理 "99+" 等格式
+            if text.rstrip("+").isdigit():
+                return int(text.rstrip("+"))
+
+        return 0
 
     # @PIM.guard
     # def lock(self) -> None:
