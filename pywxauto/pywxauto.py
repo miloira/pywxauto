@@ -11619,6 +11619,15 @@ class Weixin(WeixinWindow):
             ctypes.windll.user32.MoveWindow(_wx_hwnd, x, y,
                                             self.WINDOW_WIDTH, self.WINDOW_HEIGHT, True)
 
+        # 后台模式下将主窗口移到屏幕外
+        self._main_offscreen_rect = None
+        if _background and _wx_hwnd:
+            rect = win32gui.GetWindowRect(_wx_hwnd)
+            self._main_offscreen_rect = (rect[0], rect[1],
+                                         rect[2] - rect[0], rect[3] - rect[1])
+            ctypes.windll.user32.MoveWindow(_wx_hwnd, -9999, 0,
+                                            rect[2] - rect[0], rect[3] - rect[1], True)
+
         # 窗口功能
         self.navigator = Navigator(self)
         self.session = Session(self)
@@ -11628,7 +11637,18 @@ class Weixin(WeixinWindow):
         logger.info(f"微信客户端({self.version}) - 已连接")
     
     def __del__(self):
+        self.move_back()
         logger.info(f"微信客户端({self.version}) - 已断开")
+
+    def move_back(self) -> None:
+        """将主窗口从屏幕外移回原始位置（仅后台模式下有效）"""
+        if not self._main_offscreen_rect:
+            return
+        hwnd = _wx_hwnd or self._win.NativeWindowHandle
+        if hwnd:
+            x, y, w, h = self._main_offscreen_rect
+            ctypes.windll.user32.MoveWindow(hwnd, x, y, w, h, True)
+        self._main_offscreen_rect = None
 
     @staticmethod
     def find_wechat_window() -> list[int]:
@@ -12589,9 +12609,11 @@ class Weixin(WeixinWindow):
         停止消息监听（run/listen）。
 
         可从其他线程调用，触发 stop_event 使监听循环退出。
+        同时将主窗口移回原位。
         """
         if hasattr(self, '_stop_event') and self._stop_event is not None:
             self._stop_event.set()
+        self.move_back()
 
     def run(self, interval: float = 0.1, idle_interval: float = 0.1) -> None:
         """
