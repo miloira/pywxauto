@@ -2020,7 +2020,8 @@ class RedPacketMessage(Message):
             try:
                 hwnd = pay_redenvelop_detail_win.NativeWindowHandle or 0
                 if hwnd:
-                    png_bytes = capture_window(hwnd, offset_left=12, offset_right=12, offset_bottom=12)
+                    png_bytes = capture_window(hwnd, offset_left=12, offset_right=22,
+                                              offset_bottom=12, mode=CaptureMode.PRINT_WINDOW)
                     # 调试：保存截图到当前目录
                     with open("_debug_red_packet.png", "wb") as f:
                         f.write(png_bytes)
