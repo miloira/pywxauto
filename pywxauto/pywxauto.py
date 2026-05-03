@@ -1472,6 +1472,69 @@ class TransferMessage(Message):
     def type_label(self) -> str:
         return "转账消息"
 
+    def accept(self) -> bool:
+        """
+        收款（确认收款）。
+
+        流程:
+        1. 点击转账消息控件，弹出转账弹窗
+        2. 在弹窗中点击"收款"/"确认收款"按钮
+        3. 等待弹窗关闭
+
+        Returns:
+            True 成功收款，False 未找到控件或收款失败
+        """
+        return self._click_transfer_button("收款")
+
+    def reject(self) -> bool:
+        """
+        退还转账。
+
+        流程:
+        1. 点击转账消息控件，弹出转账弹窗
+        2. 在弹窗中点击"退还"按钮
+        3. 等待弹窗关闭
+
+        Returns:
+            True 成功退还，False 未找到控件或退还失败
+        """
+        return self._click_transfer_button("退还")
+
+    def _click_transfer_button(self, button_name: str) -> bool:
+        """
+        点击转账弹窗中的指定按钮。
+
+        Args:
+            button_name: 按钮名称（"收款"/"退还"）
+
+        Returns:
+            True 成功点击，False 失败
+        """
+        # 先悬浮到消息上，再点击打开弹窗
+        if not self.hover():
+            return False
+
+        ctrl = self._find_ctrl()
+        if not ctrl:
+            return False
+
+        ctrl.Click()
+        time.sleep(1)
+
+        win = self.chat._win
+        btn = win.ButtonControl(
+            Name=button_name,
+            searchDepth=10,
+        )
+        if not btn.Exists(maxSearchSeconds=3):
+            # 未找到目标按钮，关闭弹窗
+            RedPacketMessage._close_dialog(win)
+            return False
+
+        btn.GetInvokePattern().Invoke()
+        time.sleep(1)
+        return True
+
     @staticmethod
     def parse(raw_name: str) -> tuple[str, str, str]:
         """解析转账 Name -> (content, amount, remark)"""
@@ -1500,6 +1563,71 @@ class RedPacketMessage(Message):
     @property
     def type_label(self) -> str:
         return "红包消息"
+
+    def open(self) -> dict:
+        """
+        打开（拆开）红包。
+
+        流程:
+        1. 悬浮鼠标到红包消息，点击打开弹窗
+        2. 在弹窗中点击"拆开"按钮
+        3. 等待结果页面（mmui::PayRedEnvelopeDetailCover）出现
+        4. 截图 OCR 识别结果页面内容
+        5. 按 Esc 关闭结果页面
+
+        弹窗控件结构（在聊天窗口内）:
+        - 发送者: TextControl, Name="{昵称}发出的红包"
+        - 祝福语: TextControl, Name="{祝福语}"
+        - 拆开按钮: ButtonControl, Name="拆开", ClassName="mmui::XButton"
+        - 关闭按钮: ButtonControl, Name="关闭", ClassName="mmui::XButton"
+
+        Returns:
+            OCR 识别结果字典 {text: {center, left_top, right_bottom, width, height}}，
+            空字典表示拆开失败或无法识别
+        """
+        self.chat.activate()
+
+        if not self.hover():
+            return {}
+
+        ctrl = self._find_ctrl()
+        if not ctrl:
+            return {}
+
+        ctrl.Click(ratioX=_rand_ratio(), ratioY=_rand_ratio())
+        time.sleep(0.5)
+
+        # 查找"拆开"按钮
+        win = self.chat._win
+        open_btn = win.ButtonControl(
+            ClassName="mmui::XButton",
+            Name="拆开",
+            searchDepth=10,
+        )
+        if open_btn.Exists(maxSearchSeconds=3):
+            open_btn.Click(ratioX=_rand_ratio(), ratioY=_rand_ratio())
+
+        # 等待红包结果窗口出现，截图 OCR 识别
+        result = {}
+        pay_redenvelop_detail_win = auto.WindowControl(ClassName="mmui::PayRedEnvelopDetailWindow", searchDepth=1)
+        if pay_redenvelop_detail_win.Exists(maxSearchSeconds=5):
+            try:
+                hwnd = pay_redenvelop_detail_win.NativeWindowHandle or 0
+                if hwnd:
+                    png_bytes = capture_window(hwnd, offset_left=12, offset_right=12, offset_bottom=12)
+                    # 调试：保存截图到当前目录
+                    with open("_debug_red_packet.png", "wb") as f:
+                        f.write(png_bytes)
+                    result = self.chat.wx.get_image_text(png_bytes)
+            except Exception:
+                pass
+
+        pay_redenvelop_detail_win.GetWindowPattern().Close()
+        
+        return {
+            "desc": "\n".join(result),
+            "ocr": result,
+        }
 
     @staticmethod
     def parse(raw_name: str) -> tuple[str, str]:
