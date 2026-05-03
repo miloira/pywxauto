@@ -2229,8 +2229,6 @@ class WeixinWindow:
     @PIM.guard
     def activate(self) -> None:
         """激活窗口（置前并聚焦），后台模式下跳过"""
-        if _background:
-            return
         self._window.SetActive()
         self._window.SetFocus()
         time.sleep(0.2)
@@ -11471,6 +11469,8 @@ class Weixin(WeixinWindow):
 
     WINDOW_CLASS = "mmui::MainWindow"
     WINDOW_REGEX = "微信|Weixin"
+    WINDOW_WIDTH = 1200
+    WINDOW_HEIGHT = 1000
     SHORTCUTS = {
         "发送消息": "Enter",
         "语音输入文字": "Ctrl+Win",
@@ -11481,7 +11481,7 @@ class Weixin(WeixinWindow):
 
     def __init__(self, install_path: Optional[str] = None, wxocr_path: Optional[str] = None,
                  ocr_engine: str = "wcocr", idle_wait: float = 0, lock_input: bool = False,
-                 background: bool = False):
+                 background: bool = False, resize: bool = True):
         """
         Args:
             install_path: 微信安装路径，None 时自动检测
@@ -11496,6 +11496,8 @@ class Weixin(WeixinWindow):
                           默认 False。
             background:   True 时使用后台模式（通过 SendMessage 发送虚拟鼠标/键盘消息，
                           不需要窗口在前台），默认 False。
+            resize:       True 时将微信窗口设置为固定大小（1000x700），
+                          False 时保持原窗口大小。默认 True。
         """
         self.background: bool = background
 
@@ -11539,6 +11541,17 @@ class Weixin(WeixinWindow):
             RegexName=self.WINDOW_REGEX,
             searchDepth=1
         )
+
+        # 保存微信主窗口句柄供后台模式使用
+        _wx_hwnd = self._win.NativeWindowHandle
+
+        # 设置固定窗口大小
+        self.resize: bool = resize
+        if resize and _wx_hwnd:
+            rect = win32gui.GetWindowRect(_wx_hwnd)
+            x, y = rect[0], rect[1]
+            ctypes.windll.user32.MoveWindow(_wx_hwnd, x, y,
+                                            self.WINDOW_WIDTH, self.WINDOW_HEIGHT, True)
 
         # 窗口功能
         self.navigator = Navigator(self)
