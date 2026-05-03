@@ -2178,7 +2178,7 @@ def sendkeys_control(control, text: str) -> None:
             raise RuntimeError("无法获取目标窗口句柄")
 
         # 先设置焦点再发送按键
-        # win32gui.SendMessage(hwnd, win32con.WM_SETFOCUS, 0, 0)
+        win32gui.SendMessage(hwnd, win32con.WM_SETFOCUS, 0, 0)
         vm_sendkeys(hwnd, text)
 
 
