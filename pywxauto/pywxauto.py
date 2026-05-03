@@ -6435,16 +6435,20 @@ class Chat:
             raise RuntimeError("未找到聊天输入框")
 
         if _background:
-            # 后台模式：先聚焦输入框，再通过虚拟按键输入
-            click_control(field)
-            time.sleep(0.1)
-            sendkeys_control(field, content)
+            field.GetValuePattern().SetValue(content)
+            # # 后台模式：先聚焦输入框，再通过虚拟按键输入
+            # click_control(field)
+            # time.sleep(0.1)
+            # sendkeys_control(field, content)
         else:
             # 前台模式：直接设置文本
             field.GetValuePattern().SetValue(content)
 
+        send_btn = self._win.ButtonControl(Name="发送")
+        click_control(send_btn)
+
         # 回车发送
-        sendkeys_control(self._win, "{Enter}")
+        # sendkeys_control(self._win, "{Enter}")
 
         # 发送后校验：输入框应已清空
         remaining = self._get_input_value()
