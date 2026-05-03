@@ -11612,7 +11612,7 @@ class Weixin(WeixinWindow):
         _wx_hwnd = self._win.NativeWindowHandle
 
         # 设置固定窗口大小
-        self.resize: bool = resize
+        self.resize = resize
         if resize and _wx_hwnd:
             rect = win32gui.GetWindowRect(_wx_hwnd)
             x, y = rect[0], rect[1]
@@ -12478,21 +12478,23 @@ class Weixin(WeixinWindow):
         """是否注册了任何事件处理器"""
         return bool(self._ee.event_names())
 
-    def add_chat_listen(self, names: "str | list[str] | None" = None, offscreen: bool = True) -> list[SeparateChat]:
+    def add_chat_listen(self, names: "str | list[str] | None" = None) -> list[SeparateChat]:
         """
         注册要监听的聊天窗口。
 
         Args:
             names: 联系人/群聊名称，支持单个字符串或列表。
                    为 None 时自动发现所有已打开的独立聊天窗口并注册监听。
-            offscreen: 是否将窗口移到屏幕外监听，默认 True
 
         Returns:
             成功注册的 SeparateChat 实例列表
+
+        Note:
+            后台模式下窗口会自动移到屏幕外，前台模式下保持原位。
         """
         if not hasattr(self, '_listeners'):
             self._chat_listeners: dict[str, SeparateChat] = {}
-        self._offscreen = offscreen
+        self._offscreen = _background
 
         # names 为 None 时，自动发现所有已打开的独立聊天窗口
         if names is None:
