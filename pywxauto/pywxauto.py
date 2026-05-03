@@ -120,17 +120,6 @@ logger = logging.getLogger(__name__)
 _DROPFILES_FORMAT = "Illii"
 _DROPFILES_SIZE = struct.calcsize(_DROPFILES_FORMAT)
 
-# 虚拟键码映射
-_VK_MAP = {
-    "ctrl":  win32con.VK_CONTROL,
-    "alt":   win32con.VK_MENU,
-    "shift": win32con.VK_SHIFT,
-    "win":   win32con.VK_LWIN,
-    "enter": win32con.VK_RETURN,
-    "tab":   win32con.VK_TAB,
-    "esc":   win32con.VK_ESCAPE,
-}
-
 # 剪贴板保存/恢复时优先尝试的格式（按优先级排列）
 _CLIPBOARD_SAVE_FORMATS = [
     win32con.CF_HDROP,         # 文件列表
@@ -464,56 +453,12 @@ def find_window_by_name(name_pattern: str) -> list[int]:
     return result
 
 
-def send_shortcut(combo: str) -> None:
-    """
-    模拟键盘快捷键。
-
-    将 "Ctrl+Alt+W" 这样的组合键字符串转换为 SendKeys 格式，
-    通过 sendkeys_control 发送。
-
-    支持的修饰键: Ctrl, Alt, Shift, Win
-    支持的特殊键: Enter, Tab, Esc
-    支持单个字母键: A-Z（不区分大小写）
-
-    Args:
-        combo: 按键组合字符串，如 "Ctrl+A"、"Alt+Shift+S"、"Enter"
-
-    Raises:
-        ValueError: 包含无法识别的按键时抛出
-    """
-    # 修饰键映射到 SendKeys 格式
-    _MOD_MAP = {"ctrl": "Ctrl", "alt": "Alt", "shift": "Shift", "win": "Win"}
-    _SPECIAL_MAP = {"enter": "Enter", "tab": "Tab", "esc": "Escape",
-                    "escape": "Escape", "delete": "Delete", "del": "Delete",
-                    "backspace": "Backspace", "home": "Home", "end": "End",
-                    "pageup": "PageUp", "pagedown": "PageDown",
-                    "up": "Up", "down": "Down", "left": "Left", "right": "Right"}
-
-    keys = [k.strip().lower() for k in combo.split("+")]
-    modifiers = []
-    main_key = ""
-
-    for key in keys:
-        if key in _MOD_MAP:
-            modifiers.append(_MOD_MAP[key])
-        elif key in _SPECIAL_MAP:
-            main_key = "{" + _SPECIAL_MAP[key] + "}"
-        elif len(key) == 1 and key.isalpha():
-            main_key = key
-        else:
-            raise ValueError(f"无法识别的按键: {key!r}")
-
-    # 构建 SendKeys 格式: {Ctrl}{Shift}a
-    sendkeys_str = "".join("{" + m + "}" for m in modifiers) + main_key
-    sendkeys_control(None, sendkeys_str)
-
-
 def select_all() -> None:
-    send_shortcut("Ctrl+A")
+    sendkeys_control(None, "{Ctrl}a")
 
 
 def copy() -> None:
-    send_shortcut("Ctrl+C")
+    sendkeys_control(None, "{Ctrl}c")
 
 
 class PIM:
@@ -795,7 +740,7 @@ def set_clipboard(fmt, data) -> None:
 
 
 def simulate_paste() -> None:
-    send_shortcut("Ctrl+V")
+    sendkeys_control(None, "{Ctrl}v")
 
 
 def copy_text(text) -> None:
@@ -928,6 +873,10 @@ def _parse_sendkeys(text: str) -> list:
                 ops.append(("mod_down", win32con.VK_SHIFT))
                 mod_stack.append(win32con.VK_SHIFT)
                 continue
+            elif token_lower == "{win}":
+                ops.append(("mod_down", win32con.VK_LWIN))
+                mod_stack.append(win32con.VK_LWIN)
+                continue
 
             # 特殊键
             vk = _SENDKEYS_MAP.get(token)
@@ -970,21 +919,30 @@ def vm_sendkeys(hwnd: int, text: str) -> None:
         text: SendKeys 格式字符串
     """
     ops = _parse_sendkeys(text)
+    active_mods = 0  # 当前按住的修饰键数量
     for op_type, value in ops:
         if op_type == "char":
-            code = ord(value)
-            if code > 127:
-                # 非 ASCII 字符（中文等）使用 WM_IME_CHAR，兼容性更好
-                win32gui.SendMessage(hwnd, 0x0286, code, 0)  # WM_IME_CHAR
+            if active_mods > 0:
+                # 有修饰键按住时，用 WM_KEYDOWN/UP 发送虚拟键码
+                vk = ord(value.upper()) if value.isalpha() else ord(value)
+                win32gui.SendMessage(hwnd, win32con.WM_KEYDOWN, vk, 0)
+                win32gui.SendMessage(hwnd, win32con.WM_KEYUP, vk, 0)
             else:
-                win32gui.SendMessage(hwnd, win32con.WM_CHAR, code, 0)
+                code = ord(value)
+                if code > 127:
+                    # 非 ASCII 字符（中文等）使用 WM_IME_CHAR
+                    win32gui.SendMessage(hwnd, 0x0286, code, 0)  # WM_IME_CHAR
+                else:
+                    win32gui.SendMessage(hwnd, win32con.WM_CHAR, code, 0)
         elif op_type == "key":
             win32gui.SendMessage(hwnd, win32con.WM_KEYDOWN, value, 0)
             win32gui.SendMessage(hwnd, win32con.WM_KEYUP, value, 0)
         elif op_type == "mod_down":
             win32gui.SendMessage(hwnd, win32con.WM_KEYDOWN, value, 0)
+            active_mods += 1
         elif op_type == "mod_up":
             win32gui.SendMessage(hwnd, win32con.WM_KEYUP, value, 0)
+            active_mods -= 1
 
 
 def scroll_at_screen(x: int, y: int, delta: int) -> None:
@@ -2140,6 +2098,57 @@ def move_to_control(control) -> None:
 
         client_x, client_y = win32gui.ScreenToClient(hwnd, (screen_x, screen_y))
         vm_move(hwnd, client_x, client_y)
+
+
+# 修饰键到虚拟键码的映射（用于物理按键模拟）
+_MOD_VK_MAP = {
+    "ctrl": win32con.VK_CONTROL,
+    "alt": win32con.VK_MENU,
+    "shift": win32con.VK_SHIFT,
+    "win": win32con.VK_LWIN,
+}
+
+# SendKeys 特殊键到虚拟键码的映射
+_SPECIAL_VK_MAP = {
+    "enter": win32con.VK_RETURN,
+    "tab": win32con.VK_TAB,
+    "escape": win32con.VK_ESCAPE,
+    "delete": win32con.VK_DELETE,
+    "backspace": win32con.VK_BACK,
+    "home": win32con.VK_HOME,
+    "end": win32con.VK_END,
+    "up": win32con.VK_UP,
+    "down": win32con.VK_DOWN,
+    "left": win32con.VK_LEFT,
+    "right": win32con.VK_RIGHT,
+    "pageup": win32con.VK_PRIOR,
+    "pagedown": win32con.VK_NEXT,
+}
+
+
+def _physical_sendkeys(text: str) -> None:
+    """
+    使用 keybd_event 物理按键模拟发送 SendKeys 格式的组合键。
+
+    用于后台模式下发送快捷键（Ctrl+V 等），因为 SendMessage
+    无法触发应用的加速键机制。
+
+    Args:
+        text: SendKeys 格式字符串，如 "{Ctrl}v", "{Ctrl}{Shift}a"
+    """
+    ops = _parse_sendkeys(text)
+    for op_type, value in ops:
+        if op_type == "mod_down":
+            win32api.keybd_event(value, 0, 0, 0)
+        elif op_type == "mod_up":
+            win32api.keybd_event(value, 0, win32con.KEYEVENTF_KEYUP, 0)
+        elif op_type == "key":
+            win32api.keybd_event(value, 0, 0, 0)
+            win32api.keybd_event(value, 0, win32con.KEYEVENTF_KEYUP, 0)
+        elif op_type == "char":
+            vk = ord(value.upper()) if value.isalpha() else ord(value)
+            win32api.keybd_event(vk, 0, 0, 0)
+            win32api.keybd_event(vk, 0, win32con.KEYEVENTF_KEYUP, 0)
 
 
 def sendkeys_control(control, text: str) -> None:
@@ -12297,7 +12306,25 @@ class Weixin(WeixinWindow):
             ValueError: 名称未注册且无法解析为按键组合时抛出
         """
         combo = Weixin.SHORTCUTS.get(name, name)
-        send_shortcut(combo)
+        # 将 "Ctrl+Alt+W" 格式转为 SendKeys 格式 "{Ctrl}{Alt}w"
+        _MOD_KEYS = {"ctrl", "alt", "shift", "win"}
+        _SPECIAL_KEYS = {
+            "enter": "Enter", "tab": "Tab", "esc": "Escape",
+            "escape": "Escape", "delete": "Delete", "del": "Delete",
+            "backspace": "Backspace", "home": "Home", "end": "End",
+        }
+        keys = [k.strip().lower() for k in combo.split("+")]
+        sendkeys_str = ""
+        for key in keys:
+            if key in _MOD_KEYS:
+                sendkeys_str += "{" + key.capitalize() + "}"
+            elif key in _SPECIAL_KEYS:
+                sendkeys_str += "{" + _SPECIAL_KEYS[key] + "}"
+            elif len(key) == 1:
+                sendkeys_str += key
+            else:
+                raise ValueError(f"无法识别的按键: {key!r}")
+        sendkeys_control(None, sendkeys_str)
 
     def wakeup(self) -> None:
         """唤醒微信窗口（Ctrl+Alt+W）"""
