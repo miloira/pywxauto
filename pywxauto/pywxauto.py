@@ -2109,8 +2109,34 @@ def sendkeys_control(control, text: str) -> None:
             raise RuntimeError("无法获取目标窗口句柄")
 
         # 先设置焦点再发送按键
-        win32gui.SendMessage(hwnd, win32con.WM_SETFOCUS, 0, 0)
+        # win32gui.SendMessage(hwnd, win32con.WM_SETFOCUS, 0, 0)
         vm_sendkeys(hwnd, text)
+
+
+def focus_control(control) -> None:
+    """
+    让 uiautomation 控件获得焦点。
+
+    根据模块级 _background 标志选择方式：
+    - _background=False: 使用 uiautomation 的 SetFocus
+    - _background=True:  通过 SendMessage 发送 WM_SETFOCUS
+
+    Args:
+        control: uiautomation 控件对象
+    """
+    if not _background:
+        control.SetFocus()
+    else:
+        hwnd = control.NativeWindowHandle
+        if not hwnd:
+            parent = control
+            while parent:
+                hwnd = parent.NativeWindowHandle
+                if hwnd:
+                    break
+                parent = parent.GetParentControl()
+        if hwnd:
+            win32gui.SendMessage(hwnd, win32con.WM_SETFOCUS, 0, 0)
 
 
 def click_control(control, button: str = "left", click: str = "once") -> None:
@@ -2191,7 +2217,9 @@ class WeixinWindow:
 
     @PIM.guard
     def activate(self) -> None:
-        """激活窗口（置前并聚焦）"""
+        """激活窗口（置前并聚焦），后台模式下跳过"""
+        if _background:
+            return
         self._window.SetActive()
         self._window.SetFocus()
         time.sleep(0.2)
@@ -3347,7 +3375,7 @@ class FriendCircle(WeixinWindow):
                 break
 
             if not new_found:
-                lc.SetFocus()
+                focus_control(lc)
                 time.sleep(0.2)
                 sendkeys_control(lc, "{PageDown}")
                 time.sleep(1)
@@ -3360,7 +3388,7 @@ class FriendCircle(WeixinWindow):
                 if not found_after_scroll:
                     break
             else:
-                lc.SetFocus()
+                focus_control(lc)
                 time.sleep(0.2)
                 sendkeys_control(lc, "{PageDown}")
                 time.sleep(0.5)
@@ -3431,7 +3459,7 @@ class FriendCircle(WeixinWindow):
                     return
 
             if not new_found:
-                lc.SetFocus()
+                focus_control(lc)
                 time.sleep(0.2)
                 sendkeys_control(lc, "{PageDown}")
                 time.sleep(1)
@@ -3444,7 +3472,7 @@ class FriendCircle(WeixinWindow):
                 if not found_after_scroll:
                     return
             else:
-                lc.SetFocus()
+                focus_control(lc)
                 time.sleep(0.2)
                 sendkeys_control(lc, "{PageDown}")
                 time.sleep(0.5)
@@ -4766,7 +4794,8 @@ class FileManager(WeixinWindow):
             Name=self.WINDOW_NAME, searchDepth=1
         )
         if self._win.Exists(maxSearchSeconds=3):
-            self._win.SetActive()
+            if not _background:
+                self._win.SetActive()
             return self._win
         return None
 
@@ -5526,7 +5555,7 @@ class Session:
             raise RuntimeError("未找到会话列表控件")
 
         time.sleep(0.1)
-        lc.SetFocus()
+        focus_control(lc)
         time.sleep(0.2)
 
         # 滚动到顶部
@@ -5589,7 +5618,7 @@ class Session:
         if not lc.Exists(maxSearchSeconds=3):
             raise RuntimeError("未找到会话列表控件")
 
-        lc.SetFocus()
+        focus_control(lc)
         time.sleep(0.2)
 
         # 先滚动到顶部
@@ -5873,8 +5902,9 @@ class Session:
             )
             if not fresh_picker.Exists(maxSearchSeconds=3):
                 raise RuntimeError("发起群聊窗口已关闭")
-            fresh_picker.SetActive()
-            fresh_picker.SetFocus()
+            if not _background:
+                fresh_picker.SetActive()
+            focus_control(fresh_picker)
             time.sleep(0.3)
 
             # 从左侧 SearchField 容器中查找搜索框，避开右侧面板
@@ -6386,18 +6416,23 @@ class Chat:
         在当前会话中发送文本消息，返回发送状态。
 
         通过 ValuePattern 设置输入框文本，然后按回车键发送。
+        后台模式下使用 vm_sendkeys 输入文本，避免窗口被激活。
         """
         self._activate_window()
 
-        # 输入方式一 设置文本
+        # 输入方式
         field = self._input_field
         if not field.Exists(maxSearchSeconds=2):
             raise RuntimeError("未找到聊天输入框")
-        field.GetValuePattern().SetValue(content)
 
-        # 输入方式二 复制粘贴
-        # self.clear_input()
-        # paste(content)
+        if _background:
+            # 后台模式：先聚焦输入框，再通过虚拟按键输入
+            click_control(field)
+            time.sleep(0.1)
+            sendkeys_control(field, content)
+        else:
+            # 前台模式：直接设置文本
+            field.GetValuePattern().SetValue(content)
 
         # 回车发送
         sendkeys_control(self._win, "{Enter}")
@@ -8355,8 +8390,9 @@ class Chat:
                 )
                 if not fresh_picker.Exists(maxSearchSeconds=3):
                     raise RuntimeError("添加群成员窗口已关闭")
-                fresh_picker.SetActive()
-                fresh_picker.SetFocus()
+                if not _background:
+                    fresh_picker.SetActive()
+                focus_control(fresh_picker)
                 time.sleep(0.3)
 
                 search_field = fresh_picker.GroupControl(
@@ -8520,8 +8556,9 @@ class Chat:
                 )
                 if not fresh_picker.Exists(maxSearchSeconds=3):
                     raise RuntimeError("移除群成员窗口已关闭")
-                fresh_picker.SetActive()
-                fresh_picker.SetFocus()
+                if not _background:
+                    fresh_picker.SetActive()
+                focus_control(fresh_picker)
                 time.sleep(0.3)
 
                 search_field = fresh_picker.GroupControl(
