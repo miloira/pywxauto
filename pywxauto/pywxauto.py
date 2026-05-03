@@ -392,6 +392,64 @@ def get_wechat_wxocr_path() -> Optional[str]:
     return os.path.join(os.path.dirname(result[0]), "wxocr.dll")
 
 
+def _wechat3_version_int2str(v: int) -> str:
+    """将微信3.x的版本号整数转换为字符串，如 0x63090a13 -> '3.9.10.19'"""
+    major = (v >> 24) & 0xFF
+    minor = (v >> 16) & 0xFF
+    build = (v >> 8) & 0xFF
+    patch = v & 0xFF
+    major = major - 0x60
+    return f"{major}.{minor}.{build}.{patch}"
+
+
+def _wechat4_version_int2str(v: int) -> str:
+    """将微信4.x的版本号整数转换为字符串，如 0x04000112 -> '4.0.1.18'"""
+    version = hex(v)
+    ver_str = version[5:]
+    major = int(ver_str[0], 16)
+    minor = int(ver_str[1], 16)
+    build = int(ver_str[2], 16)
+    patch = int(ver_str[3:], 16)
+    return f"{major}.{minor}.{build}.{patch}"
+
+
+def get_wechat_version(version: int = 3) -> str:
+    """
+    从注册表读取微信版本号字符串。
+
+    Args:
+        version: 微信大版本号，3 或 4
+
+    Returns:
+        版本号字符串，如 "3.9.10.19" 或 "4.0.1.18"
+
+    Raises:
+        ValueError: 不支持的版本号
+        FileNotFoundError: 注册表中未找到版本信息
+    """
+    if version == 3:
+        reg_path = r"Software\Tencent\WeChat"
+        to_wechat_version = _wechat3_version_int2str
+    elif version == 4:
+        reg_path = r"Software\Tencent\Weixin"
+        to_wechat_version = _wechat4_version_int2str
+    else:
+        raise ValueError(f"Not support WeChat version: {version}")
+
+    for KEY in [winreg.HKEY_CURRENT_USER, winreg.HKEY_LOCAL_MACHINE]:
+        try:
+            key = winreg.OpenKey(KEY, reg_path)
+            ver_int, _ = winreg.QueryValueEx(key, "Version")
+            winreg.CloseKey(key)
+            return to_wechat_version(ver_int)
+        except FileNotFoundError:
+            continue
+        except Exception as e:
+            raise e
+
+    raise FileNotFoundError(f"未在注册表中找到微信{version}.x版本信息")
+
+
 def find_window_by_name(name_pattern: str) -> list[int]:
     result = []
 
@@ -11506,8 +11564,12 @@ class Weixin(WeixinWindow):
         self.background: bool = background
 
         # 设置模块级后台模式标志
-        global _background
+        global _background, _wx_hwnd
         _background = background
+
+        # 读取微信版本号
+        self.version: str = get_wechat_version(4)
+
         # 物理输入监控
         if idle_wait > 0:
             PIM(idle_wait=idle_wait, lock_input=lock_input)
@@ -11562,6 +11624,11 @@ class Weixin(WeixinWindow):
         self.session = Session(self)
         self.file_manager = FileManager(self)
         self.friend_circle = FriendCircle(self)
+
+        logger.info(f"微信客户端({self.version}) - 已连接")
+    
+    def __del__(self):
+        logger.info(f"微信客户端({self.version}) - 已断开")
 
     @staticmethod
     def find_wechat_window() -> list[int]:
