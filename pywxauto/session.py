@@ -13,10 +13,10 @@ from typing import Optional
 import uiautomation as auto
 import win32gui
 
-from . import _state
-from .pim import PIM
-from . import input_wx, input_wm
-from .utils import rand_ratio as _rand_ratio
+from pywxauto import _state
+from pywxauto.pim import PIM
+from pywxauto import input_wx, input_wm
+from pywxauto.utils import rand_ratio as _rand_ratio
 
 import logging
 logger = logging.getLogger(__name__)

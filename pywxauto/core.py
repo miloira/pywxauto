@@ -96,7 +96,7 @@ from PIL import Image
 from pyee.base import EventEmitter
 from rapidocr import RapidOCR
 
-from .utils import (
+from pywxauto.utils import (
     query_reg_install_path, get_wechat_install_path, get_wechat_wxocr_path,
     get_wechat_version, get_hwnd, ensure_narrator_registry,
     get_clipboard, save_clipboard, restore_clipboard, set_clipboard,
@@ -106,15 +106,15 @@ from .utils import (
 )
 
 # ---- 从子模块导入 ----
-from . import _state
-from .exceptions import (
+from pywxauto import _state
+from pywxauto.exceptions import (
     WxAutoError, WindowNotFoundError, ControlTimeoutError,
     SendError, OCRError, LoginError, RegistryError,
 )
-from .capture import capture_window, capture_control
-from . import input_wx, input_wm
-from .pim import PIM
-from .messages import (
+from pywxauto.capture import capture_window, capture_control
+from pywxauto import input_wx, input_wm
+from pywxauto.pim import PIM
+from pywxauto.messages import (
     Event, SenderType, MessageStatus,
     Message, TextMessage, QuoteMessage, VoiceMessage, ImageMessage,
     VideoMessage, FileMessage, LocationMessage, LinkMessage,
@@ -129,11 +129,11 @@ logging.basicConfig(level=logging.INFO, format="%(asctime)s [%(levelname)s] %(me
 logger = logging.getLogger(__name__)
 
 # ---- 从拆分模块导入业务类 ----
-from .windows import WeixinWindow, Login, VoipCallWindow, NoteEditorWindow
-from .friend_circle import Moment, FriendCircle
-from .file_manager import ChatFile, FileManager
-from .session import SessionItem, Navigator, Session
-from .chat import Chat, SeparateChat
+from pywxauto.windows import WeixinWindow, Login, VoipCallWindow, NoteEditorWindow
+from pywxauto.friend_circle import Moment, FriendCircle
+from pywxauto.file_manager import ChatFile, FileManager
+from pywxauto.session import SessionItem, Navigator, Session
+from pywxauto.chat import Chat, SeparateChat
 
 
 class Weixin(WeixinWindow):

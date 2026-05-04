@@ -20,10 +20,10 @@ import win32con
 import win32gui
 from PIL import Image
 
-from . import _state
-from .pim import PIM
-from .exceptions import SendError, OCRError
-from .messages import (
+from pywxauto import _state
+from pywxauto.pim import PIM
+from pywxauto.exceptions import SendError, OCRError
+from pywxauto.messages import (
     SenderType, MessageStatus,
     Message, TextMessage, QuoteMessage, VoiceMessage, ImageMessage,
     VideoMessage, FileMessage, LocationMessage, LinkMessage,
@@ -32,14 +32,14 @@ from .messages import (
     TransferMessage, RedPacketMessage, OtherMessage,
     MSG_CLASS_TO_EVENT as _MSG_CLASS_TO_EVENT,
 )
-from . import input_wx, input_wm
-from .utils import (
+from pywxauto import input_wx, input_wm
+from pywxauto.utils import (
     rand_ratio as _rand_ratio,
     is_url as _is_url, download_to_temp as _download_to_temp,
     get_hwnd,
 )
-from .capture import capture_window, capture_control
-from .windows import WeixinWindow, VoipCallWindow
+from pywxauto.capture import capture_window, capture_control
+from pywxauto.windows import WeixinWindow, VoipCallWindow
 
 import logging
 logger = logging.getLogger(__name__)

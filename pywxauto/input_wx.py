@@ -16,8 +16,8 @@ import win32api
 import win32con
 import win32gui
 
-from . import _state
-from . import input_wm
+from pywxauto import _state
+from pywxauto import input_wm
 
 
 def _rand_ratio() -> float:
@@ -335,7 +335,7 @@ def paste(content) -> None:
     Args:
         content: str 粘贴文本，list[str] 粘贴文件路径列表
     """
-    from .utils import save_clipboard, restore_clipboard, copy_text, copy_files
+    from pywxauto.utils import save_clipboard, restore_clipboard, copy_text, copy_files
 
     saved = save_clipboard()
     try:

@@ -15,8 +15,8 @@ from typing import TYPE_CHECKING
 import uiautomation as auto
 import win32gui
 
-from . import _state
-from . import input_wx, input_wm
+from pywxauto import _state
+from pywxauto import input_wx, input_wm
 
 if TYPE_CHECKING:
     pass

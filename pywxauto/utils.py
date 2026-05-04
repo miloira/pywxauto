@@ -22,10 +22,10 @@ import win32con
 import win32gui
 import winreg
 
-from .exceptions import RegistryError
+from pywxauto.exceptions import RegistryError
 
 try:
-    from . import wcocr
+    from pywxauto import wcocr
 except ImportError:
     wcocr = None
 

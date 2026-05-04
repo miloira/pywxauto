@@ -15,11 +15,11 @@ import win32api
 import win32con
 import win32gui
 
-from . import _state
-from .pim import PIM
-from .windows import WeixinWindow
-from . import input_wx, input_wm
-from .utils import rand_ratio as _rand_ratio
+from pywxauto import _state
+from pywxauto.pim import PIM
+from pywxauto.windows import WeixinWindow
+from pywxauto import input_wx, input_wm
+from pywxauto.utils import rand_ratio as _rand_ratio
 
 import logging
 logger = logging.getLogger(__name__)

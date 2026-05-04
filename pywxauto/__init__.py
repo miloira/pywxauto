@@ -26,4 +26,4 @@ pywxauto - 微信自动化库
     from pywxauto.input_wx import click, send_keys, paste
 """
 
-from .core import *
+from pywxauto.core import *
