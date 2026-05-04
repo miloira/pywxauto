@@ -6531,30 +6531,55 @@ class Chat:
                 raise RuntimeError("未找到聊天输入框")
 
             if background:
-                # 方式一 复制粘贴文件
-                self._win.SetActive()
-                input_wx.paste(local_paths)
-                # 方式二 通过工具栏"发送文件"按钮 → 文件选择对话框
-                # for file in local_paths:
-                #     self._send_file_via_dialog(file)
-                #     time.sleep(0.5)
+                # 后台模式：复制粘贴文件，失败时重试最多 3 次
+                max_retries = 3
+                for attempt in range(1, max_retries + 1):
+                    self.clear_input()
+                    self._win.SetActive()
+                    input_wx.paste(local_paths)
+                    time.sleep(0.3)
+
+                    doc_len = self._get_input_doc_length()
+                    if doc_len > 0:
+                        break
+
+                    logger.warning(
+                        f"{label}粘贴第 {attempt} 次失败，"
+                        f"输入框文档长度为 0"
+                    )
+                    if attempt < max_retries:
+                        time.sleep(0.5)
+                else:
+                    raise SendError(
+                        f"{label}粘贴校验失败: 重试 {max_retries} 次后"
+                        f"输入框文档长度仍为 0，{label}可能未粘贴成功"
+                    )
+
+                send_btn = self._win.ButtonControl(Name="发送")
+                input_wx.click(send_btn)
+
+                remaining_len = self._get_input_doc_length()
+                if remaining_len > 0:
+                    raise SendError(
+                        f"发送后输入框未清空: 文档长度={remaining_len}，{label}可能未发出"
+                    )
             else:
                 input_wx.paste(local_paths)
 
-            doc_len = self._get_input_doc_length()
-            if doc_len == 0:
-                raise SendError(
-                    f"{label}粘贴校验失败: 输入框文档长度为 0，{label}可能未粘贴成功"
-                )
+                doc_len = self._get_input_doc_length()
+                if doc_len == 0:
+                    raise SendError(
+                        f"{label}粘贴校验失败: 输入框文档长度为 0，{label}可能未粘贴成功"
+                    )
 
-            send_btn = self._win.ButtonControl(Name="发送")
-            input_wx.click(send_btn)
+                send_btn = self._win.ButtonControl(Name="发送")
+                input_wx.click(send_btn)
 
-            remaining_len = self._get_input_doc_length()
-            if remaining_len > 0:
-                raise SendError(
-                    f"发送后输入框未清空: 文档长度={remaining_len}，{label}可能未发出"
-                )
+                remaining_len = self._get_input_doc_length()
+                if remaining_len > 0:
+                    raise SendError(
+                        f"发送后输入框未清空: 文档长度={remaining_len}，{label}可能未发出"
+                    )
 
             return check_status()
         finally:
