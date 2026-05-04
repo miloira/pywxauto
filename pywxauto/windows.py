@@ -63,6 +63,8 @@ class WeixinWindow:
     @PIM.guard
     def activate(self) -> None:
         """激活窗口（置前并聚焦），后台模式下跳过"""
+        if _state.background:
+            return
         self._window.SetActive()
         self._window.SetFocus()
         time.sleep(0.2)

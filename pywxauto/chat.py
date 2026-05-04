@@ -311,31 +311,22 @@ class Chat:
         """
         在当前会话中发送文本消息，返回发送状态。
 
-        通过 ValuePattern 设置输入框文本，然后按回车键发送。
-        后台模式下使用 vm_sendkeys 输入文本，避免窗口被激活。
+        前台模式：ValuePattern 设置文本 + 点击发送按钮
+        后台模式：ValuePattern 设置文本 + send_keys 回车发送
         """
         self._activate_window()
 
-        # 输入方式
         field = self._input_field
         if not field.Exists(maxSearchSeconds=2):
             raise RuntimeError("未找到聊天输入框")
 
+        field.GetValuePattern().SetValue(content)
+
         if _state.background:
-            field.GetValuePattern().SetValue(content)
-            # # 后台模式：先聚焦输入框，再通过虚拟按键输入
-            # input_wx.click(field)
-            # time.sleep(0.1)
-            # input_wx.send_keys(field, content)
+            input_wx.send_keys(self._win, "{Enter}")
         else:
-            # 前台模式：直接设置文本
-            field.GetValuePattern().SetValue(content)
-
-        send_btn = self._win.ButtonControl(Name="发送")
-        input_wx.click(send_btn)
-
-        # 回车发送
-        # input_wx.send_keys(self._win, "{Enter}")
+            send_btn = self._win.ButtonControl(Name="发送")
+            input_wx.click(send_btn)
 
         # 发送后校验：输入框应已清空
         remaining = self._get_input_value()
@@ -1681,53 +1672,53 @@ class Chat:
         bubble_left, bubble_right = Chat._detect_bubble_rect(img, w, h, sender_type)
 
         # ---- 调试：标记扫描点和气泡区域并保存图片 ----
-        try:
-            from PIL import ImageDraw
-            debug_img = img.copy()
-            draw = ImageDraw.Draw(debug_img)
-            ms = 6  # marker size
-            # 边缘扫描：左侧（蓝色）
-            if edge_left_x >= 0:
-                draw.ellipse(
-                    [edge_left_x - ms, edge_scan_y - ms,
-                     edge_left_x + ms, edge_scan_y + ms],
-                    fill="blue", outline="white",
-                )
-                draw.text((edge_left_x + 10, edge_scan_y - 8),
-                          f"L({edge_left_x},{edge_scan_y})", fill="blue")
-            # 边缘扫描：右侧（红色）
-            if edge_right_x >= 0:
-                draw.ellipse(
-                    [edge_right_x - ms, edge_scan_y - ms,
-                     edge_right_x + ms, edge_scan_y + ms],
-                    fill="red", outline="white",
-                )
-                draw.text((edge_right_x - 90, edge_scan_y - 8),
-                          f"R({edge_right_x},{edge_scan_y})", fill="red")
-            # 气泡区域（绿色矩形）
-            if bubble_left > 0 or bubble_right > 0:
-                scan_y = 38
-                draw.line([(bubble_left, scan_y), (bubble_right, scan_y)],
-                          fill="green", width=2)
-                draw.ellipse(
-                    [bubble_left - ms, scan_y - ms,
-                     bubble_left + ms, scan_y + ms],
-                    fill="green", outline="white",
-                )
-                draw.text((bubble_left + 10, scan_y + 10),
-                          f"BL({bubble_left})", fill="green")
-                draw.ellipse(
-                    [bubble_right - ms, scan_y - ms,
-                     bubble_right + ms, scan_y + ms],
-                    fill="lime", outline="white",
-                )
-                draw.text((bubble_right - 80, scan_y + 10),
-                          f"BR({bubble_right})", fill="lime")
-            # 发送者标注
-            draw.text((5, 5), f"{sender} ({sender_type.value})", fill="yellow")
-            debug_img.save(os.path.join(".", "_debug_edge_scan.png"))
-        except Exception:
-            pass
+        # try:
+        #     from PIL import ImageDraw
+        #     debug_img = img.copy()
+        #     draw = ImageDraw.Draw(debug_img)
+        #     ms = 6  # marker size
+        #     # 边缘扫描：左侧（蓝色）
+        #     if edge_left_x >= 0:
+        #         draw.ellipse(
+        #             [edge_left_x - ms, edge_scan_y - ms,
+        #              edge_left_x + ms, edge_scan_y + ms],
+        #             fill="blue", outline="white",
+        #         )
+        #         draw.text((edge_left_x + 10, edge_scan_y - 8),
+        #                   f"L({edge_left_x},{edge_scan_y})", fill="blue")
+        #     # 边缘扫描：右侧（红色）
+        #     if edge_right_x >= 0:
+        #         draw.ellipse(
+        #             [edge_right_x - ms, edge_scan_y - ms,
+        #              edge_right_x + ms, edge_scan_y + ms],
+        #             fill="red", outline="white",
+        #         )
+        #         draw.text((edge_right_x - 90, edge_scan_y - 8),
+        #                   f"R({edge_right_x},{edge_scan_y})", fill="red")
+        #     # 气泡区域（绿色矩形）
+        #     if bubble_left > 0 or bubble_right > 0:
+        #         scan_y = 38
+        #         draw.line([(bubble_left, scan_y), (bubble_right, scan_y)],
+        #                   fill="green", width=2)
+        #         draw.ellipse(
+        #             [bubble_left - ms, scan_y - ms,
+        #              bubble_left + ms, scan_y + ms],
+        #             fill="green", outline="white",
+        #         )
+        #         draw.text((bubble_left + 10, scan_y + 10),
+        #                   f"BL({bubble_left})", fill="green")
+        #         draw.ellipse(
+        #             [bubble_right - ms, scan_y - ms,
+        #              bubble_right + ms, scan_y + ms],
+        #             fill="lime", outline="white",
+        #         )
+        #         draw.text((bubble_right - 80, scan_y + 10),
+        #                   f"BR({bubble_right})", fill="lime")
+        #     # 发送者标注
+        #     draw.text((5, 5), f"{sender} ({sender_type.value})", fill="yellow")
+        #     debug_img.save(os.path.join(".", "_debug_edge_scan.png"))
+        # except Exception:
+        #     pass
         # ---- 调试结束 ----
 
         # 转换为屏幕坐标
@@ -5330,7 +5321,7 @@ class SeparateChat(Chat, WeixinWindow):
         rect = self._win.BoundingRectangle
         self._offscreen_rect = (rect.left, rect.top,
                                 rect.width(), rect.height())
-        ctypes.windll.user32.MoveWindow(hwnd, -9999, 0,
+        ctypes.windll.user32.MoveWindow(hwnd, -9999, -9999,
                                         rect.width(), rect.height(), True)
 
     def move_back(self) -> None:

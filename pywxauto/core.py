@@ -150,25 +150,25 @@ class Weixin(WeixinWindow):
         "显示窗口": "Ctrl+Alt+W",
     }
 
-    def __init__(self, install_path: Optional[str] = None, wxocr_path: Optional[str] = None,
-                 ocr_engine: str = "wcocr", idle_wait: float = 0, lock_input: bool = False,
-                 background: bool = False, resize: bool = True):
+    def __init__(self, background: bool = False, idle_wait: float = 0, lock_input: bool = False,
+                 resize: bool = True, ocr_engine: str = "wcocr",
+                 install_path: Optional[str] = None, wxocr_path: Optional[str] = None):
         """
         Args:
-            install_path: 微信安装路径，None 时自动检测
-            wxocr_path:   微信 OCR 插件路径，None 时自动检测
-            ocr_engine:   OCR 引擎选择
-                - "wcocr":    使用微信自带 OCR（默认）
-                - "rapidocr": 使用 RapidOCR
+            background:   True 时使用后台模式（通过 SendMessage 发送虚拟鼠标/键盘消息，
+                          不需要窗口在前台），默认 False。
             idle_wait:   人类操作等待时间（秒），大于 0 时自动启动物理输入监控，
                           所有 UI 操作方法执行前会等待用户停止物理键盘/鼠标操作达到该秒数。
                           默认 0 表示不等待。
             lock_input:   True 时在自动化操作期间锁定物理键盘鼠标（需管理员权限），
                           默认 False。
-            background:   True 时使用后台模式（通过 SendMessage 发送虚拟鼠标/键盘消息，
-                          不需要窗口在前台），默认 False。
             resize:       True 时将微信窗口设置为固定大小（1000x700），
                           False 时保持原窗口大小。默认 True。
+            ocr_engine:   OCR 引擎选择
+                - "wcocr":    使用微信自带 OCR（默认）
+                - "rapidocr": 使用 RapidOCR
+            install_path: 微信安装路径，None 时自动检测
+            wxocr_path:   微信 OCR 插件路径，None 时自动检测
         """
         self.background: bool = background
 
@@ -231,7 +231,7 @@ class Weixin(WeixinWindow):
             rect = win32gui.GetWindowRect(hwnd)
             self._main_offscreen_rect = (rect[0], rect[1],
                                          rect[2] - rect[0], rect[3] - rect[1])
-            ctypes.windll.user32.MoveWindow(hwnd, -9999, 0,
+            ctypes.windll.user32.MoveWindow(hwnd, -9999, -9999,
                                             rect[2] - rect[0], rect[3] - rect[1], True)
 
         # 窗口功能
@@ -843,8 +843,8 @@ class Weixin(WeixinWindow):
         # 截图微信按钮区域
         try:
             png_bytes = capture_control(hwnd, wx_btn, offset_right=20)
-            with open("_debug_check_new_msg.png", "wb") as f:
-                f.write(png_bytes)
+            # with open("_debug_check_new_msg.png", "wb") as f:
+            #     f.write(png_bytes)
         except Exception:
             return 0
 

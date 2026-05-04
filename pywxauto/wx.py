@@ -2192,6 +2192,8 @@ class WeixinWindow:
     @PIM.guard
     def activate(self) -> None:
         """激活窗口（置前并聚焦），后台模式下跳过"""
+        if background:
+            return
         self._window.SetActive()
         self._window.SetFocus()
         time.sleep(0.2)
@@ -6426,26 +6428,16 @@ class Chat:
         """
         在当前会话中发送文本消息，返回发送状态。
 
-        通过 ValuePattern 设置输入框文本，然后按回车键发送。
-        后台模式下使用 vm_sendkeys 输入文本，避免窗口被激活。
+        前台模式：ValuePattern 设置文本 + 点击发送按钮
+        后台模式：ValuePattern 设置文本 + send_keys 回车发送
         """
         self._activate_window()
 
-        # 输入方式
         field = self._input_field
         if not field.Exists(maxSearchSeconds=2):
             raise RuntimeError("未找到聊天输入框")
 
-        if background:
-            field.GetValuePattern().SetValue(content)
-            # # 后台模式：先聚焦输入框，再通过虚拟按键输入
-            # input_wx.click(field)
-            # time.sleep(0.1)
-            # input_wx.send_keys(field, content)
-        else:
-            # 前台模式：直接设置文本
-            
-            field.GetValuePattern().SetValue(content)
+        input_wx.send_keys(field, content)
 
         send_btn = self._win.ButtonControl(Name="发送")
         input_wx.click(send_btn)
@@ -6578,7 +6570,7 @@ class Chat:
         self._add_at_members(field, at_members)
 
         if content:
-            input_wx.paste(content)
+            input_wx.send_keys(content)
             time.sleep(0.2)
 
         send_btn = self._win.ButtonControl(Name="发送")
@@ -7794,53 +7786,53 @@ class Chat:
         bubble_left, bubble_right = Chat._detect_bubble_rect(img, w, h, sender_type)
 
         # ---- 调试：标记扫描点和气泡区域并保存图片 ----
-        try:
-            from PIL import ImageDraw
-            debug_img = img.copy()
-            draw = ImageDraw.Draw(debug_img)
-            ms = 6  # marker size
-            # 边缘扫描：左侧（蓝色）
-            if edge_left_x >= 0:
-                draw.ellipse(
-                    [edge_left_x - ms, edge_scan_y - ms,
-                     edge_left_x + ms, edge_scan_y + ms],
-                    fill="blue", outline="white",
-                )
-                draw.text((edge_left_x + 10, edge_scan_y - 8),
-                          f"L({edge_left_x},{edge_scan_y})", fill="blue")
-            # 边缘扫描：右侧（红色）
-            if edge_right_x >= 0:
-                draw.ellipse(
-                    [edge_right_x - ms, edge_scan_y - ms,
-                     edge_right_x + ms, edge_scan_y + ms],
-                    fill="red", outline="white",
-                )
-                draw.text((edge_right_x - 90, edge_scan_y - 8),
-                          f"R({edge_right_x},{edge_scan_y})", fill="red")
-            # 气泡区域（绿色矩形）
-            if bubble_left > 0 or bubble_right > 0:
-                scan_y = 38
-                draw.line([(bubble_left, scan_y), (bubble_right, scan_y)],
-                          fill="green", width=2)
-                draw.ellipse(
-                    [bubble_left - ms, scan_y - ms,
-                     bubble_left + ms, scan_y + ms],
-                    fill="green", outline="white",
-                )
-                draw.text((bubble_left + 10, scan_y + 10),
-                          f"BL({bubble_left})", fill="green")
-                draw.ellipse(
-                    [bubble_right - ms, scan_y - ms,
-                     bubble_right + ms, scan_y + ms],
-                    fill="lime", outline="white",
-                )
-                draw.text((bubble_right - 80, scan_y + 10),
-                          f"BR({bubble_right})", fill="lime")
-            # 发送者标注
-            draw.text((5, 5), f"{sender} ({sender_type.value})", fill="yellow")
-            debug_img.save(os.path.join(".", "_debug_edge_scan.png"))
-        except Exception:
-            pass
+        # try:
+        #     from PIL import ImageDraw
+        #     debug_img = img.copy()
+        #     draw = ImageDraw.Draw(debug_img)
+        #     ms = 6  # marker size
+        #     # 边缘扫描：左侧（蓝色）
+        #     if edge_left_x >= 0:
+        #         draw.ellipse(
+        #             [edge_left_x - ms, edge_scan_y - ms,
+        #              edge_left_x + ms, edge_scan_y + ms],
+        #             fill="blue", outline="white",
+        #         )
+        #         draw.text((edge_left_x + 10, edge_scan_y - 8),
+        #                   f"L({edge_left_x},{edge_scan_y})", fill="blue")
+        #     # 边缘扫描：右侧（红色）
+        #     if edge_right_x >= 0:
+        #         draw.ellipse(
+        #             [edge_right_x - ms, edge_scan_y - ms,
+        #              edge_right_x + ms, edge_scan_y + ms],
+        #             fill="red", outline="white",
+        #         )
+        #         draw.text((edge_right_x - 90, edge_scan_y - 8),
+        #                   f"R({edge_right_x},{edge_scan_y})", fill="red")
+        #     # 气泡区域（绿色矩形）
+        #     if bubble_left > 0 or bubble_right > 0:
+        #         scan_y = 38
+        #         draw.line([(bubble_left, scan_y), (bubble_right, scan_y)],
+        #                   fill="green", width=2)
+        #         draw.ellipse(
+        #             [bubble_left - ms, scan_y - ms,
+        #              bubble_left + ms, scan_y + ms],
+        #             fill="green", outline="white",
+        #         )
+        #         draw.text((bubble_left + 10, scan_y + 10),
+        #                   f"BL({bubble_left})", fill="green")
+        #         draw.ellipse(
+        #             [bubble_right - ms, scan_y - ms,
+        #              bubble_right + ms, scan_y + ms],
+        #             fill="lime", outline="white",
+        #         )
+        #         draw.text((bubble_right - 80, scan_y + 10),
+        #                   f"BR({bubble_right})", fill="lime")
+        #     # 发送者标注
+        #     draw.text((5, 5), f"{sender} ({sender_type.value})", fill="yellow")
+        #     debug_img.save(os.path.join(".", "_debug_edge_scan.png"))
+        # except Exception:
+        #     pass
         # ---- 调试结束 ----
 
         # 转换为屏幕坐标
@@ -11443,7 +11435,7 @@ class SeparateChat(Chat, WeixinWindow):
         rect = self._win.BoundingRectangle
         self._offscreen_rect = (rect.left, rect.top,
                                 rect.width(), rect.height())
-        ctypes.windll.user32.MoveWindow(hwnd, -9999, 0,
+        ctypes.windll.user32.MoveWindow(hwnd, -9999, -9999,
                                         rect.width(), rect.height(), True)
 
     def move_back(self) -> None:
@@ -11568,30 +11560,30 @@ class Weixin(WeixinWindow):
         "显示窗口": "Ctrl+Alt+W",
     }
 
-    def __init__(self, install_path: Optional[str] = None, wxocr_path: Optional[str] = None,
-                 ocr_engine: str = "wcocr", idle_wait: float = 0, lock_input: bool = False,
-                 background: bool = False, resize: bool = True):
+    def __init__(self, background: bool = False, idle_wait: float = 0, lock_input: bool = False,
+                 resize: bool = True, ocr_engine: str = "wcocr",
+                 install_path: Optional[str] = None, wxocr_path: Optional[str] = None):
         """
         Args:
-            install_path: 微信安装路径，None 时自动检测
-            wxocr_path:   微信 OCR 插件路径，None 时自动检测
-            ocr_engine:   OCR 引擎选择
-                - "wcocr":    使用微信自带 OCR（默认）
-                - "rapidocr": 使用 RapidOCR
+            background:   True 时使用后台模式（通过 SendMessage 发送虚拟鼠标/键盘消息，
+                          不需要窗口在前台），默认 False。
             idle_wait:   人类操作等待时间（秒），大于 0 时自动启动物理输入监控，
                           所有 UI 操作方法执行前会等待用户停止物理键盘/鼠标操作达到该秒数。
                           默认 0 表示不等待。
             lock_input:   True 时在自动化操作期间锁定物理键盘鼠标（需管理员权限），
                           默认 False。
-            background:   True 时使用后台模式（通过 SendMessage 发送虚拟鼠标/键盘消息，
-                          不需要窗口在前台），默认 False。
             resize:       True 时将微信窗口设置为固定大小（1000x700），
                           False 时保持原窗口大小。默认 True。
+            ocr_engine:   OCR 引擎选择
+                - "wcocr":    使用微信自带 OCR（默认）
+                - "rapidocr": 使用 RapidOCR
+            install_path: 微信安装路径，None 时自动检测
+            wxocr_path:   微信 OCR 插件路径，None 时自动检测
         """
         self.background: bool = background
 
         # 设置全局后台模式标志
-        background = background
+        globals()['background'] = background
 
         # 读取微信版本号
         self.version: str = get_wechat_version(4)
@@ -11649,7 +11641,7 @@ class Weixin(WeixinWindow):
             rect = win32gui.GetWindowRect(hwnd)
             self._main_offscreen_rect = (rect[0], rect[1],
                                          rect[2] - rect[0], rect[3] - rect[1])
-            ctypes.windll.user32.MoveWindow(hwnd, -9999, 0,
+            ctypes.windll.user32.MoveWindow(hwnd, -9999, -9999,
                                             rect[2] - rect[0], rect[3] - rect[1], True)
 
         # 窗口功能
@@ -12261,8 +12253,8 @@ class Weixin(WeixinWindow):
         # 截图微信按钮区域
         try:
             png_bytes = capture_control(hwnd, wx_btn, mode="print_window")
-            with open("_debug_check_new_msg.png", "wb") as f:
-                f.write(png_bytes)
+            # with open("_debug_check_new_msg.png", "wb") as f:
+            #     f.write(png_bytes)
         except Exception:
             return 0
 
