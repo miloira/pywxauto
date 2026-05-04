@@ -782,18 +782,20 @@ class Weixin(WeixinWindow):
         """
         对微信主窗口截图，返回 PNG 格式的字节数据。
 
-        使用 BitBlt API 捕获窗口内容，返回 PNG bytes。
+        前台模式使用 BitBlt，后台模式使用 PrintWindow。
         """
         hwnd = self._win.NativeWindowHandle
         if not hwnd:
             raise RuntimeError("无法获取微信窗口句柄")
-        return capture_window(hwnd)
+        mode = "print_window" if _state.background else "bitblt"
+        return capture_window(hwnd, mode=mode)
 
     def screenshot(self, save_path: str) -> None:
         """
         对微信主窗口截图并保存到指定路径。
 
-        截图前会自动恢复最小化窗口并激活，确保截图内容完整。
+        前台模式使用 BitBlt，后台模式使用 PrintWindow。
+        前台模式下截图前会自动恢复最小化窗口并激活，确保截图内容完整。
 
         Args:
             save_path: 保存路径（含文件名），如 "C:\\screenshots\\wx.png"
@@ -801,14 +803,16 @@ class Weixin(WeixinWindow):
         hwnd = self._win.NativeWindowHandle
         if not hwnd:
             raise RuntimeError("无法获取微信窗口句柄")
-        if self.is_minimized:
-            self.restore()
-            time.sleep(0.3)
-        self.activate()
+        if not _state.background:
+            if self.is_minimized:
+                self.restore()
+                time.sleep(0.3)
+            self.activate()
         dir_path = os.path.dirname(save_path)
         if dir_path:
             os.makedirs(dir_path, exist_ok=True)
-        png_bytes = capture_window(hwnd)
+        mode = "print_window" if _state.background else "bitblt"
+        png_bytes = capture_window(hwnd, mode=mode)
         with open(save_path, "wb") as f:
             f.write(png_bytes)
 

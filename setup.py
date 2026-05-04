@@ -16,14 +16,17 @@ URL = "https://github.com/miloira/pywxauto"
 EMAIL = "690126048@qq.com"
 AUTHOR = "Msky"
 REQUIRES_PYTHON = ">=3.10.0"
-VERSION = "0.1.0"
+VERSION = "0.0.1"
 
 # What packages are required for this module to be executed?
 REQUIRED = [
-    "uiautomation",
-    "pywin32",
-    "Pillow",
-    "requests",
+    "uiautomation==2.0.29",
+    "pywin32==311",
+    "Pillow==12.1.1",
+    "requests==2.32.5",
+    "pyee==13.0.1",
+    "rapidocr==3.8.1",
+    "windows-capture==2.0.0",
 ]
 
 # What packages are optional?

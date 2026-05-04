@@ -430,7 +430,8 @@ class Chat:
                     f"{label}粘贴校验失败: 输入框文档长度为 0，{label}可能未粘贴成功"
                 )
 
-            input_wx.send_keys(self._win, "{Enter}")
+            send_btn = self._win.ButtonControl(Name="发送")
+            input_wx.click(send_btn)
 
             remaining_len = self._get_input_doc_length()
             if remaining_len > 0:
@@ -467,7 +468,8 @@ class Chat:
             input_wx.paste(content)
             time.sleep(0.2)
 
-        input_wx.send_keys(self._win, "{Enter}")
+        send_btn = self._win.ButtonControl(Name="发送")
+        input_wx.click(send_btn)
 
         # 发送后校验：输入框应已清空
         remaining = self._get_input_value()

@@ -1,5 +1,5 @@
 """
-将 pywxauto/pywxauto.py 编译为 .pyd 文件（Cython 编译）
+将 pywxauto/wx.py 编译为 .pyd 文件（Cython 编译）
 
 用法:
     python build_pyd.py
@@ -8,10 +8,11 @@
     1. pip install cython
     2. 安装 Microsoft Visual C++ Build Tools
        (Visual Studio Installer → "使用 C++ 的桌面开发" 工作负载)
+    3. 先运行 python _merge_wx.py 生成合并后的 wx.py
 
 输出:
     编译后的 .pyd 文件会生成在 pywxauto/ 目录下，
-    如: pywxauto/pywxauto.cp312-win_amd64.pyd
+    如: pywxauto/wx.cp312-win_amd64.pyd
 """
 
 import os
@@ -23,10 +24,10 @@ from setuptools import Distribution, Extension
 from setuptools.command.build_ext import build_ext
 
 # 源文件
-SRC = os.path.join("pywxauto", "pywxauto.py")
+SRC = os.path.join("pywxauto", "wx.py")
 
 ext = Extension(
-    name="pywxauto.pywxauto",
+    name="pywxauto.wx",
     sources=[SRC],
 )
 
@@ -55,4 +56,4 @@ for root, dirs, files in os.walk("build"):
             print(f"\n[OK] compile success: {dst_path}")
             print(f"     file size: {os.path.getsize(dst_path) / 1024:.1f} KB")
 
-print("\n[TIP] only .pyd/.so files are needed for distribution, you can remove pywxauto.py source code")
+print("\n[TIP] only .pyd/.so files are needed for distribution, you can remove wx.py source code")
