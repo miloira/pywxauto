@@ -1648,7 +1648,7 @@ class Chat:
         """
         try:
             if hwnd:
-                png_bytes = capture_control(hwnd, ctrl, offset_right=15)
+                png_bytes = capture_control(hwnd, ctrl, offset_right=15, mode="print_window")
                 img = Image.open(io.BytesIO(png_bytes))
             else:
                 tmp_path = os.path.join(tempfile.gettempdir(), "_wxuia_msg.png")
