@@ -6495,8 +6495,9 @@ class Chat:
         """
         发送文件/图片/视频的通用实现。
 
-        支持单个路径或路径列表，多文件时一次性粘贴所有文件后发送。
-        支持本地路径和网络 URL（自动下载到临时目录）。
+        前台模式：通过剪贴板粘贴文件后点击发送按钮。
+        后台模式：通过工具栏"发送文件"按钮打开文件选择对话框，
+                  逐个填入路径发送，全程不抢焦点。
 
         Args:
             file_path:    单个路径或路径列表
@@ -6512,32 +6513,32 @@ class Chat:
         if not paths:
             raise ValueError(f"{label}路径不能为空")
 
-        # 预处理：下载网络 URL 到临时文件
+        # 预处理：下载网络 URL 到临时文件，并转为绝对路径
         local_paths: list[str] = []
         tmp_files: list[str] = []
         for p in paths:
             if _is_url(p):
                 tmp = _download_to_temp(p)
-                local_paths.append(tmp)
+                local_paths.append(os.path.abspath(tmp))
                 tmp_files.append(tmp)
             else:
-                local_paths.append(p)
+                local_paths.append(os.path.abspath(p))
 
         try:
-            # self.clear_input()
-
-            # 聚焦输入框
+            self.clear_input()
             field = self._input_field
             if not field.Exists(maxSearchSeconds=2):
                 raise RuntimeError("未找到聊天输入框")
-            input_wx.focus(field)
-
-            time.sleep(0.1)
 
             if background:
+                # 方式一 复制粘贴文件
+                self._win.SetActive()
                 input_wx.paste(local_paths)
+                # 方式二 通过工具栏"发送文件"按钮 → 文件选择对话框
+                # for file in local_paths:
+                #     self._send_file_via_dialog(file)
+                #     time.sleep(0.5)
             else:
-                # 前台模式：直接通过剪贴板粘贴
                 input_wx.paste(local_paths)
 
             doc_len = self._get_input_doc_length()
@@ -6564,6 +6565,55 @@ class Chat:
                         os.remove(tmp)
                     except OSError:
                         pass
+
+    def _send_file_via_dialog(self, file_path: str) -> None:
+        """
+        通过工具栏"发送文件"按钮打开文件选择对话框，填入路径并发送。
+
+        全程使用 SendMessage / SetValue，不抢焦点。
+
+        Args:
+            file_path: 文件绝对路径
+        """
+        # 点击工具栏"发送文件"按钮
+        toolbar = self._win.ToolBarControl(
+            AutomationId="tool_bar_accessible",
+        )
+        if not toolbar.Exists(maxSearchSeconds=2):
+            raise RuntimeError("未找到聊天工具栏")
+
+        file_btn = toolbar.ButtonControl(Name="发送文件")
+        if not file_btn.Exists(maxSearchSeconds=2):
+            raise RuntimeError("未找到'发送文件'按钮")
+        input_wx.click(file_btn)
+        time.sleep(0.5)
+
+        # 等待文件选择对话框弹出（系统 #32770 对话框）
+        dlg = auto.WindowControl(ClassName="#32770")
+        if not dlg.Exists(maxSearchSeconds=5):
+            raise RuntimeError("文件选择对话框未弹出")
+
+        # 填入文件路径
+        edit = dlg.ComboBoxControl(AutomationId="1148").EditControl()
+        if not edit.Exists(0, 0):
+            edit = dlg.EditControl(AutomationId="1148")
+        if not edit.Exists(maxSearchSeconds=2):
+            raise RuntimeError("未找到文件名输入框")
+        # edit.GetValuePattern().SetValue(file_path)
+        input_wx.focus(edit)
+        input_wx.send_keys(edit, file_path)
+        time.sleep(0.2)
+
+        # 点击"打开"按钮
+        open_btn = dlg.ButtonControl(Name="打开(&O)")
+        if not open_btn.Exists(maxSearchSeconds=2):
+            open_btn = dlg.ButtonControl(Name="Open(&O)")
+        if not open_btn.Exists(0, 0):
+            open_btn = dlg.ButtonControl(AutomationId="1")
+        if not open_btn.Exists(maxSearchSeconds=2):
+            raise RuntimeError("未找到'打开'按钮")
+        input_wx.click(open_btn)
+        time.sleep(0.5)
 
     @PIM.guard
     def send_at(self, content: str, at_members: list[str]) -> MessageStatus:
