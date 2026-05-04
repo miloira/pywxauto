@@ -412,8 +412,32 @@ class Chat:
         try:
             self.clear_input()
 
-            # 一次性粘贴所有文件
-            input_wx.paste(local_paths)
+            # 聚焦输入框
+            field = self._input_field
+            if not field.Exists(maxSearchSeconds=2):
+                raise RuntimeError("未找到聊天输入框")
+            input_wx.focus(field)
+            time.sleep(0.1)
+
+            if _state.background:
+                # 后台模式：设置剪贴板 → 右键输入框 → 点击"粘贴"菜单项
+                from pywxauto.utils import save_clipboard, restore_clipboard, copy_files
+                saved = save_clipboard()
+                try:
+                    copy_files(local_paths)
+                    input_wx.click(field, button="right")
+                    time.sleep(0.3)
+                    paste_item = self._win.MenuItemControl(Name="粘贴")
+                    if not paste_item.Exists(maxSearchSeconds=2):
+                        input_wx.send_keys(self._win, "{Esc}")
+                        raise SendError(f"右键菜单中未找到'粘贴'选项")
+                    input_wx.click(paste_item)
+                    time.sleep(0.3)
+                finally:
+                    restore_clipboard(saved)
+            else:
+                # 前台模式：直接通过剪贴板粘贴
+                input_wx.paste(local_paths)
 
             doc_len = self._get_input_doc_length()
             if doc_len == 0:
@@ -421,8 +445,11 @@ class Chat:
                     f"{label}粘贴校验失败: 输入框文档长度为 0，{label}可能未粘贴成功"
                 )
 
-            send_btn = self._win.ButtonControl(Name="发送")
-            input_wx.click(send_btn)
+            if _state.background:
+                input_wx.send_keys(self._win, "{Enter}")
+            else:
+                send_btn = self._win.ButtonControl(Name="发送")
+                input_wx.click(send_btn)
 
             remaining_len = self._get_input_doc_length()
             if remaining_len > 0:

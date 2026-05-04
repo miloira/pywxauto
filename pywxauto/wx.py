@@ -6524,10 +6524,21 @@ class Chat:
                 local_paths.append(p)
 
         try:
-            self.clear_input()
+            # self.clear_input()
 
-            # 一次性粘贴所有文件
-            input_wx.paste(local_paths)
+            # 聚焦输入框
+            field = self._input_field
+            if not field.Exists(maxSearchSeconds=2):
+                raise RuntimeError("未找到聊天输入框")
+            input_wx.focus(field)
+
+            time.sleep(0.1)
+
+            if background:
+                input_wx.paste(local_paths)
+            else:
+                # 前台模式：直接通过剪贴板粘贴
+                input_wx.paste(local_paths)
 
             doc_len = self._get_input_doc_length()
             if doc_len == 0:
