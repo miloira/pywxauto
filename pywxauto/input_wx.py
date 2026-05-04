@@ -111,7 +111,9 @@ def send_keys(control, text: str) -> None:
     向控件发送按键。
 
     前台模式: uiautomation SendKeys
-    后台模式: 通过 SendMessage 发送虚拟按键
+    后台模式:
+      - 组合键（含 {Ctrl}/{Alt}/{Shift}/{Win}）: 使用 auto.SendKeys 直接发送
+      - 普通按键/文本: 通过 SendMessage 发送虚拟按键
 
     支持 SendKeys 格式：
     - 普通字符: "abc"
@@ -128,16 +130,24 @@ def send_keys(control, text: str) -> None:
         else:
             control.SendKeys(text)
     else:
-        hwnd = 0
-        if control is not None:
-            hwnd = _get_hwnd(control)
-        if not hwnd:
-            hwnd = win32gui.GetForegroundWindow()
-        if not hwnd:
-            raise RuntimeError("无法获取目标窗口句柄")
+        # 后台模式下，组合键必须使用 auto.SendKeys 发送，
+        # 因为 WM_KEYDOWN 无法可靠模拟修饰键组合
+        _MOD_TOKENS = ("{ctrl}", "{alt}", "{shift}", "{win}")
+        has_modifier = any(tok in text.lower() for tok in _MOD_TOKENS)
 
-        input_wm.focus_window(hwnd)
-        _send_keys(hwnd, text)
+        if has_modifier:
+            auto.SendKeys(text)
+        else:
+            hwnd = 0
+            if control is not None:
+                hwnd = _get_hwnd(control)
+            if not hwnd:
+                hwnd = win32gui.GetForegroundWindow()
+            if not hwnd:
+                raise RuntimeError("无法获取目标窗口句柄")
+
+            input_wm.focus_window(hwnd)
+            _send_keys(hwnd, text)
 
 def move_to(control) -> None:
     """
