@@ -62,7 +62,6 @@ def capture_by_bitblt(
     img.save(buf, format="PNG")
     return buf.getvalue()
 
-
 def capture_by_print_window(
     hwnd: int, 
     offset_left: int = 0, 
@@ -108,7 +107,6 @@ def capture_by_print_window(
     buf = io.BytesIO()
     img.save(buf, format="PNG")
     return buf.getvalue()
-
 
 def capture_by_window_capture(
     hwnd: int, 
@@ -156,7 +154,6 @@ def capture_by_window_capture(
     img.save(buf, format="PNG")
     return buf.getvalue()
 
-
 def capture_window(
     hwnd: int = None, 
     offset_left: int = 0, 
@@ -192,7 +189,6 @@ def capture_window(
         return capture_by_window_capture(hwnd, offset_left, offset_top, offset_right, offset_bottom)
     else:
         raise ValueError(f"不支持的截图模式: {mode}")
-
 
 def capture_control(
     hwnd: int, 
