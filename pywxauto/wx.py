@@ -1187,9 +1187,14 @@ def _get_hwnd(control) -> int:
         parent = parent.GetParentControl()
     return 0
 
-def _screen_to_client(control) -> tuple[int, int, int]:
+def _screen_to_client(control, randomize: bool = True) -> tuple[int, int, int]:
     """
-    获取控件中心的屏幕坐标，并转换为所属窗口的客户区坐标。
+    获取控件的屏幕坐标，并转换为所属窗口的客户区坐标。
+
+    Args:
+        control:   uiautomation 控件对象
+        randomize: True 时在控件区域内随机偏移（模拟人类点击），
+                   False 时取控件中心
 
     Returns:
         (hwnd, client_x, client_y)
@@ -1198,8 +1203,15 @@ def _screen_to_client(control) -> tuple[int, int, int]:
         RuntimeError: 无法获取窗口句柄
     """
     rect = control.BoundingRectangle
-    screen_x = (rect.left + rect.right) // 2
-    screen_y = (rect.top + rect.bottom) // 2
+    if randomize:
+        # 在控件 20%~80% 区域内随机取点，避免点到边缘
+        rx = random.uniform(0.2, 0.8)
+        ry = random.uniform(0.2, 0.8)
+        screen_x = int(rect.left + (rect.right - rect.left) * rx)
+        screen_y = int(rect.top + (rect.bottom - rect.top) * ry)
+    else:
+        screen_x = (rect.left + rect.right) // 2
+        screen_y = (rect.top + rect.bottom) // 2
 
     hwnd = _get_hwnd(control)
     if not hwnd:
@@ -13216,4 +13228,3 @@ class Weixin(WeixinWindow):
                 t.join(timeout=3)
             self._stop_event = None
             logger.info("监听已停止")
-
