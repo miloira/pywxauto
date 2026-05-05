@@ -7117,12 +7117,13 @@ class Chat:
             ClassName=self.FAV_DETAIL_LIST_CLASS,
             AutomationId=self.FAV_DETAIL_LIST_ID,
         )
-        if detail_list.Exists(maxSearchSeconds=1):
+        if detail_list.Exists(maxSearchSeconds=0.5):
             return detail_list
 
         # 查找工具栏
         toolbar = self._win.ToolBarControl(
             AutomationId="tool_bar_accessible",
+            searchDepth=16,
         )
         if not toolbar.Exists(maxSearchSeconds=2):
             raise RuntimeError("未找到聊天工具栏")
@@ -7137,7 +7138,6 @@ class Chat:
             raise RuntimeError("未找到'发送收藏'按钮")
 
         input_wx.click(fav_btn)
-        time.sleep(0.5)
 
         # 等待收藏面板出现
         if not detail_list.Exists(maxSearchSeconds=5):
@@ -7297,7 +7297,6 @@ class Chat:
             raise RuntimeError("'发送'按钮未启用，可能收藏项未正确选中")
 
         input_wx.click(send_btn)
-        time.sleep(0.5)
 
         # 6. 验证面板已关闭（表示发送成功）
         check_list = self._win.ListControl(
