@@ -7844,16 +7844,16 @@ class Chat:
                 png_bytes = capture_control(hwnd, ctrl, offset_right=15, mode="print_window")
                 img = Image.open(io.BytesIO(png_bytes))
             else:
-                tmp_path = os.path.join(tempfile.gettempdir(), "_wxuia_msg.png")
+                tmp_fd, tmp_path = tempfile.mkstemp(suffix=".png", prefix="_wxuia_msg_")
+                os.close(tmp_fd)
                 try:
                     ctrl.CaptureToImage(tmp_path)
                     img = Image.open(tmp_path)
                 finally:
-                    if os.path.exists(tmp_path):
-                        try:
-                            os.remove(tmp_path)
-                        except OSError:
-                            pass
+                    try:
+                        os.remove(tmp_path)
+                    except OSError:
+                        pass
         except Exception:
             return "", SenderType.OTHER, ()
 
@@ -12547,17 +12547,16 @@ class Weixin(WeixinWindow):
         if isinstance(image, str):
             result = wcocr.ocr(image)
         else:
-            tmp_path = os.path.join(tempfile.gettempdir(), "_pywxauto_ocr_tmp.png")
+            tmp_fd, tmp_path = tempfile.mkstemp(suffix=".png", prefix="_pywxauto_ocr_")
             try:
-                with open(tmp_path, "wb") as f:
+                with os.fdopen(tmp_fd, "wb") as f:
                     f.write(image)
                 result = wcocr.ocr(tmp_path)
             finally:
-                if os.path.exists(tmp_path):
-                    try:
-                        os.remove(tmp_path)
-                    except OSError:
-                        pass
+                try:
+                    os.remove(tmp_path)
+                except OSError:
+                    pass
         data = {}
         if not result or "ocr_response" not in result:
             return data
