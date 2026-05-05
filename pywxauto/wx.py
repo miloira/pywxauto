@@ -11931,9 +11931,19 @@ class Weixin(WeixinWindow):
         "显示窗口": "Ctrl+Alt+W",
     }
 
-    def __init__(self, background: bool = False, idle_wait: float = 0, lock_input: bool = False, auto_login: bool = False, login_timeout: float = 0,
-                 resize: bool = True, ocr_engine: str = "wcocr",
-                 install_path: Optional[str] = None, wxocr_weixin_install_path: Optional[str] = None, wxocr_plugin_path: Optional[str] = None):
+    def __init__(
+        self, 
+        auto_login: bool = False, 
+        login_timeout: float = 0,
+        background: bool = False, 
+        idle_wait: float = 0, 
+        lock_input: bool = False, 
+        resize: bool = True,
+        install_path: Optional[str] = None,
+        ocr_engine: str = "wcocr",
+        wxocr_weixin_install_path: Optional[str] = None, 
+        wxocr_plugin_path: Optional[str] = None
+    ):
         """
         Args:
             background:   True 时使用后台模式（通过 SendMessage 发送虚拟鼠标/键盘消息，
