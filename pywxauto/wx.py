@@ -50,6 +50,11 @@ except ImportError:
     wcocr = None
 
 
+# ---- 日志配置 ----
+logging.basicConfig(level=logging.INFO, format="%(asctime)s [%(levelname)s] %(message)s")
+logger = logging.getLogger(__name__)
+
+
 # ======================================================================
 # 模块: _state
 # ======================================================================
@@ -2175,9 +2180,6 @@ pywxauto 窗口类模块。
 """
 
 
-logger = logging.getLogger(__name__)
-
-
 class WeixinWindow:
     """
     微信窗口基类，封装通用的窗口操作。
@@ -3378,9 +3380,6 @@ pywxauto 会话模块。
 """
 
 
-logger = logging.getLogger(__name__)
-
-
 def _parse_session_name(raw: str, session: "Session | None" = None) -> "SessionItem":
     """
     解析会话 ListItem 的 Name 属性。
@@ -4301,9 +4300,6 @@ pywxauto 朋友圈模块。
 
 包含 FriendCircle 和 Moment 类。
 """
-
-
-logger = logging.getLogger(__name__)
 
 
 class Moment:
@@ -5561,9 +5557,6 @@ pywxauto 文件管理器模块。
 """
 
 
-logger = logging.getLogger(__name__)
-
-
 @dataclass
 class ChatFile:
     """聊天文件信息（来自"聊天文件"管理器窗口）"""
@@ -6181,9 +6174,6 @@ pywxauto 聊天模块。
 
 包含 Chat（主窗口聊天区域）和 SeparateChat（独立窗口聊天）类。
 """
-
-
-logger = logging.getLogger(__name__)
 
 
 class Chat:
@@ -11911,9 +11901,6 @@ class SeparateChat(Chat, WeixinWindow):
 # ---- 从子模块导入 ----
 
 
-logging.basicConfig(level=logging.INFO, format="%(asctime)s [%(levelname)s] %(message)s")
-logger = logging.getLogger(__name__)
-
 # ---- 从拆分模块导入业务类 ----
 
 
@@ -11933,7 +11920,7 @@ class Weixin(WeixinWindow):
 
     def __init__(
         self, 
-        auto_login: bool = False, 
+        auto_login: bool = True, 
         login_timeout: float = 0,
         background: bool = False, 
         idle_wait: float = 0, 
@@ -11984,7 +11971,7 @@ class Weixin(WeixinWindow):
         self.auto_login = auto_login
         self.login_timeout = login_timeout
         self.version = get_wechat_version(4)
-        self.install_path = install_path or get_wechat_install_path()
+        self.install_path = install_path or get_weixin_install_path()
         self._ee = EventEmitter()
 
         ensure_narrator_registry()
@@ -12062,18 +12049,58 @@ class Weixin(WeixinWindow):
         return False
 
     def _ensure_running(self) -> None:
+        # 主窗口已存在，直接返回
         if self.find_wechat_window():
             return
 
+        # 检查是否已有登录窗口（微信已启动但未登录）
+        login = Login()
+        if login.exists:
+            if self.auto_login:
+                logger.info(f"检测到已有登录窗口，自动登录: {login.nickname}")
+                login.activate()
+                login.enter(timeout=self.login_timeout or 30)
+            else:
+                logger.info("检测到已有登录窗口，等待手动登录...")
+                self._wait_for_main_window()
+            return
+
+        # 尝试快捷键唤醒（微信可能在后台/托盘）
         self.shortcut("显示窗口")
         if self.is_exists_window(timeout=3, interval=0.1):
-            return 
+            return
 
+        # 启动微信进程
         subprocess.Popen([f"{self.install_path}\\Weixin.exe"])
-        if self.is_exists_window(timeout=self.login_timeout, interval=0.1):
-            return 
 
-        raise LoginError("微信启动超时，请手动登录后重试")
+        # 等待登录窗口或主窗口出现
+        deadline = time.monotonic() + max(self.login_timeout, 30)
+        while time.monotonic() < deadline:
+            if self.find_wechat_window():
+                return
+            if login.exists:
+                break
+            time.sleep(0.5)
+        else:
+            raise LoginError("微信启动超时，未检测到登录窗口或主窗口")
+
+        # 登录窗口已出现，执行自动登录
+        if self.auto_login:
+            logger.info(f"检测到登录窗口，自动登录: {login.nickname}")
+            login.activate()
+            login.enter(timeout=self.login_timeout or 30)
+        else:
+            logger.info("检测到登录窗口，等待手动登录...")
+            self._wait_for_main_window()
+
+    def _wait_for_main_window(self) -> None:
+        """等待用户手动登录，直到主窗口出现或超时"""
+        deadline = time.monotonic() + max(self.login_timeout, 30)
+        while time.monotonic() < deadline:
+            if self.find_wechat_window():
+                return
+            time.sleep(1)
+        raise LoginError("等待登录超时，请手动登录后重试")
 
     @property
     def is_online(self) -> bool:
