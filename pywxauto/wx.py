@@ -1288,9 +1288,9 @@ def send_keys(control, text: str) -> None:
     """
     if not background:
         if control is None:
-            auto.SendKeys(text)
+            auto.SendKeys(text, interval=0)
         else:
-            control.SendKeys(text)
+            control.SendKeys(text, interval=0)
     else:
         # 后台模式下，组合键必须使用 auto.SendKeys 发送，
         # 因为 WM_KEYDOWN 无法可靠模拟修饰键组合
@@ -1298,7 +1298,7 @@ def send_keys(control, text: str) -> None:
         has_modifier = any(tok in text.lower() for tok in _MOD_TOKENS)
 
         if has_modifier:
-            auto.SendKeys(text)
+            auto.SendKeys(text, interval=0)
         else:
             hwnd = 0
             if control is not None:
@@ -1488,7 +1488,7 @@ def send_shortcut(text: str) -> None:
         send_shortcut("{Enter}")   # 回车
         send_shortcut("{Ctrl}z")   # 撤销
     """
-    auto.SendKeys(text)
+    auto.SendKeys(text, interval=0)
 
 def select_all() -> None:
     """全选（Ctrl+A）"""
