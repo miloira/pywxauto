@@ -26,6 +26,7 @@ REQUIRED = [
     "requests==2.32.5",
     "pyee==13.0.1",
     "rapidocr==3.8.1",
+    "onnxruntime==1.25.1",
     "windows-capture==2.0.0",
 ]
 

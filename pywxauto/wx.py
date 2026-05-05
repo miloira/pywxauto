@@ -11902,7 +11902,26 @@ class SeparateChat(Chat, WeixinWindow):
 
 
 # ---- 从拆分模块导入业务类 ----
+import psutil
 
+def find_process(name: str) -> list[dict]:
+    """
+    查询指定名称的进程信息（使用 psutil）。
+
+    Args:
+        name: 进程名，如 "Weixin.exe"
+
+    Returns:
+        进程列表，每项包含 pid 和 name
+    """
+    processes = []
+    for proc in psutil.process_iter(["pid", "name"]):
+        try:
+            if proc.info["name"] and proc.info["name"].lower() == name.lower():
+                processes.append({"name": proc.info["name"], "pid": proc.info["pid"]})
+        except (psutil.NoSuchProcess, psutil.AccessDenied):
+            continue
+    return processes
 
 class Weixin(WeixinWindow):
 
@@ -11959,14 +11978,6 @@ class Weixin(WeixinWindow):
         if ocr_engine not in ("wcocr", "rapidocr"):
             raise ValueError(f"ocr_engine 参数必须为 'wcocr' 或 'rapidocr'，当前: {ocr_engine!r}")
 
-        self._ocr_engine = ocr_engine
-        if self._ocr_engine == "wcocr":
-            self.wxocr_weixin_install_path = wxocr_weixin_install_path or get_wechat_install_path(4)
-            self.wxocr_plugin_path = wxocr_plugin_path or get_wechat_wxocr_path()
-            wcocr.init(self.wxocr_plugin_path, self.wxocr_weixin_install_path)
-        else:
-            self._rapid_ocr = RapidOCR()
-
         self.version = get_wechat_version(4)
         self.install_path = install_path or get_weixin_install_path()
         self._ee = EventEmitter()
@@ -11980,6 +11991,15 @@ class Weixin(WeixinWindow):
             RegexName=self.WINDOW_REGEX,
             searchDepth=1
         )
+
+        self._ocr_engine = ocr_engine
+        if self._ocr_engine == "wcocr":
+            self.wxocr_weixin_install_path = wxocr_weixin_install_path or get_wechat_install_path(4)
+            self.wxocr_plugin_path = wxocr_plugin_path or get_wechat_wxocr_path()
+            wcocr.init(self.wxocr_plugin_path, self.wxocr_weixin_install_path)
+        else:
+            self._rapid_ocr = RapidOCR()
+
         self.resize = resize
         hwnd = self._win.NativeWindowHandle
         if resize and hwnd:
@@ -11987,7 +12007,6 @@ class Weixin(WeixinWindow):
             x, y = rect[0], rect[1]
             ctypes.windll.user32.MoveWindow(hwnd, x, y,
                                             self.WINDOW_WIDTH, self.WINDOW_HEIGHT, True)
-        self._main_offscreen_rect = None
         if background and hwnd:
             rect = win32gui.GetWindowRect(hwnd)
             self._main_offscreen_rect = (rect[0], rect[1],
@@ -12034,6 +12053,27 @@ class Weixin(WeixinWindow):
         return False
 
     def _ensure_running(self) -> None:
+        if not find_process("Weixin.exe"):
+            # 没有任何窗口，启动微信进程
+            subprocess.Popen([f"{self.install_path}\\Weixin.exe"])
+
+            # 等待登录窗口或主窗口出现
+            deadline = time.monotonic() + 30
+            login = Login()
+            while time.monotonic() < deadline:
+                if self.find_wechat_window():
+                    return
+                if login.exists:
+                    break
+                time.sleep(0.5)
+            else:
+                raise LoginError("微信启动超时，未检测到登录窗口或主窗口")
+
+            # 登录窗口已出现
+            self._handle_login(login)
+
+            return 
+
         # 主窗口已存在，直接返回
         if self.find_wechat_window():
             return
@@ -12046,25 +12086,8 @@ class Weixin(WeixinWindow):
 
         # 尝试快捷键唤醒（微信可能在后台/托盘）
         self.shortcut("显示窗口")
-        if self.is_exists_window(timeout=1, interval=0.1):
+        if self.is_exists_window(timeout=2, interval=0.1):
             return
-
-        # 启动微信进程
-        subprocess.Popen([f"{self.install_path}\\Weixin.exe"])
-
-        # 等待登录窗口或主窗口出现
-        deadline = time.monotonic() + 30
-        while time.monotonic() < deadline:
-            if self.find_wechat_window():
-                return
-            if login.exists:
-                break
-            time.sleep(0.5)
-        else: 
-            raise LoginError("微信启动超时，未检测到登录窗口或主窗口")
-
-        # 登录窗口已出现
-        self._handle_login(login)
 
     def _handle_login(self, login: "Login") -> None:
         """
