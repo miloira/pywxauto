@@ -31,7 +31,6 @@ import time
 import urllib
 
 from PIL import Image
-from PIL import Image # pip install pillow
 from pyee.base import EventEmitter
 from rapidocr import RapidOCR
 from windows_capture import WindowsCapture, Frame, InternalCaptureControl # pip install windows-capture
