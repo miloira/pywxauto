@@ -7292,6 +7292,8 @@ class Chat:
 
         input_wx.click(send_btn)
 
+        time.sleep(0.1)
+
         # 6. 验证面板已关闭（表示发送成功）
         check_list = self._win.ListControl(
             ClassName=self.FAV_DETAIL_LIST_CLASS,
@@ -7366,7 +7368,6 @@ class Chat:
         try:
             # 1. 打开表情面板
             self._open_emoji_panel()
-            time.sleep(0.3)
 
             popover = self._get_emoji_popover()
 
@@ -7374,12 +7375,11 @@ class Chat:
                 # 搜索表情模式
                 # 2. 点击"搜索表情"标签
                 self._click_emoji_search_tab(popover)
-                time.sleep(0.3)
 
                 # 3. 在搜索框中输入关键词
                 search_edit = self._find_emoji_search_edit(popover)
                 input_wx.click(search_edit)
-                time.sleep(0.2)
+
                 # 清空已有内容后键盘输入，确保触发搜索
                 input_wx.send_keys(search_edit, "{Ctrl}a")
                 input_wx.send_keys(search_edit, keyword)
@@ -7392,18 +7392,16 @@ class Chat:
                 # 自定义表情模式
                 # 2. 点击"自定义表情"标签
                 self._click_custom_emoji_tab(popover)
-                time.sleep(0.3)
 
                 # 3. 在自定义表情列表中点击第 index 个表情
                 popover = self._get_emoji_popover()
                 self._click_custom_emoji_item(popover, index)
 
-            time.sleep(0.5)
-
             # 验证表情面板已关闭（表示发送成功）
             emoji_popover = auto.WindowControl(
                 ClassName=self.EMOJI_POPOVER_CLASS,
                 AutomationId=self.EMOJI_POPOVER_ID,
+                searchDepth=1
             )
             if emoji_popover.Exists(maxSearchSeconds=1):
                 self._close_emoji_panel()
@@ -7424,6 +7422,7 @@ class Chat:
         popover = auto.WindowControl(
             ClassName=self.EMOJI_POPOVER_CLASS,
             AutomationId=self.EMOJI_POPOVER_ID,
+            searchDepth=1
         )
         if not popover.Exists(maxSearchSeconds=3):
             raise RuntimeError("未找到表情弹窗")
@@ -7440,6 +7439,7 @@ class Chat:
         emoji_popover = auto.WindowControl(
             ClassName=self.EMOJI_POPOVER_CLASS,
             AutomationId=self.EMOJI_POPOVER_ID,
+            searchDepth=1
         )
         if emoji_popover.Exists(maxSearchSeconds=0.5):
             return
@@ -7447,6 +7447,7 @@ class Chat:
         # 查找工具栏
         toolbar = self._win.ToolBarControl(
             AutomationId="tool_bar_accessible",
+            searchDepth=16
         )
         if not toolbar.Exists(maxSearchSeconds=2):
             raise RuntimeError("未找到聊天工具栏")
@@ -7461,7 +7462,6 @@ class Chat:
             raise RuntimeError("未找到'发送表情'按钮")
 
         input_wx.click(emoji_btn)
-        time.sleep(0.5)
 
         # 等待表情弹窗出现
         if not emoji_popover.Exists(maxSearchSeconds=5):
@@ -7546,7 +7546,10 @@ class Chat:
         # 收集所有 ListItemControl（即表情项）
         items = result_doc.GetChildren()
         emotion_items = []
-        for child in items:
+        for i, child in enumerate(items):
+            if i == 0:
+                if not child.Exists(maxSearchSeconds=10):
+                    raise RuntimeError("未找到任何表情")
             self._collect_emotion_items(child, emotion_items)
 
         if not emotion_items:
@@ -7600,12 +7603,7 @@ class Chat:
         )
         if not custom_tab.Exists(maxSearchSeconds=2):
             raise RuntimeError("未找到'自定义表情'标签")
-
-        rect = custom_tab.BoundingRectangle
-        auto.Click(
-            int(rect.left + rect.width() / 2),
-            int(rect.top + rect.height() / 2),
-        )
+        input_wx.click(custom_tab)
 
     def _click_custom_emoji_item(
         self, popover: auto.WindowControl, index: int,
@@ -7637,21 +7635,7 @@ class Chat:
                 f"第 {index} 个自定义表情不存在，"
                 f"共 {len(emoji_items)} 个自定义表情"
             )
-
-        target = emoji_items[index - 1]
-        try:
-            target.GetInvokePattern().Invoke()
-        except Exception:
-            rect = target.BoundingRectangle
-            if rect.width() > 0 and rect.height() > 0:
-                auto.Click(
-                    int(rect.left + rect.width() / 2),
-                    int(rect.top + rect.height() / 2),
-                )
-            else:
-                raise RuntimeError(
-                    f"第 {index} 个自定义表情不可见（offscreen），无法点击"
-                )
+        input_wx.click(emoji_items[index - 1])
 
     # -- 发送名片 --
     # 聊天信息按钮: ButtonControl, Name="聊天信息", ClassName="mmui::XButton",
