@@ -2347,7 +2347,7 @@ class Login(WeixinWindow):
     @property
     def exists(self) -> bool:
         """登录窗口是否存在"""
-        return self._win.Exists(maxSearchSeconds=3)
+        return self._win.Exists(0, 0)
 
     def _ensure_exists(self) -> None:
         if not self._win.Exists(maxSearchSeconds=3):
@@ -11920,8 +11920,7 @@ class Weixin(WeixinWindow):
 
     def __init__(
         self, 
-        auto_login: bool = True, 
-        login_timeout: float = 0,
+        on_login: "callable | None" = None,
         background: bool = False, 
         idle_wait: float = 0, 
         lock_input: bool = False, 
@@ -11968,11 +11967,11 @@ class Weixin(WeixinWindow):
         else:
             self._rapid_ocr = RapidOCR()
 
-        self.auto_login = auto_login
-        self.login_timeout = login_timeout
         self.version = get_wechat_version(4)
         self.install_path = install_path or get_weixin_install_path()
         self._ee = EventEmitter()
+        self._on_login = on_login
+        self._main_offscreen_rect = None
 
         ensure_narrator_registry()
         self._ensure_running()
@@ -12017,33 +12016,19 @@ class Weixin(WeixinWindow):
         self._main_offscreen_rect = None
 
     @staticmethod
-    def find_wechat_window() -> list[int]:
-        result = []
-
-        def callback(hwnd, _) -> None:
-            if win32gui.IsWindowVisible(hwnd):
-                title = win32gui.GetWindowText(hwnd)
-                # 关键：微信窗口标题通常包含“微信”
-                if title.lower() in ["微信", "wechat", "weixin"]:
-                    result.append(hwnd)
-
-        win32gui.EnumWindows(callback, None)
-        return result
-
-    @staticmethod
-    def _is_process_running(name: str) -> bool:
-        output = subprocess.check_output(
-            ["tasklist", "/FI", f"IMAGENAME eq {name}", "/NH"],
-            text=True, creationflags=0x08000000,
+    def find_wechat_window() -> bool:
+        """检查微信主窗口（mmui::MainWindow）是否存在"""
+        win = auto.WindowControl(
+            ClassName="mmui::MainWindow",
+            searchDepth=1,
         )
-        return name.lower() in output.lower()
+        return win.Exists(0, 0)
 
-    @staticmethod
-    def is_exists_window(timeout: float = 30, interval: float = 0.1) -> bool:
-        # 检测微信窗口是否存在
+    def is_exists_window(self, timeout: float = 30, interval: float = 0.1) -> bool:
+        """轮询检测微信主窗口是否存在"""
         deadline = time.monotonic() + timeout
         while time.monotonic() < deadline:
-            if Weixin.find_wechat_window():
+            if self.find_wechat_window():
                 return True
             time.sleep(interval)
         return False
@@ -12056,51 +12041,60 @@ class Weixin(WeixinWindow):
         # 检查是否已有登录窗口（微信已启动但未登录）
         login = Login()
         if login.exists:
-            if self.auto_login:
-                logger.info(f"检测到已有登录窗口，自动登录: {login.nickname}")
-                login.activate()
-                login.enter(timeout=self.login_timeout or 30)
-            else:
-                logger.info("检测到已有登录窗口，等待手动登录...")
-                self._wait_for_main_window()
+            self._handle_login(login)
             return
 
         # 尝试快捷键唤醒（微信可能在后台/托盘）
         self.shortcut("显示窗口")
-        if self.is_exists_window(timeout=3, interval=0.1):
+        if self.is_exists_window(timeout=1, interval=0.1):
             return
 
         # 启动微信进程
         subprocess.Popen([f"{self.install_path}\\Weixin.exe"])
 
         # 等待登录窗口或主窗口出现
-        deadline = time.monotonic() + max(self.login_timeout, 30)
+        deadline = time.monotonic() + 30
         while time.monotonic() < deadline:
             if self.find_wechat_window():
                 return
             if login.exists:
                 break
             time.sleep(0.5)
-        else:
+        else: 
             raise LoginError("微信启动超时，未检测到登录窗口或主窗口")
 
-        # 登录窗口已出现，执行自动登录
-        if self.auto_login:
-            logger.info(f"检测到登录窗口，自动登录: {login.nickname}")
-            login.activate()
-            login.enter(timeout=self.login_timeout or 30)
-        else:
-            logger.info("检测到登录窗口，等待手动登录...")
-            self._wait_for_main_window()
+        # 登录窗口已出现
+        self._handle_login(login)
 
-    def _wait_for_main_window(self) -> None:
-        """等待用户手动登录，直到主窗口出现或超时"""
-        deadline = time.monotonic() + max(self.login_timeout, 30)
-        while time.monotonic() < deadline:
-            if self.find_wechat_window():
-                return
-            time.sleep(1)
-        raise LoginError("等待登录超时，请手动登录后重试")
+    def _handle_login(self, login: "Login") -> None:
+        """
+        处理登录窗口。
+
+        如果传入了 on_login 回调，调用回调让用户处理登录；
+        否则等待用户手动操作（60秒超时）。
+        """
+        nickname = login.nickname
+        logger.info(f"检测到登录窗口: {nickname}")
+
+        # 恢复并激活登录窗口（可能处于最小化状态）
+        if login.is_minimized:
+            login.restore()
+
+        login.activate()
+
+        if self._on_login:
+            self._on_login(login)
+        else:
+            # 等待用户手动登录
+            logger.info("等待手动登录...")
+            for _ in range(600):
+                if self.find_wechat_window():
+                    break
+                time.sleep(0.1)
+
+        # 验证登录结果
+        if not self.find_wechat_window():
+            raise LoginError("登录超时，主窗口未出现")
 
     @property
     def is_online(self) -> bool:
