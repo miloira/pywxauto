@@ -1570,7 +1570,7 @@ class SenderType(Enum):
     SYSTEM = "system"
     SELF = "self"
     FRIEND = "friend"
-    OTHER = "other"
+    UNKNOWN = "unknown"
 
 
 class MessageStatus(Enum):
@@ -1586,7 +1586,7 @@ class MessageStatus(Enum):
 class Message:
     """聊天消息基类"""
 
-    def __init__(self, *, sender: str = "", sender_type: SenderType = SenderType.OTHER,
+    def __init__(self, *, sender: str = "", sender_type: SenderType = SenderType.UNKNOWN,
                  content: str = "", raw_name: str = "",
                  status: MessageStatus = MessageStatus.UNKNOWN,
                  runtime_id: tuple = (), bubble_rect: tuple = ()):
@@ -6286,6 +6286,10 @@ class Chat:
     _FILE_CLASS_NAMES = {"mmui::ChatFileItemView"}
     _IMAGE_CLASS_NAMES = {"mmui::ChatImageItemView"}
     _VIDEO_CLASS_NAMES = {"mmui::ChatVideoItemView"}
+    _EMOTION_CLASS_NAMES = {"mmui::ChatEmojiItemView", "mmui::ChatBubbleReferItemView"}
+    # 文件消息在传输中/失败时 ClassName 为 ChatBubbleItemView，
+    # 需要通过 Name 以 "文件\n" 开头来区分
+    _FILE_BUBBLE_CLASS_NAMES = {"mmui::ChatFileItemView", "mmui::ChatBubbleItemView"}
 
     def _find_last_self_message_ctrl(
         self, class_names: set[str],
@@ -6298,9 +6302,6 @@ class Chat:
         lc = self._message_list
         if not lc.Exists(maxSearchSeconds=2):
             return None
-
-        list_rect = lc.BoundingRectangle
-        list_center_x = (list_rect.left + list_rect.right) // 2
 
         # 获取窗口句柄，用于 PrintWindow 截图
         hwnd = self._win.NativeWindowHandle or 0
@@ -6318,7 +6319,7 @@ class Chat:
         # 倒序查找自己发的
         for ctrl in reversed(candidates):
             sender, sender_type, _ = self._detect_sender(
-                ctrl, list_center_x, self.current_name or "对方", hwnd,
+                hwnd, ctrl, self.current_name or "对方",
             )
             if sender_type == SenderType.SELF:
                 return ctrl
@@ -6341,6 +6342,82 @@ class Chat:
         if name.startswith(f"发送中{sep}"):
             return MessageStatus.SENDING
         return MessageStatus.SENT
+
+    def _check_last_message_status(self, timeout: float = 5) -> MessageStatus:
+        """
+        检测最后一条自己发的消息的发送状态（自动识别消息类型）。
+
+        从消息列表中倒序查找最后一条自己发的消息，根据其 ClassName 和 Name
+        判断消息类型，然后调用对应的状态检测方法。
+
+        适用于发送收藏等无法预知消息类型的场景。
+
+        Args:
+            timeout: 轮询超时时间（秒），默认 5 秒
+
+        Returns:
+            MessageStatus 发送状态
+        """
+        lc = self._message_list
+        if not lc.Exists(maxSearchSeconds=2):
+            return MessageStatus.UNKNOWN
+
+        hwnd = self._win.NativeWindowHandle or 0
+
+        # 收集所有消息控件
+        candidates: list[auto.Control] = []
+        for ctrl, _ in auto.WalkControl(lc):
+            if ctrl.ControlType != auto.ControlType.ListItemControl:
+                continue
+            if not ctrl.Name:
+                continue
+            candidates.append(ctrl)
+
+        # 倒序查找最后一条自己发的消息
+        for ctrl in reversed(candidates):
+            sender, sender_type, _ = self._detect_sender(
+                hwnd, ctrl, self.current_name or "对方",
+            )
+            if sender_type != SenderType.SELF:
+                continue
+
+            cls = ctrl.ClassName or ""
+            name = ctrl.Name
+
+            # 根据 ClassName 和 Name 判断类型并调用对应检测
+            if cls == "mmui::ChatTextItemView":
+                return self.check_text_message_status(timeout=timeout)
+            if cls == "mmui::ChatImageItemView":
+                return self.check_image_message_status(timeout=timeout)
+            if cls == "mmui::ChatVideoItemView":
+                return self.check_video_message_status(timeout=timeout)
+            if cls == "mmui::ChatFileItemView":
+                return self.check_file_message_status(timeout=timeout)
+            if cls == "mmui::ChatEmojiItemView":
+                return self.check_emotion_message_status(timeout=timeout)
+
+            # ChatBubbleItemView — 通用气泡
+            if cls == "mmui::ChatBubbleItemView":
+                if name.startswith("文件\n"):
+                    return self.check_file_message_status(timeout=timeout)
+                # 其他气泡类型（链接、位置等）无传输状态，直接返回 SENT
+                return MessageStatus.SENT
+
+            # ChatBubbleReferItemView — 图片/视频/表情
+            if cls == "mmui::ChatBubbleReferItemView":
+                if self._IMAGE_NAME_RE.match(name):
+                    return self.check_image_message_status(timeout=timeout)
+                if self._VIDEO_NAME_RE.match(name):
+                    return self.check_video_message_status(timeout=timeout)
+                if self._EMOTION_NAME_RE.match(name):
+                    return self.check_emotion_message_status(timeout=timeout)
+                # 其他 refer 类型
+                return self._check_status_by_prefix(name, space_sep=True)
+
+            # 未知类型，用通用前缀检测
+            return self._check_status_by_prefix(name, space_sep=True)
+
+        return MessageStatus.UNKNOWN
 
     def check_text_message_status(
         self, content: str = "", timeout: float = 0, interval: float = 0.5,
@@ -6380,26 +6457,335 @@ class Chat:
                 return status
             time.sleep(interval)
 
-    def check_file_message_status(self) -> MessageStatus:
-        """检测最后一条自己发的文件消息的发送状态。"""
-        ctrl = self._find_last_self_message_ctrl(self._FILE_CLASS_NAMES)
-        if not ctrl:
-            return MessageStatus.UNKNOWN
-        return self._check_status_by_prefix(ctrl.Name, space_sep=False)
+    def check_file_message_status(self, timeout: float = 0, interval: float = 1.0) -> MessageStatus:
+        """
+        检测最后一条自己发的文件消息的发送状态。
 
-    def check_image_message_status(self) -> MessageStatus:
-        """检测最后一条自己发的图片消息的发送状态。"""
-        ctrl = self._find_last_self_message_ctrl(self._IMAGE_CLASS_NAMES)
-        if not ctrl:
-            return MessageStatus.UNKNOWN
-        return self._check_status_by_prefix(ctrl.Name, space_sep=True)
+        文件消息的 Name 格式（换行分隔）：
+        - 发送中:   "文件\\n进度: 25%\\n{文件名}\\n{来源}"
+        - 发送失败: "文件\\n进度: 0%\\n{文件名}\\n发送中断\\n{来源}"
+        - 发送成功: "文件\\n{文件名}\\n{来源}" （无"进度"行）
 
-    def check_video_message_status(self) -> MessageStatus:
-        """检测最后一条自己发的视频消息的发送状态。"""
-        ctrl = self._find_last_self_message_ctrl(self._VIDEO_CLASS_NAMES)
-        if not ctrl:
+        Args:
+            timeout:  超时时间（秒）。大于 0 时，若状态为 SENDING 会轮询等待，
+                      直到状态变为 SENT/FAILED 或超时。默认 0 不等待。
+            interval: 轮询间隔（秒），默认 1.0。
+        """
+        deadline = time.monotonic() + timeout if timeout > 0 else 0
+
+        while True:
+            ctrl = self._find_last_self_file_ctrl()
+            if not ctrl:
+                status = MessageStatus.UNKNOWN
+            else:
+                status = self._check_file_status_by_content(ctrl.Name)
+
+            if not deadline or status != MessageStatus.SENDING:
+                return status
+            if time.monotonic() >= deadline:
+                return status
+            time.sleep(interval)
+
+    def _find_last_self_file_ctrl(self) -> Optional[auto.Control]:
+        """
+        从消息列表中倒序查找最后一条自己发的文件消息控件。
+
+        文件消息可能是 ChatFileItemView（发送完成后）或
+        ChatBubbleItemView（传输中/失败时），通过 Name 以 "文件\\n" 开头来区分。
+        """
+        lc = self._message_list
+        if not lc.Exists(maxSearchSeconds=2):
+            return None
+
+        hwnd = self._win.NativeWindowHandle or 0
+
+        candidates: list[auto.Control] = []
+        for ctrl, _ in auto.WalkControl(lc):
+            if ctrl.ControlType != auto.ControlType.ListItemControl:
+                continue
+            if not ctrl.Name:
+                continue
+            cls = ctrl.ClassName or ""
+            if cls not in self._FILE_BUBBLE_CLASS_NAMES:
+                continue
+            # ChatBubbleItemView 是通用气泡，需要通过 Name 过滤文件消息
+            if cls == "mmui::ChatBubbleItemView" and not ctrl.Name.startswith("文件\n"):
+                continue
+            candidates.append(ctrl)
+
+        for ctrl in reversed(candidates):
+            sender, sender_type, _ = self._detect_sender(
+                hwnd, ctrl, self.current_name or "对方",
+            )
+            if sender_type == SenderType.SELF:
+                return ctrl
+        return None
+
+    # 文件消息 Name 正则匹配
+    # 发送中:   "文件\n进度: 25%\n{文件名}\n{来源}"
+    # 发送失败: "文件\n进度: 0%\n{文件名}\n发送中断\n{来源}"
+    # 发送成功: "文件\n{文件名}\n{来源}"
+    _FILE_SENDING_RE = re.compile(r"^文件\n进度[:：]\s*\d+%\n.+\n(?!.*发送中断)", re.DOTALL)
+    _FILE_FAILED_RE = re.compile(r"^文件\n进度[:：]\s*\d+%\n.+\n发送中断\n", re.DOTALL)
+    _FILE_SENT_RE = re.compile(r"^文件\n(?!进度[:：])")
+
+    @staticmethod
+    def _check_file_status_by_content(name: str) -> MessageStatus:
+        """
+        通过正则匹配文件消息 Name 判断发送状态。
+
+        格式：
+        - 发送中:   "文件\\n进度: {N}%\\n{文件名}\\n{来源}"
+        - 发送失败: "文件\\n进度: 0%\\n{文件名}\\n发送中断\\n{来源}"
+        - 发送成功: "文件\\n{文件名}\\n{来源}" （无"进度"行）
+        """
+        if not name:
             return MessageStatus.UNKNOWN
-        return self._check_status_by_prefix(ctrl.Name, space_sep=True)
+        if Chat._FILE_FAILED_RE.match(name):
+            return MessageStatus.FAILED
+        if Chat._FILE_SENDING_RE.match(name):
+            return MessageStatus.SENDING
+        if Chat._FILE_SENT_RE.match(name):
+            return MessageStatus.SENT
+        return MessageStatus.UNKNOWN
+
+    def check_image_message_status(self, timeout: float = 0, interval: float = 0.5) -> MessageStatus:
+        """
+        检测最后一条自己发的图片消息的发送状态。
+
+        图片消息的 Name 格式（空格分隔前缀）：
+        - 发送中:   "发送中 图片"
+        - 发送失败: "发送失败 图片"
+        - 发送成功: "图片"
+
+        ClassName 为 mmui::ChatImageItemView 或 mmui::ChatBubbleReferItemView。
+
+        Args:
+            timeout:  超时时间（秒）。大于 0 时，若状态为 SENDING 会轮询等待，
+                      直到状态变为 SENT/FAILED 或超时。默认 0 不等待。
+            interval: 轮询间隔（秒），默认 0.5。
+        """
+        deadline = time.monotonic() + timeout if timeout > 0 else 0
+
+        while True:
+            ctrl = self._find_last_self_image_ctrl()
+            if not ctrl:
+                status = MessageStatus.UNKNOWN
+            else:
+                status = self._check_status_by_prefix(ctrl.Name, space_sep=True)
+
+            if not deadline or status != MessageStatus.SENDING:
+                return status
+            if time.monotonic() >= deadline:
+                return status
+            time.sleep(interval)
+
+    # 图片消息 Name 匹配正则（用于从 ChatBubbleReferItemView 中过滤图片消息）
+    _IMAGE_NAME_RE = re.compile(r"^(?:发送失败\s+|发送中\s+)?图片$")
+
+    def _find_last_self_image_ctrl(self) -> Optional[auto.Control]:
+        """
+        从消息列表中倒序查找最后一条自己发的图片消息控件。
+
+        图片消息可能是 ChatImageItemView 或 ChatBubbleReferItemView，
+        通过 Name 匹配 "图片" / "发送中 图片" / "发送失败 图片" 来区分。
+        """
+        lc = self._message_list
+        if not lc.Exists(maxSearchSeconds=2):
+            return None
+
+        hwnd = self._win.NativeWindowHandle or 0
+
+        target_classes = {"mmui::ChatImageItemView", "mmui::ChatBubbleReferItemView"}
+        candidates: list[auto.Control] = []
+        for ctrl, _ in auto.WalkControl(lc):
+            if ctrl.ControlType != auto.ControlType.ListItemControl:
+                continue
+            if not ctrl.Name:
+                continue
+            cls = ctrl.ClassName or ""
+            if cls not in target_classes:
+                continue
+            # ChatBubbleReferItemView 是通用类型，需要通过 Name 过滤图片消息
+            if cls == "mmui::ChatBubbleReferItemView":
+                if not self._IMAGE_NAME_RE.match(ctrl.Name):
+                    continue
+            candidates.append(ctrl)
+
+        for ctrl in reversed(candidates):
+            sender, sender_type, _ = self._detect_sender(
+                hwnd, ctrl, self.current_name or "对方",
+            )
+            if sender_type == SenderType.SELF:
+                return ctrl
+        return None
+
+    def check_emotion_message_status(self, timeout: float = 0, interval: float = 0.5) -> MessageStatus:
+        """
+        检测最后一条自己发的表情消息的发送状态。
+
+        表情消息的 Name 格式（空格分隔前缀）：
+        - 发送中:   "发送中 动画表情" 或 "发送中 动画表情 [xxx]"
+        - 发送失败: "发送失败 动画表情" 或 "发送失败 动画表情 [xxx]"
+        - 发送成功: "动画表情" 或 "动画表情 [xxx]"
+
+        ClassName 为 mmui::ChatEmojiItemView 或 mmui::ChatBubbleReferItemView。
+
+        Args:
+            timeout:  超时时间（秒）。大于 0 时，若状态为 SENDING 会轮询等待，
+                      直到状态变为 SENT/FAILED 或超时。默认 0 不等待。
+            interval: 轮询间隔（秒），默认 0.5。
+        """
+        deadline = time.monotonic() + timeout if timeout > 0 else 0
+
+        while True:
+            ctrl = self._find_last_self_emotion_ctrl()
+            if not ctrl:
+                status = MessageStatus.UNKNOWN
+            else:
+                status = self._check_status_by_prefix(ctrl.Name, space_sep=True)
+
+            if not deadline or status != MessageStatus.SENDING:
+                return status
+            if time.monotonic() >= deadline:
+                return status
+            time.sleep(interval)
+
+    # 表情消息 Name 匹配正则（用于从 ChatBubbleReferItemView 中过滤表情消息）
+    _EMOTION_NAME_RE = re.compile(r"^(?:发送失败\s+|发送中\s+)?动画表情")
+
+    def _find_last_self_emotion_ctrl(self) -> Optional[auto.Control]:
+        """
+        从消息列表中倒序查找最后一条自己发的表情消息控件。
+
+        表情消息可能是 ChatEmojiItemView 或 ChatBubbleReferItemView，
+        通过 Name 包含 "动画表情" 来区分。
+        """
+        lc = self._message_list
+        if not lc.Exists(maxSearchSeconds=2):
+            return None
+
+        hwnd = self._win.NativeWindowHandle or 0
+
+        candidates: list[auto.Control] = []
+        for ctrl, _ in auto.WalkControl(lc):
+            if ctrl.ControlType != auto.ControlType.ListItemControl:
+                continue
+            if not ctrl.Name:
+                continue
+            cls = ctrl.ClassName or ""
+            if cls not in self._EMOTION_CLASS_NAMES:
+                continue
+            # ChatBubbleReferItemView 是通用类型，需要通过 Name 过滤表情消息
+            if cls == "mmui::ChatBubbleReferItemView":
+                if not self._EMOTION_NAME_RE.match(ctrl.Name):
+                    continue
+            candidates.append(ctrl)
+
+        for ctrl in reversed(candidates):
+            sender, sender_type, _ = self._detect_sender(
+                hwnd, ctrl, self.current_name or "对方",
+            )
+            if sender_type == SenderType.SELF:
+                return ctrl
+        return None
+
+    def check_video_message_status(self, timeout: float = 0, interval: float = 1.0) -> MessageStatus:
+        """
+        检测最后一条自己发的视频消息的发送状态。
+
+        视频消息的 Name 格式（空格分隔）：
+        - 发送中:   "视频 进度: {N}%{时长}" 如 "视频 进度: 0%0:02"
+        - 发送失败: "视频 上传 暂停{时长}" 如 "视频 上传 暂停0:02"
+        - 发送成功: "视频" 或 "视频{时长}" 如 "视频0:02"
+
+        ClassName 为 mmui::ChatBubbleReferItemView。
+
+        Args:
+            timeout:  超时时间（秒）。大于 0 时，若状态为 SENDING 会轮询等待，
+                      直到状态变为 SENT/FAILED 或超时。默认 0 不等待。
+            interval: 轮询间隔（秒），默认 1.0。
+        """
+        deadline = time.monotonic() + timeout if timeout > 0 else 0
+
+        while True:
+            ctrl = self._find_last_self_video_ctrl()
+            if not ctrl:
+                status = MessageStatus.UNKNOWN
+            else:
+                status = self._check_video_status_by_content(ctrl.Name)
+
+            if not deadline or status != MessageStatus.SENDING:
+                return status
+            if time.monotonic() >= deadline:
+                return status
+            time.sleep(interval)
+
+    def _find_last_self_video_ctrl(self) -> Optional[auto.Control]:
+        """
+        从消息列表中倒序查找最后一条自己发的视频消息控件。
+
+        视频消息可能是 ChatVideoItemView（发送完成后）或
+        ChatBubbleReferItemView（传输中/失败时），通过 Name 以 "视频" 开头来区分。
+        """
+        lc = self._message_list
+        if not lc.Exists(maxSearchSeconds=2):
+            return None
+
+        hwnd = self._win.NativeWindowHandle or 0
+
+        target_classes = {"mmui::ChatVideoItemView", "mmui::ChatBubbleReferItemView"}
+        candidates: list[auto.Control] = []
+        for ctrl, _ in auto.WalkControl(lc):
+            if ctrl.ControlType != auto.ControlType.ListItemControl:
+                continue
+            if not ctrl.Name:
+                continue
+            cls = ctrl.ClassName or ""
+            if cls not in target_classes:
+                continue
+            # ChatBubbleReferItemView 是通用类型，需要通过 Name 过滤视频消息
+            if cls == "mmui::ChatBubbleReferItemView":
+                if not self._VIDEO_NAME_RE.match(ctrl.Name):
+                    continue
+            candidates.append(ctrl)
+
+        for ctrl in reversed(candidates):
+            sender, sender_type, _ = self._detect_sender(
+                hwnd, ctrl, self.current_name or "对方",
+            )
+            if sender_type == SenderType.SELF:
+                return ctrl
+        return None
+
+    # 视频消息 Name 正则匹配
+    # 发送中:   "视频 进度: 0%0:02"
+    # 发送失败: "视频 上传 暂停0:02"
+    # 发送成功: "视频 0:02" 或 "视频"
+    _VIDEO_NAME_RE = re.compile(r"^视频(?:\s|$)")
+    _VIDEO_SENDING_RE = re.compile(r"^视频\s+进度[:：]\s*\d+%")
+    _VIDEO_FAILED_RE = re.compile(r"^视频\s+上传\s*暂停")
+    _VIDEO_SENT_RE = re.compile(r"^视频(?:\s+\d+:\d+)?$")
+
+    @staticmethod
+    def _check_video_status_by_content(name: str) -> MessageStatus:
+        """
+        通过正则匹配视频消息 Name 判断发送状态。
+
+        格式：
+        - 发送中:   "视频 进度: {N}%{时长}"
+        - 发送失败: "视频 上传 暂停{时长}"
+        - 发送成功: "视频" 或 "视频{时长}"
+        """
+        if not name:
+            return MessageStatus.UNKNOWN
+        if Chat._VIDEO_FAILED_RE.match(name):
+            return MessageStatus.FAILED
+        if Chat._VIDEO_SENDING_RE.match(name):
+            return MessageStatus.SENDING
+        if Chat._VIDEO_SENT_RE.match(name):
+            return MessageStatus.SENT
+        return MessageStatus.UNKNOWN
 
     def _get_input_value(self) -> str:
         """读取输入框当前的 Value"""
@@ -6826,7 +7212,7 @@ class Chat:
         return None
 
     @PIM.guard
-    def send_collection(self, keyword: str) -> bool:
+    def send_collection(self, keyword: str) -> MessageStatus:
         """
         在当前会话中发送收藏内容。
 
@@ -6841,7 +7227,7 @@ class Chat:
             keyword: 搜索关键词，输入到收藏面板的搜索框中。
 
         Returns:
-            True 发送成功
+            MessageStatus 发送状态
 
         Raises:
             ValueError: keyword 为空时抛出
@@ -6912,7 +7298,7 @@ class Chat:
             raise SendError("发送收藏失败，选择面板未关闭")
 
         logger.info("收藏发送成功")
-        return True
+        return self._check_last_message_status()
 
     # -- 发送表情 --
     # 表情按钮: ButtonControl, Name="发送表情(Alt+E)", ClassName="mmui::XButton"
@@ -6949,7 +7335,7 @@ class Chat:
     EMOJI_CUSTOM_ITEM_CLASS = "mmui::FavEmoticonItemView"
 
     @PIM.guard
-    def send_emotion(self, keyword: str = None, index: int = 1) -> bool:
+    def send_emotion(self, keyword: str = None, index: int = 1) -> MessageStatus:
         """
         在当前会话中发送表情。
 
@@ -6962,7 +7348,7 @@ class Chat:
             index: 选择第几个表情，从 1 开始，默认为 1。
 
         Returns:
-            True 发送成功
+            MessageStatus 发送状态
 
         Raises:
             ValueError: index < 1 时抛出
@@ -7021,7 +7407,7 @@ class Chat:
                 raise SendError(f"发送{label}失败，表情面板未关闭")
 
             logger.info("表情发送成功")
-            return True
+            return self.check_emotion_message_status(timeout=5)
 
         except Exception:
             self._close_emoji_panel()
@@ -7641,9 +8027,6 @@ class Chat:
         if not lc.Exists(maxSearchSeconds=2):
             return []
 
-        list_rect = lc.BoundingRectangle
-        list_center_x = (list_rect.left + list_rect.right) // 2
-
         # 获取窗口句柄，用于 PrintWindow 截图
         hwnd = self._win.NativeWindowHandle or 0
 
@@ -7714,7 +8097,7 @@ class Chat:
                 sender, sender_type, bubble_rect = sender_cache[rid]
             else:
                 sender, sender_type, bubble_rect = self._detect_sender(
-                    ctrl, list_center_x, chat_name, hwnd,
+                    hwnd, ctrl, chat_name,
                 )
                 # 写入缓存
                 if sender_cache is not None and rid:
@@ -7783,50 +8166,23 @@ class Chat:
 
     @staticmethod
     def _detect_sender(
-        ctrl, list_center_x: int, chat_name: str,
-        hwnd: int = 0,
+        hwnd: int, ctrl, chat_name: str,
     ) -> tuple[str, SenderType, tuple]:
         """
         判断消息发送者、来源类型，并检测气泡区域坐标。
 
-        策略1: 截图后从左右两侧向内扫描非白色像素，判断头像在哪侧
-        策略2: 通过气泡颜色（绿色/灰色）判断
-        策略3: 通过控件水平位置判断（适用于图片/视频等无气泡消息）
+        通过截图后从左右两侧向内扫描非白色像素，判断头像在哪侧。
+
+        Args:
+            hwnd:      窗口句柄，用于 PrintWindow 截图
+            ctrl:      消息 ListItemControl 控件
+            chat_name: 当前聊天对象名称（用于标记对方消息的 sender）
 
         Returns:
             (sender, sender_type, bubble_rect)
             bubble_rect 为气泡区域屏幕坐标 (left, top, right, bottom)，空元组表示未检测到
         """
-        sender, sender_type, bubble_rect = Chat._detect_sender_by_pixel(
-            ctrl, chat_name, hwnd,
-        )
-        # 像素分析失败时，用控件位置兜底
-        if sender_type == SenderType.OTHER:
-            sender, sender_type = Chat._detect_sender_by_position(
-                ctrl, list_center_x, chat_name,
-            )
-        return sender, sender_type, bubble_rect
-
-    @staticmethod
-    def _detect_sender_by_position(
-        ctrl, list_center_x: int, chat_name: str,
-    ) -> tuple[str, SenderType]:
-        """
-        策略3: 通过控件水平位置判断发送者。
-
-        微信中对方消息偏左，自己消息偏右。
-        控件中心 x > 列表中心 x → 自己发的
-        控件中心 x < 列表中心 x → 对方发的
-        """
-        try:
-            rect = ctrl.BoundingRectangle
-            ctrl_center_x = (rect.left + rect.right) // 2
-        except Exception:
-            return "", SenderType.OTHER
-
-        if ctrl_center_x > list_center_x:
-            return "我", SenderType.SELF
-        return chat_name, SenderType.FRIEND
+        return Chat._detect_sender_by_pixel(ctrl, chat_name, hwnd)
 
     @staticmethod
     def _detect_sender_by_pixel(
@@ -7855,71 +8211,20 @@ class Chat:
                     except OSError:
                         pass
         except Exception:
-            return "", SenderType.OTHER, ()
+            return "", SenderType.UNKNOWN, ()
 
         w, h = img.size
 
-        # ---- 策略1: 边缘扫描 ----
+        # ---- 边缘扫描 ----
         edge_result = Chat._detect_sender_by_edge_scan(img, w, h, chat_name)
         edge_scan_y, edge_left_x, edge_right_x = -1, -1, -1
         if edge_result is not None:
             sender, sender_type, edge_scan_y, edge_left_x, edge_right_x = edge_result
         else:
-            # ---- 策略2: 气泡颜色 ----
-            sender, sender_type = Chat._detect_sender_by_bubble_color(img, w, h, chat_name)
+            sender, sender_type = "", SenderType.UNKNOWN
 
         # ---- 检测气泡区域 ----
         bubble_left, bubble_right = Chat._detect_bubble_rect(img, w, h, sender_type)
-
-        # ---- 调试：标记扫描点和气泡区域并保存图片 ----
-        # try:
-        #     from PIL import ImageDraw
-        #     debug_img = img.copy()
-        #     draw = ImageDraw.Draw(debug_img)
-        #     ms = 6  # marker size
-        #     # 边缘扫描：左侧（蓝色）
-        #     if edge_left_x >= 0:
-        #         draw.ellipse(
-        #             [edge_left_x - ms, edge_scan_y - ms,
-        #              edge_left_x + ms, edge_scan_y + ms],
-        #             fill="blue", outline="white",
-        #         )
-        #         draw.text((edge_left_x + 10, edge_scan_y - 8),
-        #                   f"L({edge_left_x},{edge_scan_y})", fill="blue")
-        #     # 边缘扫描：右侧（红色）
-        #     if edge_right_x >= 0:
-        #         draw.ellipse(
-        #             [edge_right_x - ms, edge_scan_y - ms,
-        #              edge_right_x + ms, edge_scan_y + ms],
-        #             fill="red", outline="white",
-        #         )
-        #         draw.text((edge_right_x - 90, edge_scan_y - 8),
-        #                   f"R({edge_right_x},{edge_scan_y})", fill="red")
-        #     # 气泡区域（绿色矩形）
-        #     if bubble_left > 0 or bubble_right > 0:
-        #         scan_y = 38
-        #         draw.line([(bubble_left, scan_y), (bubble_right, scan_y)],
-        #                   fill="green", width=2)
-        #         draw.ellipse(
-        #             [bubble_left - ms, scan_y - ms,
-        #              bubble_left + ms, scan_y + ms],
-        #             fill="green", outline="white",
-        #         )
-        #         draw.text((bubble_left + 10, scan_y + 10),
-        #                   f"BL({bubble_left})", fill="green")
-        #         draw.ellipse(
-        #             [bubble_right - ms, scan_y - ms,
-        #              bubble_right + ms, scan_y + ms],
-        #             fill="lime", outline="white",
-        #         )
-        #         draw.text((bubble_right - 80, scan_y + 10),
-        #                   f"BR({bubble_right})", fill="lime")
-        #     # 发送者标注
-        #     draw.text((5, 5), f"{sender} ({sender_type.value})", fill="yellow")
-        #     debug_img.save(os.path.join(".", "_debug_edge_scan.png"))
-        # except Exception:
-        #     pass
-        # ---- 调试结束 ----
 
         # 转换为屏幕坐标
         bubble_rect = ()
@@ -8052,38 +8357,6 @@ class Chat:
         if found_left:
             return chat_name, SenderType.FRIEND, scan_y, left_x, right_x
         return "我", SenderType.SELF, scan_y, left_x, right_x
-
-    @staticmethod
-    def _detect_sender_by_bubble_color(
-        img: "Image.Image", w: int, h: int, chat_name: str,
-    ) -> tuple[str, SenderType]:
-        """
-        策略3: 通过气泡颜色判断发送者。
-
-        微信气泡颜色规则：
-        - 绿色气泡：自己发的消息 (G > 180, G-R > 50, G-B > 80)
-        - 灰色/白色气泡：对方发的消息 (R,G,B 接近且 > 200)
-        """
-        green_count = 0
-        gray_count = 0
-
-        sample_rows = [h // 3, h // 2, h * 2 // 3]
-        for y in sample_rows:
-            for x in range(w):
-                r, g, b = img.getpixel((x, y))[:3]
-                if g > 180 and g - r > 50 and g - b > 80:
-                    green_count += 1
-                elif r > 200 and g > 200 and b > 200 \
-                        and abs(r - g) < 15 and abs(r - b) < 15 \
-                        and not (r > 250 and g > 250 and b > 250):
-                    gray_count += 1
-
-        if green_count > 30:
-            return "我", SenderType.SELF
-        if gray_count > 30:
-            return chat_name, SenderType.FRIEND
-
-        return "", SenderType.OTHER
 
     # -- 消息状态检测 --
 
@@ -11491,12 +11764,12 @@ class SeparateChat(Chat, WeixinWindow):
         return super().send_at(content, at_members)
 
     @PIM.guard
-    def send_collection(self, keyword: str) -> bool:
+    def send_collection(self, keyword: str) -> MessageStatus:
         self.activate()
         return super().send_collection(keyword)
 
     @PIM.guard
-    def send_emotion(self, keyword: str = None, index: int = 1) -> bool:
+    def send_emotion(self, keyword: str = None, index: int = 1) -> MessageStatus:
         self.activate()
         return super().send_emotion(keyword, index)
 
@@ -11914,11 +12187,11 @@ class Weixin(WeixinWindow):
         """在群聊中 @指定成员发送消息"""
         return self.chat_with(nickname).send_at(content, at_members)
 
-    def send_collection(self, nickname: str, keyword: str) -> bool:
+    def send_collection(self, nickname: str, keyword: str) -> MessageStatus:
         """发送收藏内容"""
         return self.chat_with(nickname).send_collection(keyword)
 
-    def send_emotion(self, nickname: str, keyword: str = None, index: int = 1) -> bool:
+    def send_emotion(self, nickname: str, keyword: str = None, index: int = 1) -> MessageStatus:
         """发送表情，keyword 为 None 时发送自定义表情"""
         return self.chat_with(nickname).send_emotion(keyword, index)
 
@@ -12828,7 +13101,6 @@ class Weixin(WeixinWindow):
 
             if self._offscreen:
                 chat.move_offscreen()
-            time.sleep(0.3)
 
             while not stop_event.is_set():
                 if not chat.exists:
