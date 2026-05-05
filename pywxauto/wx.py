@@ -629,6 +629,18 @@ def query_reg_install_path(reg_path: str) -> Optional[str]:
 
     return None
 
+def get_weixin_install_path():
+    try:
+        key = winreg.OpenKey(
+            winreg.HKEY_CURRENT_USER,
+            r"Software\Tencent\Weixin",
+        )
+        install_path, _ = winreg.QueryValueEx(key, "InstallPath")
+        winreg.CloseKey(key)
+        return install_path
+    except FileNotFoundError:
+        raise LoginError("未找到微信安装路径，请确认微信已安装")
+
 def get_wechat_install_path(version: Optional[int] = None) -> Optional[str]:
     reg_paths_map = {
         3: [
@@ -11919,9 +11931,9 @@ class Weixin(WeixinWindow):
         "显示窗口": "Ctrl+Alt+W",
     }
 
-    def __init__(self, background: bool = False, idle_wait: float = 0, lock_input: bool = False,
+    def __init__(self, background: bool = False, idle_wait: float = 0, lock_input: bool = False, auto_login: bool = False, login_timeout: float = 0,
                  resize: bool = True, ocr_engine: str = "wcocr",
-                 install_path: Optional[str] = None, wxocr_path: Optional[str] = None):
+                 install_path: Optional[str] = None, wxocr_weixin_install_path: Optional[str] = None, wxocr_plugin_path: Optional[str] = None):
         """
         Args:
             background:   True 时使用后台模式（通过 SendMessage 发送虚拟鼠标/键盘消息，
@@ -11937,55 +11949,41 @@ class Weixin(WeixinWindow):
                 - "wcocr":    使用微信自带 OCR（默认）
                 - "rapidocr": 使用 RapidOCR
             install_path: 微信安装路径，None 时自动检测
-            wxocr_path:   微信 OCR 插件路径，None 时自动检测
+            wxocr_weixin_install_path: 微信 OCR 插件带版本号微信安装路径，None 时自动检测
+            wxocr_plugin_path:   微信 OCR 插件路径，None 时自动检测
         """
-        self.background: bool = background
-
-        # 设置全局后台模式标志
-        globals()['background'] = background
-
-        # 读取微信版本号
-        self.version: str = get_wechat_version(4)
-
-        # 物理输入监控
-        if idle_wait > 0:
-            PIM(idle_wait=idle_wait, lock_input=lock_input)
+        self.background = background
+        globals()['background'] = background # 设置全局后台模式标志
+        self.idle_wait = idle_wait
+        self.lock_input = lock_input
+        if self.idle_wait > 0:
+            PIM(idle_wait=self.idle_wait, lock_input=self.lock_input)
             PIM.start()
 
-        # 事件处理器 (pyee EventEmitter)
-        self._ee = EventEmitter()
-
-        # 选择OCR引擎
         if ocr_engine not in ("wcocr", "rapidocr"):
             raise ValueError(f"ocr_engine 参数必须为 'wcocr' 或 'rapidocr'，当前: {ocr_engine!r}")
+
         self._ocr_engine = ocr_engine
-
-        # 微信安装路径
-        self.install_path = install_path or get_wechat_install_path(4)
-
-        # 微信OCR插件路径
-        self.wxocr_path = wxocr_path or get_wechat_wxocr_path()
-
-        # 初始化 OCR 引擎
         if self._ocr_engine == "wcocr":
-            wcocr.init(self.wxocr_path, self.install_path)
+            self.wxocr_weixin_install_path = wxocr_weixin_install_path or get_wechat_install_path(4)
+            self.wxocr_plugin_path = wxocr_plugin_path or get_wechat_wxocr_path()
+            wcocr.init(self.wxocr_plugin_path, self.wxocr_weixin_install_path)
         else:
             self._rapid_ocr = RapidOCR()
 
-        # 开启讲述人模式标识 激活微信控件通信
+        self.auto_login = auto_login
+        self.login_timeout = login_timeout
+        self.version = get_wechat_version(4)
+        self.install_path = install_path or get_wechat_install_path()
+        self._ee = EventEmitter()
+
         ensure_narrator_registry()
-
-        # 初始化微信窗口
         self._ensure_running()
-
-        # 窗口定位
         self._win: auto.WindowControl = auto.WindowControl(
             ClassName=self.WINDOW_CLASS,
             RegexName=self.WINDOW_REGEX,
             searchDepth=1
         )
-
-        # 设置固定窗口大小
         self.resize = resize
         hwnd = self._win.NativeWindowHandle
         if resize and hwnd:
@@ -11993,8 +11991,6 @@ class Weixin(WeixinWindow):
             x, y = rect[0], rect[1]
             ctypes.windll.user32.MoveWindow(hwnd, x, y,
                                             self.WINDOW_WIDTH, self.WINDOW_HEIGHT, True)
-
-        # 后台模式下将主窗口移到屏幕外
         self._main_offscreen_rect = None
         if background and hwnd:
             rect = win32gui.GetWindowRect(hwnd)
@@ -12003,14 +11999,12 @@ class Weixin(WeixinWindow):
             ctypes.windll.user32.MoveWindow(hwnd, -9999, -9999,
                                             rect[2] - rect[0], rect[3] - rect[1], True)
 
-        # 窗口功能
         self.navigator = Navigator(self)
         self.session = Session(self)
         self.file_manager = FileManager(self)
         self.friend_circle = FriendCircle(self)
-
         logger.info(f"微信客户端({self.version}) - 已连接")
-    
+
     def __del__(self):
         self.move_back()
         logger.info(f"微信客户端({self.version}) - 已断开")
@@ -12057,34 +12051,18 @@ class Weixin(WeixinWindow):
             time.sleep(interval)
         return False
 
-    @staticmethod
-    def _ensure_running() -> None:
-        # 用 find_wechat_window 判断窗口是否存在
-        if Weixin.find_wechat_window():
+    def _ensure_running(self) -> None:
+        if self.find_wechat_window():
             return
 
-        # 窗口不存在，尝试用快捷键唤醒
-        Weixin.shortcut("显示窗口")
-
-        # 检测微信窗口是否存在
-        if Weixin.is_exists_window(timeout=3, interval=0.1):
+        self.shortcut("显示窗口")
+        if self.is_exists_window(timeout=3, interval=0.1):
             return 
 
-        # 唤醒失败，尝试启动微信
-        try:
-            key = winreg.OpenKey(
-                winreg.HKEY_CURRENT_USER,
-                r"Software\Tencent\Weixin",
-            )
-            install_path, _ = winreg.QueryValueEx(key, "InstallPath")
-            winreg.CloseKey(key)
-        except FileNotFoundError:
-            raise LoginError("未找到微信安装路径，请确认微信已安装")
-        subprocess.Popen([f"{install_path}\\Weixin.exe"])
-
-        # 检测微信窗口是否存在
-        if Weixin.is_exists_window(timeout=3, interval=0.1):
+        subprocess.Popen([f"{self.install_path}\\Weixin.exe"])
+        if self.is_exists_window(timeout=self.login_timeout, interval=0.1):
             return 
+
         raise LoginError("微信启动超时，请手动登录后重试")
 
     @property
