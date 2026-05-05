@@ -7250,14 +7250,11 @@ class Chat:
 
         # 1. 打开收藏选择面板
         self._open_collection_panel()
-        time.sleep(0.5)
 
         # 2. 在搜索框中输入关键词
         search_edit = self._find_fav_search_edit()
         input_wx.click(search_edit)
-        time.sleep(0.3)
-        search_edit.GetValuePattern().SetValue(keyword)
-        time.sleep(1)  # 等待搜索结果加载
+        input_wx.send_keys(search_edit, keyword)
 
         # 3. 获取搜索后的详情列表
         detail_list = self._win.ListControl(
@@ -7276,7 +7273,6 @@ class Chat:
             raise RuntimeError(f"未找到匹配的收藏项: {keyword}")
 
         input_wx.click(matched_item)
-        time.sleep(0.3)
 
         # 5. 点击"发送"按钮
         send_btn = self._win.ButtonControl(
