@@ -7267,11 +7267,9 @@ class Chat:
 
         # 4. 选中第一个搜索结果
         matched_item = self._find_collection_item(detail_list, keyword)
-
         if not matched_item:
             self._close_collection_panel()
             raise RuntimeError(f"未找到匹配的收藏项: {keyword}")
-
         input_wx.click(matched_item)
 
         # 5. 点击"发送"按钮
