@@ -13855,6 +13855,11 @@ class Weixin:
         client = self.get_client(pid)
         client.remove_chat_listen(names)
 
+    def remove_all_chat_listen(self) -> None:
+        """移除所有客户端的所有聊天监听。"""
+        for client in self._clients.values():
+            client.remove_chat_listen(None)
+
     def run(self, interval: float = 0.1, idle_interval: float = 0.1) -> None:
         """
         启动统一消息监听（阻塞运行，Ctrl+C 退出）。
