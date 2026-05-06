@@ -36,7 +36,7 @@ from pyee.base import EventEmitter
 from rapidocr import RapidOCR
 
 try:
-    from pywxauto import wcocr
+    import wcocr
 except ImportError:
     wcocr = None
 
