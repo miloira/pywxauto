@@ -12217,15 +12217,15 @@ class Weixin(WeixinWindow):
         return self.chat_with(nickname).send_text(content, timeout)
 
     def send_file(self, nickname: str, file_path: "str | list[str]", timeout: float = 0) -> MessageStatus:
-        """发送文件，支持单个或多个路径，支持网络 URL"""
+        """发送文件"""
         return self.chat_with(nickname).send_file(file_path, timeout)
 
     def send_image(self, nickname: str, file_path: "str | list[str]", timeout: float = 0) -> MessageStatus:
-        """发送图片，支持单个或多个路径，支持网络 URL"""
+        """发送图片"""
         return self.chat_with(nickname).send_image(file_path, timeout)
 
     def send_video(self, nickname: str, file_path: "str | list[str]", timeout: float = 0) -> MessageStatus:
-        """发送视频，支持单个或多个路径，支持网络 URL"""
+        """发送视频"""
         return self.chat_with(nickname).send_video(file_path, timeout)
 
     def send_at(self, nickname: str, content: str, at_members: list[str], timeout: float = 0) -> MessageStatus:
