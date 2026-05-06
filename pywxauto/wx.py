@@ -6995,6 +6995,7 @@ class Chat:
         # 点击工具栏"发送文件"按钮
         toolbar = self._win.ToolBarControl(
             AutomationId="tool_bar_accessible",
+            searchDepth=20
         )
         if not toolbar.Exists(maxSearchSeconds=2):
             raise RuntimeError("未找到聊天工具栏")
@@ -7122,7 +7123,7 @@ class Chat:
         # 查找工具栏
         toolbar = self._win.ToolBarControl(
             AutomationId="tool_bar_accessible",
-            searchDepth=16,
+            searchDepth=20
         )
         if not toolbar.Exists(maxSearchSeconds=2):
             raise RuntimeError("未找到聊天工具栏")
@@ -7446,7 +7447,7 @@ class Chat:
         # 查找工具栏
         toolbar = self._win.ToolBarControl(
             AutomationId="tool_bar_accessible",
-            searchDepth=16
+            searchDepth=20
         )
         if not toolbar.Exists(maxSearchSeconds=2):
             raise RuntimeError("未找到聊天工具栏")
