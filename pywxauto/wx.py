@@ -37,8 +37,8 @@ from rapidocr import RapidOCR
 import sys
 
 try:
-    import wcocr
-    # from . import wcocr
+    # import wcocr
+    from . import wcocr
 except ImportError:
     wcocr = None
 
@@ -12861,6 +12861,267 @@ class WeixinClient(WeixinWindow):
 
         return 0
 
+    @PIM.guard
+    def get_self_profile(self) -> dict:
+        """
+        获取当前登录账号的个人资料（昵称、微信号）。
+
+        通过导航栏"更多" → 点击"设置"按钮打开设置窗口，
+        点击"账号与存储"菜单项，从右侧面板读取昵称和微信号，
+        然后关闭设置窗口。
+
+        设置窗口: WindowControl, ClassName="mmui::PreferenceWindow"
+
+        Returns:
+            dict: {"nickname": str, "account": str}
+        """
+        self.activate()
+        self.navigator.switch_to("更多")
+        time.sleep(0.3)
+
+        # 点击"设置"按钮
+        setting_btn = self._win.ButtonControl(Name="设置", searchDepth=10)
+        if not setting_btn.Exists(maxSearchSeconds=3):
+            raise RuntimeError("未找到'设置'按钮")
+        input_wx.click(setting_btn)
+        time.sleep(0.5)
+
+        # 等待设置窗口出现
+        setting_win = auto.WindowControl(
+            ClassName="mmui::PreferenceWindow",
+            ProcessId=self.pid,
+            searchDepth=1,
+        )
+        if not setting_win.Exists(maxSearchSeconds=5):
+            raise RuntimeError("设置窗口未打开")
+
+        try:
+            # 右侧面板: mmui::PreferencePageAccount 内第一个区域包含头像、昵称、微信号
+            page = setting_win.GroupControl(
+                ClassName="mmui::PreferencePageAccount",
+            )
+            if not page.Exists(maxSearchSeconds=3):
+                # 可能需要先点击"账号与存储"
+                account_btn = setting_win.ButtonControl(
+                    ClassName="mmui::XButton",
+                    Name="账号与存储",
+                )
+                if account_btn.Exists(maxSearchSeconds=2):
+                    input_wx.click(account_btn)
+                    time.sleep(0.5)
+                page = setting_win.GroupControl(
+                    ClassName="mmui::PreferencePageAccount",
+                )
+                if not page.Exists(maxSearchSeconds=3):
+                    raise RuntimeError("未找到账号与存储页面")
+
+            # 昵称和微信号在 ContactHeadView 旁边的 QWidget 容器中
+            # 该容器包含两个 mmui::XTextView: 昵称和微信号
+            nickname = ""
+            account = ""
+            head_view = page.ButtonControl(ClassName="mmui::ContactHeadView")
+            if head_view.Exists(maxSearchSeconds=2):
+                # 头像的下一个兄弟控件就是包含昵称和微信号的容器
+                parent = head_view.GetParentControl()
+                if parent:
+                    texts = []
+                    for ctrl in parent.GetChildren():
+                        if (ctrl.ControlType == auto.ControlType.GroupControl
+                                and ctrl.ClassName == "QWidget"):
+                            # 这个 QWidget 包含昵称和微信号
+                            for child in ctrl.GetChildren():
+                                if (child.ControlType == auto.ControlType.TextControl
+                                        and child.ClassName == "mmui::XTextView"
+                                        and child.Name):
+                                    texts.append(child.Name)
+                            if texts:
+                                break
+
+                    if len(texts) >= 1:
+                        nickname = texts[0]
+                    if len(texts) >= 2:
+                        account = texts[1]
+
+            return {"nickname": nickname, "account": account}
+        finally:
+            # 关闭设置窗口
+            try:
+                wp = setting_win.GetWindowPattern()
+                if wp:
+                    wp.Close()
+                else:
+                    close_btn = setting_win.ButtonControl(
+                        ClassName="mmui::XButton", Name="关闭",
+                    )
+                    if close_btn.Exists(maxSearchSeconds=1):
+                        input_wx.click(close_btn)
+            except Exception:
+                pass
+            time.sleep(0.3)
+
+    @PIM.guard
+    def get_self_info2(self) -> dict:
+        """
+        获取当前登录账号的个人资料（通过点击头像打开资料面板）。
+
+        点击导航栏"微信"按钮上方 35px 处（即头像位置）打开个人资料面板，
+        从面板中读取昵称、微信号和头像，然后关闭面板。
+
+        Returns:
+            dict: {"nickname": str, "account": str, "avatar": str}
+            avatar 为头像图片的 base64 编码字符串（PNG 格式）
+        """
+        import base64
+
+        self.activate()
+
+        # 获取导航栏"微信"按钮的位置
+        tabbar = self.navigator._tabbar
+        wx_btn = tabbar.ButtonControl(
+            ClassName="mmui::XTabBarItem",
+            Name="微信",
+            searchDepth=5,
+        )
+        if not wx_btn.Exists(maxSearchSeconds=2):
+            raise RuntimeError("未找到导航栏'微信'按钮")
+
+        # 点击"微信"按钮上方 35px（头像位置）
+        rect = wx_btn.BoundingRectangle
+        click_x = (rect.left + rect.right) // 2
+        click_y = rect.top - 35
+        auto.Click(click_x, click_y)
+        time.sleep(0.5)
+
+        # 等待资料面板出现（mmui::ContactProfileView）
+        profile = self._win.GroupControl(
+            ClassName="mmui::ContactProfileView",
+        )
+        if not profile.Exists(maxSearchSeconds=3):
+            raise RuntimeError("个人资料面板未打开")
+
+        try:
+            result = {"nickname": "", "account": "", "avatar": ""}
+
+            # 先获取昵称和微信号（在打开图片浏览器之前）
+            display_name = profile.TextControl(
+                AutomationId="right_v_view.nickname_button_view.display_name_text",
+            )
+            if display_name.Exists(0, 0):
+                val = (display_name.Name or "").strip()
+                if val:
+                    result["nickname"] = val
+
+            key_map = {
+                "微信号：": "account",
+            }
+            info_center = profile.GroupControl(
+                AutomationId="right_v_view.user_info_center_view",
+            )
+            if info_center.Exists(0, 0):
+                for child in info_center.GetChildren():
+                    key_ctrl = child.TextControl(
+                        AutomationId="right_v_view.user_info_center_view.basic_line_view.basic_line.key_text",
+                    )
+                    if not key_ctrl.Exists(0, 0):
+                        continue
+                    key_name = key_ctrl.Name or ""
+                    field = key_map.get(key_name)
+                    if not field:
+                        continue
+                    val_ctrl = child.TextControl(
+                        ClassName="mmui::ContactProfileTextView",
+                    )
+                    if val_ctrl.Exists(0, 0):
+                        val = (val_ctrl.Name or "").strip()
+                        if val:
+                            result[field] = val
+
+            # 头像: 点击头像打开图片浏览器，点击保存按钮获取原图
+            avatar_ctrl = profile.ButtonControl(
+                ClassName="mmui::ContactHeadView",
+                AutomationId="head_image_v_view.head_view_",
+            )
+            if avatar_ctrl.Exists(0, 0):
+                try:
+                    input_wx.click(avatar_ctrl)
+                    time.sleep(1)
+
+                    img_viewer = auto.WindowControl(
+                        ClassName="mmui::PreviewWindow",
+                        ProcessId=self.pid,
+                        searchDepth=1,
+                    )
+                    if img_viewer.Exists(maxSearchSeconds=3):
+                        save_btn = img_viewer.ButtonControl(
+                            ClassName="mmui::XButton",
+                            Name="保存",
+                        )
+                        if save_btn.Exists(maxSearchSeconds=2):
+                            tmp_dir = os.path.join(tempfile.gettempdir(), "pywxauto_avatar")
+                            os.makedirs(tmp_dir, exist_ok=True)
+                            tmp_path = os.path.join(tmp_dir, "avatar.png")
+                            if os.path.exists(tmp_path):
+                                os.remove(tmp_path)
+
+                            input_wx.click(save_btn)
+
+                            save_dlg = auto.WindowControl(ClassName="#32770")
+                            if save_dlg.Exists(maxSearchSeconds=5):
+                                file_edit = save_dlg.EditControl(AutomationId="1001")
+                                if file_edit.Exists(maxSearchSeconds=2):
+                                    vp = file_edit.GetValuePattern()
+                                    if vp:
+                                        vp.SetValue(tmp_path)
+                                    else:
+                                        input_wx.send_keys(file_edit, "{Ctrl}a{Del}")
+                                        input_wx.send_keys(file_edit, tmp_path)
+                                    time.sleep(0.3)
+
+                                    dlg_save_btn = save_dlg.ButtonControl(AutomationId="1")
+                                    if dlg_save_btn.Exists(maxSearchSeconds=2):
+                                        input_wx.click(dlg_save_btn)
+                                    else:
+                                        input_wx.send_keys(save_dlg, "{Alt}S")
+                                    time.sleep(1)
+
+                                    if save_dlg.Exists(maxSearchSeconds=0.5):
+                                        input_wx.send_keys(save_dlg, "{Alt}Y")
+                                        time.sleep(0.5)
+
+                                    if os.path.exists(tmp_path):
+                                        with open(tmp_path, "rb") as f:
+                                            avatar_bytes = f.read()
+                                        result["avatar"] = base64.b64encode(avatar_bytes).decode("ascii")
+                                        os.remove(tmp_path)
+                                else:
+                                    input_wx.send_keys(save_dlg, "{Esc}")
+
+                        # 关闭图片浏览器
+                        time.sleep(0.3)
+                        close_btn = img_viewer.ButtonControl(
+                            ClassName="mmui::XButton", Name="关闭",
+                        )
+                        if close_btn.Exists(maxSearchSeconds=1):
+                            input_wx.click(close_btn)
+                        time.sleep(0.3)
+                except Exception:
+                    try:
+                        iv = auto.WindowControl(
+                            ClassName="mmui::PreviewWindow",
+                            ProcessId=self.pid,
+                            searchDepth=1,
+                        )
+                        if iv.Exists(maxSearchSeconds=0.5):
+                            cb = iv.ButtonControl(ClassName="mmui::XButton", Name="关闭")
+                            if cb.Exists(0, 0):
+                                input_wx.click(cb)
+                    except Exception:
+                        pass
+
+            return result
+        finally:
+            pass
+
     # @PIM.guard
     # def lock(self) -> None:
     #     """通过点击菜单锁定微信（已弃用，改用快捷键）"""
@@ -13846,6 +14107,16 @@ class Weixin:
     def unmute_chat(self, pid: int, nickname: str) -> None:
         """取消免打扰"""
         return self.get_client(pid).unmute_chat(nickname)
+
+    # ---- 个人资料 ----
+
+    def get_self_profile(self, pid: int) -> dict:
+        """获取当前登录账号的个人资料（昵称、微信号）"""
+        return self.get_client(pid).get_self_profile()
+
+    def get_self_info2(self, pid: int) -> dict:
+        """通过点击头像打开资料面板获取个人资料（昵称、微信号）"""
+        return self.get_client(pid).get_self_info2()
 
     # ---- 朋友圈 ----
 
