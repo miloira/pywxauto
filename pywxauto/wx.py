@@ -1,17 +1,5 @@
-"""
-pywxauto - 微信自动化库（单文件合并版）
-
-将所有模块合并为单个文件，便于编译为 .pyd。
-"""
-
 from __future__ import annotations
 
-from dataclasses import dataclass, field
-from datetime import date
-from enum import Enum
-from queue import Empty, Queue
-from typing import Optional
-from typing import Optional, Iterable
 import ctypes
 import ctypes.wintypes
 import fnmatch
@@ -29,11 +17,12 @@ import tempfile
 import threading
 import time
 import urllib
+from datetime import date
+from enum import Enum
+from queue import Empty, Queue
+from typing import Iterable, Optional
 
-from PIL import Image
-from pyee.base import EventEmitter
-from rapidocr import RapidOCR
-from windows_capture import WindowsCapture, Frame, InternalCaptureControl # pip install windows-capture
+import psutil
 import requests
 import uiautomation as auto
 import win32api
@@ -42,6 +31,9 @@ import win32con
 import win32gui
 import win32ui
 import winreg
+from PIL import Image
+from pyee.base import EventEmitter
+from rapidocr import RapidOCR
 
 try:
     from pywxauto import wcocr
@@ -54,28 +46,8 @@ logging.basicConfig(level=logging.INFO, format="%(asctime)s [%(levelname)s] %(me
 logger = logging.getLogger(__name__)
 
 
-# ======================================================================
-# 模块: _state
-# ======================================================================
-
-"""
-pywxauto 全局状态模块。
-
-存放跨模块共享的可变状态（如后台模式标志）。
-各模块通过 import _state 引用，避免循环依赖。
-"""
-
 # 全局后台模式标志，由 Weixin.__init__ 设置
 background: bool = False
-
-
-# ======================================================================
-# 模块: exceptions
-# ======================================================================
-
-"""
-pywxauto 异常体系。
-"""
 
 
 class WxAutoError(Exception):
@@ -111,15 +83,6 @@ class LoginError(WxAutoError):
 class RegistryError(Exception):
     """注册表操作异常"""
     pass
-
-
-# ======================================================================
-# 模块: pim
-# ======================================================================
-
-"""
-PIM (Physical Input Monitor) - 物理键盘/鼠标输入监控器。
-"""
 
 
 # ---- 底层钩子常量与结构体 ----
@@ -208,6 +171,13 @@ class PIM:
     _mouse_proc = None
 
     def __init__(self, idle_wait: float = 0, lock_input: bool = False):
+        """
+        初始化 PIM 实例，设置全局等待时间和锁定输入参数。
+
+        Args:
+            idle_wait: 等待物理空闲的秒数，0 表示不等待。
+            lock_input: True 时在操作期间锁定物理输入（需管理员权限）。
+        """
         PIM.idle_wait = idle_wait
         PIM.lock_input = lock_input
 
@@ -384,9 +354,24 @@ class PIM:
         raise TypeError(f"PIM.guard 参数类型错误: {type(func_or_wait)}")
 
 
-# ======================================================================
-# 模块: input_wm
-# ======================================================================
+def find_process(name: str) -> list[dict]:
+    """
+    查询指定名称的进程信息（使用 psutil）。
+
+    Args:
+        name: 进程名，如 "Weixin.exe"
+
+    Returns:
+        进程列表，每项包含 pid 和 name
+    """
+    processes = []
+    for proc in psutil.process_iter(["pid", "name"]):
+        try:
+            if proc.info["name"] and proc.info["name"].lower() == name.lower():
+                processes.append({"name": proc.info["name"], "pid": proc.info["pid"]})
+        except (psutil.NoSuchProcess, psutil.AccessDenied):
+            continue
+    return processes
 
 ######## 窗口操作
 def minimize_window(hwnd):
@@ -550,8 +535,6 @@ def key_type_window(hwnd, text):
         results.append(win32gui.SendMessage(hwnd, win32con.WM_CHAR, ord(c), 0))
     return all(results)
 
-
-
 # ---- input_wm 命名空间（供其他模块通过 input_wm.xxx 调用） ----
 class _InputWmNamespace:
     """模拟 input_wm 模块命名空间，使 input_wm.xxx() 调用方式继续工作"""
@@ -579,19 +562,6 @@ class _InputWmNamespace:
     key_type_window = staticmethod(key_type_window)
 
 input_wm = _InputWmNamespace()
-
-# ======================================================================
-# 模块: utils
-# ======================================================================
-
-"""
-pywxauto 工具函数模块。
-
-包含注册表查询、微信路径检测、剪贴板操作、窗口查找等底层工具。
-"""
-
-
-
 
 # ---- 常量 ----
 # DROPFILES struct: pFiles(uint), x(long), y(long), fNC(int), fWide(bool)
@@ -936,16 +906,6 @@ def rand_ratio() -> float:
     """返回 0.2~0.6 之间的随机比例，用于模拟人类点击偏移"""
     return random.uniform(0.2, 0.6)
 
-# 别名（原模块间 import as 的兼容）
-_is_url = is_url
-_download_to_temp = download_to_temp
-_rand_ratio = rand_ratio
-
-
-# ======================================================================
-# 模块: capture
-# ======================================================================
-
 try:
     # https://docs.microsoft.com/en-us/windows/win32/api/shellscalingapi/nf-shellscalingapi-setprocessdpiawareness
     # Once SetProcessDpiAwareness is set for an app, any future calls to SetProcessDpiAwareness will fail.
@@ -953,7 +913,6 @@ try:
     ctypes.windll.shcore.SetProcessDpiAwareness(2) # 支持每个显示器不同 DPI
 except Exception as ex:
     pass
-
 
 def capture_by_bitblt(
     hwnd: int, 
@@ -1053,6 +1012,7 @@ def capture_by_window_capture(
     offset_bottom: int = 0
 ) -> bytes:
     """Windows.Graphics.Capture方式截取窗口图像（支持后台截图）"""
+    from windows_capture import WindowsCapture, Frame, InternalCaptureControl # pip install windows-capture
     result = {}
 
     # 判断是否为桌面窗口，桌面用 monitor_index 截全屏
@@ -1172,21 +1132,7 @@ def capture_control(
     img.save(buf, format="PNG")
     return buf.getvalue()
 
-
-# ======================================================================
-# 模块: input_wx
-# ======================================================================
-
-"""
-pywxauto 微信控件输入模块。
-
-对 uiautomation 控件的高层操作封装，根据 background 自动选择：
-- 前台模式: 使用 uiautomation 原生方法（需要窗口可见）
-- 后台模式: 使用 input_wm 的 SendMessage 方式（不需要窗口在前台）
-"""
-
-
-def _rand_ratio() -> float:
+def rand_ratio() -> float:
     """返回 0.2~0.6 之间的随机比例，用于模拟人类点击偏移"""
     return random.uniform(0.2, 0.6)
 
@@ -1281,9 +1227,9 @@ def click(control, button: str = "left", click: str = "once") -> None:
         if click == "double":
             control.DoubleClick()
         elif button == "right":
-            control.RightClick(ratioX=_rand_ratio(), ratioY=_rand_ratio())
+            control.RightClick(ratioX=rand_ratio(), ratioY=rand_ratio())
         else:
-            control.Click(ratioX=_rand_ratio(), ratioY=_rand_ratio())
+            control.Click(ratioX=rand_ratio(), ratioY=rand_ratio())
     else:
         hwnd, cx, cy = _screen_to_client(control)
 
@@ -1551,8 +1497,6 @@ def paste(content) -> None:
     finally:
         restore_clipboard(saved)
 
-
-
 # ---- input_wx 命名空间（供其他模块通过 input_wx.xxx 调用） ----
 class _InputWxNamespace:
     """模拟 input_wx 模块命名空间，使 input_wx.xxx() 调用方式继续工作"""
@@ -1568,20 +1512,6 @@ class _InputWxNamespace:
     paste = staticmethod(paste)
 
 input_wx = _InputWxNamespace()
-
-# ======================================================================
-# 模块: messages
-# ======================================================================
-
-"""
-pywxauto 消息类体系。
-
-包含 Event 枚举、Message 基类及所有消息子类。
-"""
-
-
-from typing import TYPE_CHECKING
-
 
 # ---- 消息事件类型 ----
 class Event(str, Enum):
@@ -1626,7 +1556,6 @@ class MessageStatus(Enum):
     UNKNOWN = "unknown"
 
 
-# ---- 消息基类 ----
 class Message:
     """聊天消息基类"""
 
@@ -1791,7 +1720,6 @@ class Message:
         return True
 
 
-# ---- 消息子类 ----
 class TextMessage(Message):
     """文本消息"""
     @property
@@ -2160,7 +2088,7 @@ class OtherMessage(Message):
 
 
 # ---- 消息类 -> 事件类型映射 ----
-MSG_CLASS_TO_EVENT: dict[type, Event] = {
+_MSG_CLASS_TO_EVENT: dict[type, Event] = {
     TextMessage: Event.TEXT,
     ImageMessage: Event.IMAGE,
     VideoMessage: Event.VIDEO,
@@ -2181,19 +2109,6 @@ MSG_CLASS_TO_EVENT: dict[type, Event] = {
     SystemMessage: Event.SYSTEM,
     OtherMessage: Event.OTHER,
 }
-
-_MSG_CLASS_TO_EVENT = MSG_CLASS_TO_EVENT
-
-
-# ======================================================================
-# 模块: windows
-# ======================================================================
-
-"""
-pywxauto 窗口类模块。
-
-包含 WeixinWindow 基类、Login、VoipCallWindow、NoteEditorWindow。
-"""
 
 
 class WeixinWindow:
@@ -2354,6 +2269,7 @@ class Login(WeixinWindow):
     PROXY_BTN_NAME = "网络代理设置"
 
     def __init__(self):
+        """初始化登录窗口操作实例，绑定微信登录窗口控件。"""
         self._win = auto.WindowControl(
             ClassName=self.WINDOW_CLASS,
             Name=self.WINDOW_NAME,
@@ -2796,6 +2712,7 @@ class VoipCallWindow:
     WINDOW_ID = "VOIPWindow"
 
     def __init__(self):
+        """初始化通话窗口控制实例，绑定 VOIPWindow 控件。"""
         self._win = auto.WindowControl(
             ClassName=self.WINDOW_CLASS,
             AutomationId=self.WINDOW_ID,
@@ -3010,6 +2927,16 @@ class NoteEditorWindow(WeixinWindow):
     MAIN_CONTAINER_ID = "mainContainer"
 
     def __init__(self, handle: int = 0):
+        """
+        初始化笔记编辑窗口。
+
+        Args:
+            handle: 窗口句柄。传 0 时自动查找名为"笔记"的 Chrome WebView 窗口，
+                传非零值时直接通过句柄绑定窗口（避免标题变化后找不到）。
+
+        Raises:
+            RuntimeError: 窗口未找到时抛出。
+        """
         if handle:
             self._handle = handle
             self._win = auto.ControlFromHandle(handle)
@@ -3386,17 +3313,6 @@ class NoteEditorWindow(WeixinWindow):
         return f"NoteEditorWindow(content={preview!r})"
 
 
-# ======================================================================
-# 模块: session
-# ======================================================================
-
-"""
-pywxauto 会话模块。
-
-包含 Navigator、Session、SessionItem 类。
-"""
-
-
 def _parse_session_name(raw: str, session: "Session | None" = None) -> "SessionItem":
     """
     解析会话 ListItem 的 Name 属性。
@@ -3405,7 +3321,7 @@ def _parse_session_name(raw: str, session: "Session | None" = None) -> "SessionI
       "雕虫小技 一群\\n...\\n17:15\\n消息免打扰\\n"
     """
     parts = [p for p in raw.split("\n") if p.strip()]
-    item = SessionItem(_session=session)
+    item = SessionItem(session)
     item.name = parts[0] if parts else ""
     item.last_msg = parts[1] if len(parts) > 1 else ""
     item.msg_time = parts[2] if len(parts) > 2 else ""
@@ -3419,10 +3335,23 @@ def _parse_session_name(raw: str, session: "Session | None" = None) -> "SessionI
 class SessionItem:
     """会话列表中的一条会话"""
 
-    def __init__(self, *, name="", last_msg="", msg_time="",
+    def __init__(self, session: "Session | None" = None, *, name="", last_msg="", msg_time="",
                  muted=False, unread="", active=False,
-                 runtime_id: tuple = (),
-                 _session: "Session | None" = None):
+                 runtime_id: tuple = ()):
+        """
+        初始化会话项。
+
+        Args:
+            session: 关联的 Session 实例，用于执行右键菜单等操作。
+            name: 会话名称。
+            last_msg: 最后一条消息摘要。
+            msg_time: 消息时间文本。
+            muted: 是否消息免打扰。
+            unread: 未读条数文本，如 "[9条]"。
+            active: 是否为当前选中（激活）的会话。
+            runtime_id: UI Automation RuntimeId，用于唯一标识控件。
+        """
+        self.session = session
         self.name = name
         self.last_msg = last_msg
         self.msg_time = msg_time
@@ -3430,7 +3359,6 @@ class SessionItem:
         self.unread = unread       # 未读条数文本，如 "[9条]"
         self.active = active       # 是否为当前选中（激活）的会话
         self.runtime_id: tuple = runtime_id  # UI Automation RuntimeId
-        self._session = _session   # 关联的 Session 实例（用于执行操作）
 
     def __repr__(self):
         muted_tag = " [免打扰]" if self.muted else ""
@@ -3438,9 +3366,9 @@ class SessionItem:
         return f"SessionItem({self.name!r}, {self.msg_time}{muted_tag}{active_tag})"
 
     def _require_session(self) -> "Session":
-        if self._session is None:
+        if self.session is None:
             raise RuntimeError("此 SessionItem 未关联 Session，无法执行操作")
-        return self._session
+        return self.session
 
     def pin(self) -> None:
         """置顶会话"""
@@ -3516,6 +3444,12 @@ class Navigator:
     }
 
     def __init__(self, wx: "Weixin"):
+        """
+        初始化导航栏。
+
+        Args:
+            wx: Weixin 实例。
+        """
         self.wx = wx
         self._win = wx._win
         self._tabbar = self._win.ToolBarControl(ClassName="mmui::MainTabBar", searchDepth=5)
@@ -3548,6 +3482,12 @@ class Session:
     """
 
     def __init__(self, wx: "Weixin"):
+        """
+        初始化会话列表面板。
+
+        Args:
+            wx: Weixin 实例。
+        """
         self.wx = wx
         self._win = wx._win
 
@@ -3671,7 +3611,7 @@ class Session:
                 except Exception:
                     pass
                 input_wx.click(item)
-                # item.Click(ratioX=_rand_ratio(), ratioY=_rand_ratio())
+                # item.Click(ratioX=rand_ratio(), ratioY=rand_ratio())
                 time.sleep(0.3)
                 return
 
@@ -4311,17 +4251,6 @@ class Session:
             return f"Session(error={e!r})"
 
 
-# ======================================================================
-# 模块: friend_circle
-# ======================================================================
-
-"""
-pywxauto 朋友圈模块。
-
-包含 FriendCircle 和 Moment 类。
-"""
-
-
 class Moment:
     """朋友圈动态条目"""
 
@@ -4329,6 +4258,21 @@ class Moment:
                  type="", sender="", content="",
                  raw_text="", timestamp="", image_count=0,
                  cell_type="", scroll_offset: int = 0):
+        """
+        初始化朋友圈动态条目。
+
+        Args:
+            friend_circle: 关联的 FriendCircle 实例。
+            runtime_id: UI Automation RuntimeId。
+            type: 动态类型（如 "文本"、"图片"、"视频"、"分享"）。
+            sender: 发送者昵称。
+            content: 正文内容。
+            raw_text: 原始 Name 属性文本。
+            timestamp: 时间戳文本。
+            image_count: 图片数量。
+            cell_type: 控件 ClassName。
+            scroll_offset: 该动态在列表中的累计滚动偏移（像素）。
+        """
         self.friend_circle = friend_circle
         self.runtime_id = runtime_id
         self.type = type
@@ -4617,6 +4561,12 @@ class FriendCircle(WeixinWindow):
     }
 
     def __init__(self, wx: "Weixin"):
+        """
+        初始化朋友圈操作实例。
+
+        Args:
+            wx: Weixin 实例。
+        """
         self.wx = wx
         self._win = auto.WindowControl(
             ClassName=self.SNS_WINDOW_CLASS,
@@ -5036,8 +4986,8 @@ class FriendCircle(WeixinWindow):
         if text_only:
             # 纯文本发布：移动鼠标到"发表"按钮，长按 3 秒触发文字发布面板
             rect = publish_tab.BoundingRectangle
-            cx = rect.left + int(rect.width() * _rand_ratio())
-            cy = rect.top + int(rect.height() * _rand_ratio())
+            cx = rect.left + int(rect.width() * rand_ratio())
+            cy = rect.top + int(rect.height() * rand_ratio())
             if not background:
                 win32api.SetCursorPos((cx, cy))
                 time.sleep(0.1)
@@ -5567,29 +5517,38 @@ class FriendCircle(WeixinWindow):
         return "FriendCircle(朋友圈)"
 
 
-# ======================================================================
-# 模块: file_manager
-# ======================================================================
-
-"""
-pywxauto 文件管理器模块。
-
-包含 FileManager 和 ChatFile 类。
-"""
-
-
-@dataclass
 class ChatFile:
     """聊天文件信息（来自"聊天文件"管理器窗口）"""
-    file_name: str = ""           # 文件名
-    sender_name: str = ""         # 发送人
-    source_name: str = ""         # 来源（群名或个人昵称）
-    source_type: str = ""         # 来源类型: "contact"(联系人私聊) 或 "room"(群聊)
-    file_date: str = ""           # 日期文本
-    file_status: str = ""         # 状态（如"将在X天后无法下载"、空=已下载）
-    file_size: str = ""           # 文件大小
-    raw_text: str = ""            # 原始文本
-    _cell: object = field(default=None, repr=False)  # UI 控件引用（内部使用）
+
+    def __init__(self, file_manager: "FileManager | None" = None, *, file_name="",
+                 sender_name="", source_name="", source_type="",
+                 file_date="", file_status="", file_size="",
+                 raw_text="", _cell=None):
+        """
+        初始化聊天文件信息。
+
+        Args:
+            file_manager: 关联的 FileManager 实例。
+            file_name: 文件名。
+            sender_name: 发送人昵称。
+            source_name: 来源（群名或个人昵称）。
+            source_type: 来源类型，"contact"(私聊) 或 "room"(群聊)。
+            file_date: 日期文本。
+            file_status: 状态文本（空字符串表示已下载）。
+            file_size: 文件大小文本。
+            raw_text: 原始 Name 属性文本。
+            _cell: UI 控件引用（内部使用）。
+        """
+        self.file_manager = file_manager
+        self.file_name = file_name
+        self.sender_name = sender_name
+        self.source_name = source_name
+        self.source_type = source_type
+        self.file_date = file_date
+        self.file_status = file_status
+        self.file_size = file_size
+        self.raw_text = raw_text
+        self._cell = _cell
 
     def __str__(self):
         status = self.file_status if self.file_status else "已下载"
@@ -5625,6 +5584,12 @@ class FileManager(WeixinWindow):
     DELETE_MENU_ITEM_NAME = "删除"
 
     def __init__(self, wx: "Weixin"):
+        """
+        初始化聊天文件管理器。
+
+        Args:
+            wx: Weixin 实例。
+        """
         self.wx = wx
         self._win = auto.WindowControl(
             Name=self.WINDOW_NAME, searchDepth=1,
@@ -6053,8 +6018,7 @@ class FileManager(WeixinWindow):
 
         return False
 
-    @staticmethod
-    def parse_file_cell_text(cell_text: str) -> Optional[ChatFile]:
+    def parse_file_cell_text(self, cell_text: str) -> Optional[ChatFile]:
         """
         解析 mmui::FileListCell 的 Name 属性文本，提取文件信息。
 
@@ -6130,6 +6094,7 @@ class FileManager(WeixinWindow):
         source_type = "contact" if sender_name and sender_name == source_name else "room"
 
         return ChatFile(
+            self,
             file_name=file_name,
             sender_name=sender_name,
             source_name=source_name,
@@ -6188,17 +6153,6 @@ class FileManager(WeixinWindow):
         return "FileManager(closed)"
 
 
-# ======================================================================
-# 模块: chat
-# ======================================================================
-
-"""
-pywxauto 聊天模块。
-
-包含 Chat（主窗口聊天区域）和 SeparateChat（独立窗口聊天）类。
-"""
-
-
 class Chat:
     """
     聊天区域，包含标题栏、消息列表、输入框。
@@ -6233,6 +6187,12 @@ class Chat:
     ]
 
     def __init__(self, wx: "Weixin"):
+        """
+        初始化聊天区域。
+
+        Args:
+            wx: Weixin 实例。
+        """
         self.wx = wx
         self._win = wx._win
 
@@ -6947,8 +6907,8 @@ class Chat:
         local_paths: list[str] = []
         tmp_files: list[str] = []
         for p in paths:
-            if _is_url(p):
-                tmp = _download_to_temp(p)
+            if is_url(p):
+                tmp = download_to_temp(p)
                 local_paths.append(os.path.abspath(tmp))
                 tmp_files.append(tmp)
             else:
@@ -11728,6 +11688,17 @@ class SeparateChat(Chat, WeixinWindow):
     WINDOW_CLASS = "mmui::ChatSingleWindow"
 
     def __init__(self, wx: "Weixin | None", contact_name: str):
+        """
+        初始化独立聊天窗口。
+
+        Args:
+            wx: Weixin 实例，可为 None（仅用于独立操作时）。
+            contact_name: 联系人或群聊名称（即窗口标题）。
+
+        Raises:
+            ValueError: contact_name 为空时抛出。
+            RuntimeError: 独立聊天窗口未找到时抛出。
+        """
         if not contact_name:
             raise ValueError("contact_name 不能为空")
         self._win = auto.WindowControl(
@@ -11836,11 +11807,6 @@ class SeparateChat(Chat, WeixinWindow):
     def __repr__(self) -> str:
         return self.__str__()
 
-
-# ======================================================================
-# 模块: core
-# ======================================================================
-
 """
 ┌─────────────────────────────────────────────────────────────────────────────┐
 │  mmui::MainWindow (微信主窗口)                              _ □ × (置顶)   │
@@ -11910,32 +11876,6 @@ class SeparateChat(Chat, WeixinWindow):
 └──────────────────────────┘  └──────────────────────────────┘
 """
 
-
-# ---- 从子模块导入 ----
-
-
-# ---- 从拆分模块导入业务类 ----
-import psutil
-
-def find_process(name: str) -> list[dict]:
-    """
-    查询指定名称的进程信息（使用 psutil）。
-
-    Args:
-        name: 进程名，如 "Weixin.exe"
-
-    Returns:
-        进程列表，每项包含 pid 和 name
-    """
-    processes = []
-    for proc in psutil.process_iter(["pid", "name"]):
-        try:
-            if proc.info["name"] and proc.info["name"].lower() == name.lower():
-                processes.append({"name": proc.info["name"], "pid": proc.info["pid"]})
-        except (psutil.NoSuchProcess, psutil.AccessDenied):
-            continue
-    return processes
-
 class Weixin(WeixinWindow):
 
     WINDOW_CLASS = "mmui::MainWindow"
@@ -11963,25 +11903,36 @@ class Weixin(WeixinWindow):
         wxocr_plugin_path: Optional[str] = None
     ):
         """
+        初始化微信自动化实例，连接微信客户端。
+
         Args:
-            background:   True 时使用后台模式（通过 SendMessage 发送虚拟鼠标/键盘消息，
-                          不需要窗口在前台），默认 False。
-            idle_wait:   人类操作等待时间（秒），大于 0 时自动启动物理输入监控，
-                          所有 UI 操作方法执行前会等待用户停止物理键盘/鼠标操作达到该秒数。
-                          默认 0 表示不等待。
-            lock_input:   True 时在自动化操作期间锁定物理键盘鼠标（需管理员权限），
-                          默认 False。
-            resize:       True 时将微信窗口设置为固定大小（1000x700），
-                          False 时保持原窗口大小。默认 True。
-            ocr_engine:   OCR 引擎选择
-                - "wcocr":    使用微信自带 OCR（默认）
-                - "rapidocr": 使用 RapidOCR
-            install_path: 微信安装路径，None 时自动检测
-            wxocr_weixin_install_path: 微信 OCR 插件带版本号微信安装路径，None 时自动检测
-            wxocr_plugin_path:   微信 OCR 插件路径，None 时自动检测
+            on_login: 登录回调函数，签名为 callback(login: Login)。
+                微信未登录时调用此回调处理登录流程，
+                None 时等待用户手动登录（60秒超时）。
+            background: True 时使用后台模式（通过 SendMessage 发送虚拟鼠标/键盘消息，
+                不需要窗口在前台），默认 False。
+            idle_wait: 人类操作等待时间（秒），大于 0 时自动启动物理输入监控，
+                所有 UI 操作方法执行前会等待用户停止物理键盘/鼠标操作达到该秒数。
+                默认 0 表示不等待。
+            lock_input: True 时在自动化操作期间锁定物理键盘鼠标（需管理员权限），
+                默认 False。
+            resize: True 时将微信窗口设置为固定大小（1200x1000），
+                False 时保持原窗口大小。默认 True。
+            install_path: 微信安装路径，None 时自动从注册表检测。
+            ocr_engine: OCR 引擎选择，可选值：
+                - "wcocr": 使用微信自带 OCR（默认，速度快）
+                - "rapidocr": 使用 RapidOCR（无需微信 OCR 插件）
+            wxocr_weixin_install_path: 微信 OCR 插件所需的带版本号微信安装路径，
+                None 时自动检测。仅 ocr_engine="wcocr" 时有效。
+            wxocr_plugin_path: 微信 OCR 插件 wxocr.dll 路径，
+                None 时自动检测。仅 ocr_engine="wcocr" 时有效。
+
+        Raises:
+            LoginError: 微信未安装、启动超时或登录超时时抛出。
+            ValueError: ocr_engine 参数无效时抛出。
         """
         self.background = background
-        globals()['background'] = background # 设置全局后台模式标志
+        globals()["background"] = background # 设置全局后台模式标志
         self.idle_wait = idle_wait
         self.lock_input = lock_input
         if self.idle_wait > 0:
@@ -12686,14 +12637,14 @@ class Weixin(WeixinWindow):
     #     more_btn = self.navigator._win.ButtonControl(Name="更多")
     #     if not more_btn.Exists(maxSearchSeconds=2):
     #         raise RuntimeError("未找到更多按钮")
-    #     more_btn.Click(ratioX=_rand_ratio(), ratioY=_rand_ratio())
+    #     more_btn.Click(ratioX=rand_ratio(), ratioY=rand_ratio())
     #     time.sleep(0.1)
     #
     #     lock_btn = self._win.ButtonControl(ClassName="mmui::XButton", Name="锁定")
     #     if not lock_btn.Exists(maxSearchSeconds=2):
     #         self._win.SendKeys("{Esc}")
     #         raise RuntimeError("弹出菜单中未找到锁定按钮")
-    #     lock_btn.Click(ratioX=_rand_ratio(), ratioY=_rand_ratio())
+    #     lock_btn.Click(ratioX=rand_ratio(), ratioY=rand_ratio())
 
     @PIM.guard
     def lock(self) -> None:
@@ -12774,8 +12725,6 @@ class Weixin(WeixinWindow):
             click:   点击方式 - "once"(默认) / "double"
         """
         input_wx.click(control, button=button, click=click)
-
-    # ---- 朋友圈快捷方法 ----
 
     def get_moments(self, count: int = 10, position: str = "top") -> list:
         """获取朋友圈动态列表，委托给 friend_circle"""
