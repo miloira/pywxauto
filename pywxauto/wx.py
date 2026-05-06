@@ -1236,6 +1236,21 @@ def _screen_to_client(control, randomize: bool = True) -> tuple[int, int, int]:
     client_x, client_y = win32gui.ScreenToClient(hwnd, (screen_x, screen_y))
     return hwnd, client_x, client_y
 
+def activate(control) -> None:
+    """
+    激活控件所属窗口。
+
+    前台模式: uiautomation SetActive + SetFocus
+    后台模式: SendMessage WM_ACTIVATE
+    """
+    if not background:
+        control.SetActive()
+        control.SetFocus()
+    else:
+        hwnd = _get_hwnd(control)
+        if hwnd:
+            input_wm.activate_window(hwnd)
+
 def focus(control) -> None:
     """
     让控件获得焦点。
@@ -1541,6 +1556,7 @@ def paste(content) -> None:
 # ---- input_wx 命名空间（供其他模块通过 input_wx.xxx 调用） ----
 class _InputWxNamespace:
     """模拟 input_wx 模块命名空间，使 input_wx.xxx() 调用方式继续工作"""
+    activate = staticmethod(activate)
     focus = staticmethod(focus)
     click = staticmethod(click)
     send_keys = staticmethod(send_keys)
@@ -12682,6 +12698,7 @@ class Weixin(WeixinWindow):
     @PIM.guard
     def lock(self) -> None:
         """锁定微信（Ctrl+L）"""
+        self.activate()
         self.shortcut("锁定")
 
     @staticmethod
@@ -12739,6 +12756,7 @@ class Weixin(WeixinWindow):
 
     def enter(self) -> None:
         """发送消息（Enter）"""
+        self.activate()
         self.shortcut("发送消息")
 
     def click(self, control, button: str = "left",
