@@ -51,7 +51,7 @@ background: bool = False
 
 
 class WxAutoError(Exception):
-    """pywxauto 异常基类"""
+    """异常基类"""
     pass
 
 
@@ -888,7 +888,9 @@ def download_to_temp(url: str, timeout: int = 60) -> str:
 
     tmp_dir = os.path.join(tempfile.gettempdir(), "pywxauto_downloads")
     os.makedirs(tmp_dir, exist_ok=True)
-    tmp_path = os.path.join(tmp_dir, basename)
+    name_part, ext_part = os.path.splitext(basename)
+    tmp_fd, tmp_path = tempfile.mkstemp(suffix=ext_part, prefix=f"{name_part}_", dir=tmp_dir)
+    os.close(tmp_fd)
 
     try:
         resp = requests.get(url, timeout=timeout, stream=True)
@@ -12816,7 +12818,7 @@ class Weixin(WeixinWindow):
         if isinstance(image, str):
             result = wcocr.ocr(image)
         else:
-            tmp_fd, tmp_path = tempfile.mkstemp(suffix=".png", prefix="_pywxauto_ocr_")
+            tmp_fd, tmp_path = tempfile.mkstemp(suffix=".png", prefix="ocr_")
             try:
                 with os.fdopen(tmp_fd, "wb") as f:
                     f.write(image)
