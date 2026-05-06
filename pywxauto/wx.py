@@ -2273,13 +2273,25 @@ class Login(WeixinWindow):
     TRANSFER_ONLY_BTN_NAME = "仅传输文件"
     PROXY_BTN_NAME = "网络代理设置"
 
-    def __init__(self):
-        """初始化登录窗口操作实例，绑定微信登录窗口控件。"""
-        self._win = auto.WindowControl(
-            ClassName=self.WINDOW_CLASS,
-            Name=self.WINDOW_NAME,
-            Depth=1,
-        )
+    def __init__(self, pid: Optional[int] = None):
+        """初始化登录窗口操作实例，绑定微信登录窗口控件。
+
+        Args:
+            pid: 微信进程 PID，传入时精确绑定该进程的登录窗口，
+                None 时匹配第一个登录窗口（兼容旧行为）。
+        """
+        if pid:
+            self._win = auto.WindowControl(
+                ClassName=self.WINDOW_CLASS,
+                ProcessId=pid,
+                searchDepth=1,
+            )
+        else:
+            self._win = auto.WindowControl(
+                ClassName=self.WINDOW_CLASS,
+                Name=self.WINDOW_NAME,
+                Depth=1,
+            )
 
     @property
     def exists(self) -> bool:
@@ -12055,7 +12067,26 @@ class WeixinClient(WeixinWindow):
                 searchDepth=1
             )
             if not self._win.Exists(maxSearchSeconds=3):
-                raise WindowNotFoundError(f"未找到 PID={self.pid} 的微信主窗口")
+                # 主窗口未找到，检查是否存在登录窗口
+                login_win = auto.WindowControl(
+                    ClassName=Login.WINDOW_CLASS,
+                    ProcessId=self.pid,
+                    searchDepth=1
+                )
+                if login_win.Exists(maxSearchSeconds=3):
+                    # 是登录窗口，走登录逻辑
+                    login = Login(pid=self.pid)
+                    self._handle_login(login)
+                    # 登录完成后重新绑定主窗口
+                    self._win = auto.WindowControl(
+                        ClassName=self.WINDOW_CLASS,
+                        ProcessId=self.pid,
+                        searchDepth=1
+                    )
+                    if not self._win.Exists(maxSearchSeconds=5):
+                        raise LoginError(f"登录后未找到 PID={self.pid} 的微信主窗口")
+                else:
+                    raise WindowNotFoundError(f"未找到 PID={self.pid} 的微信主窗口或登录窗口")
         else:
             self._win: auto.WindowControl = auto.WindowControl(
                 ClassName=self.WINDOW_CLASS,
@@ -12182,16 +12213,24 @@ class WeixinClient(WeixinWindow):
         if self._on_login:
             self._on_login(login)
         else:
-            # 等待用户手动登录
+            # 等待用户手动登录（60秒超时）
             logger.info("等待手动登录...")
             for _ in range(600):
-                if self.find_wechat_window():
-                    break
+                if self.pid:
+                    if self.find_wechat_window_by_pid(self.pid):
+                        break
+                else:
+                    if self.find_wechat_window():
+                        break
                 time.sleep(0.1)
 
         # 验证登录结果
-        if not self.find_wechat_window():
-            raise LoginError("登录超时，主窗口未出现")
+        if self.pid:
+            if not self.find_wechat_window_by_pid(self.pid):
+                raise LoginError("登录超时，主窗口未出现")
+        else:
+            if not self.find_wechat_window():
+                raise LoginError("登录超时，主窗口未出现")
 
     @property
     def is_online(self) -> bool:

@@ -114,6 +114,11 @@ class CreateRoomRequest(BaseModel):
     members: list[str] = Field(..., description="好友昵称列表（至少两个）")
 
 
+class OpenClientRequest(BaseModel):
+    install_path: Optional[str] = Field(None, description="微信安装路径，None 时自动从注册表检测")
+    timeout: float = Field(30, description="等待微信进程启动的超时时间（秒）")
+
+
 class CallbackRequest(BaseModel):
     url: str = Field(..., description="消息回调地址（POST），设为空字符串取消回调")
 
@@ -298,6 +303,20 @@ async def disconnect_client(pid: Optional[int] = None):
     else:
         wx.disconnect_all()
         return {"message": "已断开所有客户端"}
+
+
+@app.post("/open", summary="打开微信客户端")
+async def open_client(req: OpenClientRequest = OpenClientRequest()):
+    """
+    启动一个新的微信客户端并连接，返回新进程的 PID。
+
+    每次调用都会启动一个新进程（支持多开）。
+    """
+    try:
+        pid = wx.open(install_path=req.install_path, timeout=req.timeout)
+        return {"pid": pid, "message": f"微信客户端已启动，PID={pid}"}
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
 
 
 # ---- 消息发送接口 ----
