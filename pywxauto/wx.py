@@ -3652,7 +3652,7 @@ class Session:
                         return
                 except Exception:
                     pass
-                click(item)
+                input_wx.click(item)
                 # item.Click(ratioX=_rand_ratio(), ratioY=_rand_ratio())
                 time.sleep(0.3)
                 return
@@ -3922,7 +3922,7 @@ class Session:
         chat_type = chat_type or ["联系人", "群聊", "功能"]
         edit = self._get_search_edit()
         input_wx.click(edit)
-        edit.GetValuePattern().SetValue(keyword)
+        input_wx.send_keys(edit, keyword)
         time.sleep(0.5)
 
         # 按分类优先级查找搜索结果
@@ -7805,7 +7805,7 @@ class Chat:
         time.sleep(0.3)
         input_wx.send_keys(search_edit, "{Ctrl}a{Del}")
         time.sleep(0.2)
-        input_wx.paste(receiver_nickname)
+        input_wx.send_keys(search_edit, receiver_nickname)
         time.sleep(1.5)
 
         # 重新获取 picker_win，避免控件缓存问题
