@@ -34,9 +34,11 @@ import winreg
 from PIL import Image
 from pyee.base import EventEmitter
 from rapidocr import RapidOCR
+import sys
 
 try:
-    from . import wcocr
+    import wcocr
+    # from . import wcocr
 except ImportError:
     wcocr = None
 
