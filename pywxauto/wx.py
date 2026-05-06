@@ -2273,30 +2273,86 @@ class Login(WeixinWindow):
     TRANSFER_ONLY_BTN_NAME = "仅传输文件"
     PROXY_BTN_NAME = "网络代理设置"
 
-    def __init__(self, pid: Optional[int] = None):
+    def __init__(self, pid: int):
         """初始化登录窗口操作实例，绑定微信登录窗口控件。
 
         Args:
-            pid: 微信进程 PID，传入时精确绑定该进程的登录窗口，
-                None 时匹配第一个登录窗口（兼容旧行为）。
+            pid: 微信进程 PID，精确绑定该进程的登录窗口。
         """
-        if pid:
-            self._win = auto.WindowControl(
-                ClassName=self.WINDOW_CLASS,
-                ProcessId=pid,
-                searchDepth=1,
-            )
-        else:
-            self._win = auto.WindowControl(
-                ClassName=self.WINDOW_CLASS,
-                Name=self.WINDOW_NAME,
-                Depth=1,
-            )
+        self.pid = pid
+        self._win = auto.WindowControl(
+            ClassName=self.WINDOW_CLASS,
+            ProcessId=pid,
+            searchDepth=1,
+        )
 
     @property
     def exists(self) -> bool:
         """登录窗口是否存在"""
         return self._win.Exists(0, 0)
+
+    @property
+    def state(self) -> str:
+        """
+        获取登录窗口当前状态。
+
+        通过检测关键控件判断当前处于哪个界面：
+        - "enter":    进入微信状态（显示"进入微信"按钮，已有登录账号）
+        - "qrcode":   扫码登录状态（显示二维码）
+        - "confirm":  待确认登录状态（已扫码，等待手机确认）
+        - "entering": 正在进入状态（手机已确认，正在加载主界面）
+        - "unknown":  未知状态（可能在代理设置页面或其他过渡状态）
+
+        Returns:
+            "enter" / "qrcode" / "confirm" / "entering" / "unknown"
+        """
+        self._ensure_exists()
+        # 检测"进入微信"按钮
+        enter_btn = self._win.ButtonControl(
+            ClassName=self.ENTER_BTN_CLASS,
+            Name=self.ENTER_BTN_NAME,
+        )
+        if enter_btn.Exists(0, 0):
+            return "enter"
+        # 检测正在进入状态
+        entering_txt = self._win.TextControl(
+            ClassName="mmui::XTextView",
+            Name="正在进入",
+        )
+        if entering_txt.Exists(0, 0):
+            return "entering"
+        # 检测待确认登录状态
+        confirm_txt = self._win.TextControl(
+            ClassName="mmui::XTextView",
+            Name="需在手机上完成登录",
+        )
+        if confirm_txt.Exists(0, 0):
+            return "confirm"
+        # 检测二维码控件
+        qr_ctrl = self._win.ButtonControl(
+            ClassName="mmui::XImage",
+            Name="二维码",
+        )
+        if qr_ctrl.Exists(0, 0):
+            return "qrcode"
+        return "unknown"
+
+    @property
+    def is_logined(self) -> bool:
+        """
+        判断是否已登录成功（微信主窗口是否已出现）。
+
+        通过检测当前进程的微信主窗口（mmui::MainWindow）是否存在来判断。
+
+        Returns:
+            True 已登录（主窗口存在），False 未登录
+        """
+        win = auto.WindowControl(
+            ClassName="mmui::MainWindow",
+            ProcessId=self.pid,
+            searchDepth=1,
+        )
+        return win.Exists(0, 0)
 
     def _ensure_exists(self) -> None:
         if not self._win.Exists(maxSearchSeconds=3):
@@ -2377,6 +2433,39 @@ class Login(WeixinWindow):
             raise RuntimeError("未找到'切换账号'按钮")
         input_wx.click(btn)
         time.sleep(0.5)
+
+    def get_qrcode(self) -> bytes:
+        """
+        获取登录二维码图片数据。
+
+        从登录窗口中截取二维码控件区域，返回 PNG 格式的字节数据。
+        二维码控件: ButtonControl, ClassName="mmui::XImage", Name="二维码"
+
+        注意：二维码仅在"切换账号"后的扫码登录界面显示。
+        如果当前是"进入微信"界面（已有登录账号），需要先调用
+        switch_account() 切换到扫码界面。
+
+        Returns:
+            PNG 格式的二维码图片字节数据
+
+        Raises:
+            WindowNotFoundError: 登录窗口未找到
+            RuntimeError: 二维码控件未找到
+        """
+        self._ensure_exists()
+        qr_ctrl = self._win.ButtonControl(
+            ClassName="mmui::XImage",
+            Name="二维码",
+        )
+        if not qr_ctrl.Exists(maxSearchSeconds=5):
+            raise RuntimeError("未找到二维码控件，请确认当前处于扫码登录界面")
+
+        # 通过窗口截图 + 裁剪二维码区域获取图片
+        hwnd = self._win.NativeWindowHandle
+        if not hwnd:
+            raise RuntimeError("无法获取登录窗口句柄")
+
+        return capture_control(hwnd, qr_ctrl, offset_left=2, mode="print_window")
 
     @PIM.guard
     def transfer_only(self) -> None:
@@ -12182,15 +12271,11 @@ class WeixinClient(WeixinWindow):
         return win
 
     def is_exists_window(self, timeout: float = 30, interval: float = 0.1) -> bool:
-        """轮询检测微信主窗口是否存在（支持 PID 过滤）"""
+        """轮询检测微信主窗口是否存在"""
         deadline = time.monotonic() + timeout
         while time.monotonic() < deadline:
-            if self.pid:
-                if self.find_wechat_window_by_pid(self.pid):
-                    return True
-            else:
-                if self.find_wechat_window():
-                    return True
+            if self.find_wechat_window_by_pid(self.pid):
+                return True
             time.sleep(interval)
         return False
 
@@ -12216,21 +12301,13 @@ class WeixinClient(WeixinWindow):
             # 等待用户手动登录（60秒超时）
             logger.info("等待手动登录...")
             for _ in range(600):
-                if self.pid:
-                    if self.find_wechat_window_by_pid(self.pid):
-                        break
-                else:
-                    if self.find_wechat_window():
-                        break
+                if self.find_wechat_window_by_pid(self.pid):
+                    break
                 time.sleep(0.1)
 
         # 验证登录结果
-        if self.pid:
-            if not self.find_wechat_window_by_pid(self.pid):
-                raise LoginError("登录超时，主窗口未出现")
-        else:
-            if not self.find_wechat_window():
-                raise LoginError("登录超时，主窗口未出现")
+        if not self.find_wechat_window_by_pid(self.pid):
+            raise LoginError("登录超时，主窗口未出现")
 
     @property
     def is_online(self) -> bool:
