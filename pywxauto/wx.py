@@ -36,7 +36,7 @@ from pyee.base import EventEmitter
 from rapidocr import RapidOCR
 
 try:
-    import wcocr
+    from . import wcocr
 except ImportError:
     wcocr = None
 
@@ -1227,11 +1227,11 @@ def click(control, button: str = "left", click: str = "once") -> None:
     """
     if not background:
         if click == "double":
-            control.DoubleClick()
+            control.DoubleClick(simulateMove=False)
         elif button == "right":
-            control.RightClick(ratioX=rand_ratio(), ratioY=rand_ratio())
+            control.RightClick(ratioX=rand_ratio(), ratioY=rand_ratio(), simulateMove=False)
         else:
-            control.Click(ratioX=rand_ratio(), ratioY=rand_ratio())
+            control.Click(ratioX=rand_ratio(), ratioY=rand_ratio(), simulateMove=False)
     else:
         hwnd, cx, cy = _screen_to_client(control)
 
@@ -1573,6 +1573,7 @@ class Message:
         self.runtime_id: tuple = runtime_id
         self.bubble_rect: tuple = bubble_rect
         self.chat: object = None
+        self.pid: int = 0  # 来源微信客户端的进程 PID
 
     @property
     def type_label(self) -> str:
@@ -2713,11 +2714,18 @@ class VoipCallWindow:
     WINDOW_CLASS = "mmui::VOIPWindow"
     WINDOW_ID = "VOIPWindow"
 
-    def __init__(self):
-        """初始化通话窗口控制实例，绑定 VOIPWindow 控件。"""
+    def __init__(self, pid: int = None):
+        """
+        初始化通话窗口控制实例，绑定 VOIPWindow 控件。
+
+        Args:
+            pid: 微信进程 PID，传入时按 PID 精确匹配通话窗口。
+        """
+        self._pid = pid
         self._win = auto.WindowControl(
             ClassName=self.WINDOW_CLASS,
             AutomationId=self.WINDOW_ID,
+            ProcessId=pid or 0,
         )
 
     @property
@@ -4573,6 +4581,7 @@ class FriendCircle(WeixinWindow):
         self._win = auto.WindowControl(
             ClassName=self.SNS_WINDOW_CLASS,
             AutomationId=self.SNS_WINDOW_ID,
+            ProcessId=self.wx.pid,
             searchDepth=1
         )
 
@@ -7935,12 +7944,14 @@ class Chat:
     @PIM.guard
     def voice_call(self) -> "VoipCallWindow":
         self._click_voip_menu("语音通话")
-        return VoipCallWindow()
+        pid = self.wx.pid if self.wx else None
+        return VoipCallWindow(pid=pid)
 
     @PIM.guard
     def video_call(self) -> "VoipCallWindow":
         self._click_voip_menu("视频通话")
-        return VoipCallWindow()
+        pid = self.wx.pid if self.wx else None
+        return VoipCallWindow(pid=pid)
 
     @PIM.guard
     def separate(self) -> "SeparateChat":
@@ -11153,13 +11164,31 @@ class Chat:
 
     @PIM.guard
     def set_contact_star(self) -> None:
-        """将当前私聊联系人设为星标朋友"""
+        """将当前私聊联系人设为星标朋友，已是星标则跳过"""
         self._activate_window()
         try:
             self._open_contact_profile()
-            self._click_profile_menu_item("设为星标朋友")
+            self._click_profile_more_button()
             time.sleep(0.3)
-            logger.debug(f"设为星标朋友操作完成: {self.current_name}")
+
+            # 发现"不再设为星标朋友"说明已是星标
+            unstar_item = self._win.MenuItemControl(
+                ClassName="mmui::XMenuView", Name="不再设为星标朋友",
+            )
+            if unstar_item.Exists(0, 0):
+                input_wx.send_keys(self._win, "{Esc}")
+                logger.debug(f"已是星标朋友，跳过: {self.current_name}")
+                return
+
+            menu_item = self._win.MenuItemControl(
+                ClassName="mmui::XMenuView", Name="设为星标朋友",
+            )
+            if not menu_item.Exists(maxSearchSeconds=2):
+                input_wx.send_keys(self._win, "{Esc}")
+                raise RuntimeError("未找到'设为星标朋友'菜单项")
+            input_wx.click(menu_item)
+            time.sleep(0.3)
+            logger.debug(f"设为星标朋友成功: {self.current_name}")
         except Exception:
             self._cleanup_profile()
             raise
@@ -11168,13 +11197,31 @@ class Chat:
 
     @PIM.guard
     def cancel_contact_star(self) -> None:
-        """取消当前私聊联系人的星标朋友"""
+        """取消当前私聊联系人的星标朋友，非星标则跳过"""
         self._activate_window()
         try:
             self._open_contact_profile()
-            self._click_profile_menu_item("不再设为星标朋友")
+            self._click_profile_more_button()
             time.sleep(0.3)
-            logger.debug(f"取消星标朋友操作完成: {self.current_name}")
+
+            # 发现"设为星标朋友"说明当前不是星标
+            star_item = self._win.MenuItemControl(
+                ClassName="mmui::XMenuView", Name="设为星标朋友",
+            )
+            if star_item.Exists(0, 0):
+                input_wx.send_keys(self._win, "{Esc}")
+                logger.debug(f"非星标朋友，跳过: {self.current_name}")
+                return
+
+            menu_item = self._win.MenuItemControl(
+                ClassName="mmui::XMenuView", Name="不再设为星标朋友",
+            )
+            if not menu_item.Exists(maxSearchSeconds=2):
+                input_wx.send_keys(self._win, "{Esc}")
+                raise RuntimeError("未找到'不再设为星标朋友'菜单项")
+            input_wx.click(menu_item)
+            time.sleep(0.3)
+            logger.debug(f"取消星标朋友成功: {self.current_name}")
         except Exception:
             self._cleanup_profile()
             raise
@@ -11183,11 +11230,29 @@ class Chat:
 
     @PIM.guard
     def black_contact(self) -> None:
-        """将当前私聊联系人加入黑名单"""
+        """将当前私聊联系人加入黑名单，已在黑名单中则跳过"""
         self._activate_window()
         try:
             self._open_contact_profile()
-            self._click_profile_menu_item("加入黑名单")
+            self._click_profile_more_button()
+            time.sleep(0.3)
+
+            # 检查菜单中是否有"移出黑名单"（说明已在黑名单中）
+            unblack_item = self._win.MenuItemControl(
+                ClassName="mmui::XMenuView", Name="移出黑名单",
+            )
+            if unblack_item.Exists(0, 0):
+                input_wx.send_keys(self._win, "{Esc}")
+                logger.debug(f"已在黑名单中，跳过: {self.current_name}")
+                return
+
+            menu_item = self._win.MenuItemControl(
+                ClassName="mmui::XMenuView", Name="加入黑名单",
+            )
+            if not menu_item.Exists(maxSearchSeconds=2):
+                input_wx.send_keys(self._win, "{Esc}")
+                raise RuntimeError("未找到'加入黑名单'菜单项")
+            input_wx.click(menu_item)
             time.sleep(0.5)
 
             confirm_btn = self._win.ButtonControl(Name="确定")
@@ -11206,11 +11271,29 @@ class Chat:
 
     @PIM.guard
     def unblack_contact(self) -> None:
-        """将当前私聊联系人移出黑名单"""
+        """将当前私聊联系人移出黑名单，不在黑名单中则跳过"""
         self._activate_window()
         try:
             self._open_contact_profile()
-            self._click_profile_menu_item("移出黑名单")
+            self._click_profile_more_button()
+            time.sleep(0.3)
+
+            # 检查菜单中是否有"加入黑名单"（说明不在黑名单中）
+            black_item = self._win.MenuItemControl(
+                ClassName="mmui::XMenuView", Name="加入黑名单",
+            )
+            if black_item.Exists(0, 0):
+                input_wx.send_keys(self._win, "{Esc}")
+                logger.debug(f"不在黑名单中，跳过: {self.current_name}")
+                return
+
+            menu_item = self._win.MenuItemControl(
+                ClassName="mmui::XMenuView", Name="移出黑名单",
+            )
+            if not menu_item.Exists(maxSearchSeconds=2):
+                input_wx.send_keys(self._win, "{Esc}")
+                raise RuntimeError("未找到'移出黑名单'菜单项")
+            input_wx.click(menu_item)
             time.sleep(0.3)
             logger.debug(f"移出黑名单成功: {self.current_name}")
         except Exception:
@@ -11690,12 +11773,12 @@ class SeparateChat(Chat, WeixinWindow):
 
     WINDOW_CLASS = "mmui::ChatSingleWindow"
 
-    def __init__(self, wx: "Weixin | None", contact_name: str):
+    def __init__(self, wx: "WeixinClient | None", contact_name: str):
         """
         初始化独立聊天窗口。
 
         Args:
-            wx: Weixin 实例，可为 None（仅用于独立操作时）。
+            wx: WeixinClient 实例，可为 None（仅用于独立操作时）。
             contact_name: 联系人或群聊名称（即窗口标题）。
 
         Raises:
@@ -11704,14 +11787,18 @@ class SeparateChat(Chat, WeixinWindow):
         """
         if not contact_name:
             raise ValueError("contact_name 不能为空")
+
+        self.wx = wx
+        pid = wx.pid if wx else None
+
         self._win = auto.WindowControl(
             ClassName=self.WINDOW_CLASS,
             Name=contact_name,
+            ProcessId=pid or 0,
             searchDepth=1
         )
         if not self._win.Exists(0, 0):
             raise RuntimeError(f"独立聊天窗口未找到: {contact_name}")
-        self.wx = wx
 
     @property
     def exists(self) -> bool:
@@ -11804,7 +11891,8 @@ class SeparateChat(Chat, WeixinWindow):
     def __str__(self) -> str:
         if not self._win.Exists(0, 0):
             return "SeparateChat(closed)"
-        return (f"SeparateChat(chat_type={self.chat_type!r}, "
+        pid = self.wx.pid if self.wx else 0
+        return (f"SeparateChat(pid={pid}, chat_type={self.chat_type!r}, "
                 f"name={self.current_name!r})")
 
     def __repr__(self) -> str:
@@ -11879,7 +11967,7 @@ class SeparateChat(Chat, WeixinWindow):
 └──────────────────────────┘  └──────────────────────────────┘
 """
 
-class Weixin(WeixinWindow):
+class WeixinClient(WeixinWindow):
 
     WINDOW_CLASS = "mmui::MainWindow"
     WINDOW_REGEX = "微信|Weixin"
@@ -11895,6 +11983,7 @@ class Weixin(WeixinWindow):
 
     def __init__(
         self, 
+        pid: Optional[int] = None,
         on_login: "callable | None" = None,
         background: bool = False, 
         idle_wait: float = 0, 
@@ -11909,6 +11998,8 @@ class Weixin(WeixinWindow):
         初始化微信自动化实例，连接微信客户端。
 
         Args:
+            pid: 微信进程 PID。传入时精确绑定该进程的主窗口，
+                None 时自动查找或启动微信（兼容旧行为）。
             on_login: 登录回调函数，签名为 callback(login: Login)。
                 微信未登录时调用此回调处理登录流程，
                 None 时等待用户手动登录（60秒超时）。
@@ -11934,6 +12025,7 @@ class Weixin(WeixinWindow):
             LoginError: 微信未安装、启动超时或登录超时时抛出。
             ValueError: ocr_engine 参数无效时抛出。
         """
+        self.pid = pid
         self.background = background
         globals()["background"] = background # 设置全局后台模式标志
         self.idle_wait = idle_wait
@@ -11952,12 +12044,25 @@ class Weixin(WeixinWindow):
         self._main_offscreen_rect = None
 
         ensure_narrator_registry()
-        self._ensure_running()
-        self._win: auto.WindowControl = auto.WindowControl(
-            ClassName=self.WINDOW_CLASS,
-            RegexName=self.WINDOW_REGEX,
-            searchDepth=1
-        )
+
+        # 通过 PID 精确绑定窗口，或按旧逻辑匹配第一个
+        if self.pid:
+            self._win: auto.WindowControl = auto.WindowControl(
+                ClassName=self.WINDOW_CLASS,
+                ProcessId=self.pid,
+                searchDepth=1
+            )
+            if not self._win.Exists(maxSearchSeconds=3):
+                raise WindowNotFoundError(f"未找到 PID={self.pid} 的微信主窗口")
+        else:
+            self._win: auto.WindowControl = auto.WindowControl(
+                ClassName=self.WINDOW_CLASS,
+                RegexName=self.WINDOW_REGEX,
+                searchDepth=1
+            )
+            # 记录绑定的 PID
+            if self._win.Exists(0, 0):
+                self.pid = self._win.ProcessId
 
         self._ocr_engine = ocr_engine
         if self._ocr_engine == "wcocr":
@@ -12010,51 +12115,51 @@ class Weixin(WeixinWindow):
         )
         return win.Exists(0, 0)
 
+    @staticmethod
+    def find_wechat_window_by_pid(pid: int) -> bool:
+        """检查指定 PID 的微信主窗口是否存在"""
+        win = auto.WindowControl(
+            ClassName="mmui::MainWindow",
+            ProcessId=pid,
+            searchDepth=1,
+        )
+        return win.Exists(0, 0)
+
+    @staticmethod
+    def _find_window_by_pid(pid: int) -> auto.WindowControl:
+        """
+        通过 PID 查找微信主窗口控件。
+
+        Args:
+            pid: 微信进程 PID
+
+        Returns:
+            匹配的 WindowControl
+
+        Raises:
+            WindowNotFoundError: 未找到匹配的窗口
+        """
+        win = auto.WindowControl(
+            ClassName="mmui::MainWindow",
+            ProcessId=pid,
+            searchDepth=1,
+        )
+        if not win.Exists(maxSearchSeconds=3):
+            raise WindowNotFoundError(f"未找到 PID={pid} 的微信主窗口")
+        return win
+
     def is_exists_window(self, timeout: float = 30, interval: float = 0.1) -> bool:
-        """轮询检测微信主窗口是否存在"""
+        """轮询检测微信主窗口是否存在（支持 PID 过滤）"""
         deadline = time.monotonic() + timeout
         while time.monotonic() < deadline:
-            if self.find_wechat_window():
-                return True
+            if self.pid:
+                if self.find_wechat_window_by_pid(self.pid):
+                    return True
+            else:
+                if self.find_wechat_window():
+                    return True
             time.sleep(interval)
         return False
-
-    def _ensure_running(self) -> None:
-        if not find_process("Weixin.exe"):
-            # 没有任何窗口，启动微信进程
-            subprocess.Popen([f"{self.install_path}\\Weixin.exe"])
-
-            # 等待登录窗口或主窗口出现
-            deadline = time.monotonic() + 30
-            login = Login()
-            while time.monotonic() < deadline:
-                if self.find_wechat_window():
-                    return
-                if login.exists:
-                    break
-                time.sleep(0.5)
-            else:
-                raise LoginError("微信启动超时，未检测到登录窗口或主窗口")
-
-            # 登录窗口已出现
-            self._handle_login(login)
-
-            return 
-
-        # 主窗口已存在，直接返回
-        if self.find_wechat_window():
-            return
-
-        # 检查是否已有登录窗口（微信已启动但未登录）
-        login = Login()
-        if login.exists:
-            self._handle_login(login)
-            return
-
-        # 尝试快捷键唤醒（微信可能在后台/托盘）
-        self.shortcut("显示窗口")
-        if self.is_exists_window(timeout=2, interval=0.1):
-            return
 
     def _handle_login(self, login: "Login") -> None:
         """
@@ -12115,7 +12220,7 @@ class Weixin(WeixinWindow):
         获取所有已打开的聊天窗口对象。
 
         包括主窗口中的当前聊天（Chat）和所有独立聊天窗口（SeparateChat）。
-        通过桌面顶层窗口一次性过滤，避免逐个搜索。
+        通过桌面顶层窗口按 PID 过滤，避免匹配到其他微信实例的窗口。
         """
         result: list[Chat | SeparateChat] = []
 
@@ -12124,13 +12229,15 @@ class Weixin(WeixinWindow):
         if main_chat is not None:
             result.append(main_chat)
 
-        # 从桌面一次性获取所有顶层窗口，按类名过滤独立聊天窗口
+        # 从桌面一次性获取所有顶层窗口，按类名和 PID 过滤独立聊天窗口
         for ctrl in auto.GetRootControl().GetChildren():
-            if ctrl.ClassName == SeparateChat.WINDOW_CLASS and ctrl.Name:
-                try:
+            try:
+                if (ctrl.ClassName == SeparateChat.WINDOW_CLASS
+                        and ctrl.Name
+                        and (not self.pid or ctrl.ProcessId == self.pid)):
                     result.append(SeparateChat(self, ctrl.Name))
-                except (RuntimeError, ValueError):
-                    pass
+            except Exception:
+                pass
 
         return result
 
@@ -12247,15 +12354,18 @@ class Weixin(WeixinWindow):
 
     def get_separate_chats(self) -> list[SeparateChat]:
         """
-        获取所有已打开的独立聊天窗口。
+        获取所有已打开的独立聊天窗口（按 PID 过滤）。
 
-        遍历桌面顶层窗口，返回所有 mmui::ChatSingleWindow 的 SeparateChat 实例。
+        遍历桌面顶层窗口，返回属于当前微信进程的所有独立聊天窗口。
         """
         result: list[SeparateChat] = []
         skip_names = {"微信", "Weixin"}
         for ctrl in auto.GetRootControl().GetChildren():
             try:
-                if ctrl.ClassName == SeparateChat.WINDOW_CLASS and ctrl.Name and ctrl.Name not in skip_names:
+                if (ctrl.ClassName == SeparateChat.WINDOW_CLASS
+                        and ctrl.Name
+                        and ctrl.Name not in skip_names
+                        and (not self.pid or ctrl.ProcessId == self.pid)):
                     result.append(SeparateChat(self, ctrl.Name))
             except (RuntimeError, ValueError, Exception):
                 pass
@@ -12973,9 +13083,12 @@ class Weixin(WeixinWindow):
                 try:
                     cls_name = ctrl.ClassName
                     name = ctrl.Name
+                    proc_pid = ctrl.ProcessId
                 except Exception:
                     continue
-                if cls_name == SeparateChat.WINDOW_CLASS and name and name not in skip_names:
+                if (cls_name == SeparateChat.WINDOW_CLASS
+                        and name and name not in skip_names
+                        and (not self.pid or proc_pid == self.pid)):
                     if name not in self._chat_listeners or not self._chat_listeners[name].exists:
                         try:
                             chat = SeparateChat(self, name)
@@ -13139,6 +13252,7 @@ class Weixin(WeixinWindow):
                 # 按消息在列表中的原始顺序推送新消息
                 for msg in visible:
                     if msg.runtime_id and msg.runtime_id in new_rids:
+                        msg.pid = self.pid or 0
                         msg_queue.put((chat, msg))
 
                 # 只保留当前可见的 + 新增的
@@ -13227,3 +13341,681 @@ class Weixin(WeixinWindow):
                 t.join(timeout=3)
             self._stop_event = None
             logger.info("监听已停止")
+
+
+class Weixin:
+    """
+    微信多客户端管理器。
+
+    管理多个 WeixinClient 实例，所有 API 第一个参数为 pid，
+    内部路由到对应的 WeixinClient 执行操作。
+
+    支持统一消息监听，回调中通过 pid 区分消息来源。
+
+    用法::
+
+        wx = Weixin()
+
+        # 启动并连接微信
+        pid1 = wx.open()
+        pid2 = wx.open()
+
+        # 发送消息
+        wx.send_text(pid1, "张三", "来自账号1")
+        wx.send_text(pid2, "李四", "来自账号2")
+
+        # 统一监听
+        @wx.on(Event.TEXT)
+        def on_text(pid, client, message):
+            print(f"[PID={pid}] {message.sender}: {message.content}")
+
+        wx.add_chat_listen(pid1, ["张三", "李四"])
+        wx.add_chat_listen(pid2, ["王五"])
+        wx.run()
+    """
+
+    def __init__(
+        self,
+        background: bool = False,
+        idle_wait: float = 0,
+        lock_input: bool = False,
+        resize: bool = True,
+        ocr_engine: str = "wcocr",
+        wxocr_weixin_install_path: Optional[str] = None,
+        wxocr_plugin_path: Optional[str] = None,
+    ):
+        """
+        初始化微信管理器。
+
+        这些参数作为默认值，在 open/connect 创建 WeixinClient 时使用。
+
+        Args:
+            background:  后台模式
+            idle_wait:   物理输入等待时间
+            lock_input:  是否锁定物理输入
+            resize:      是否调整窗口大小
+            ocr_engine:  OCR 引擎
+            wxocr_weixin_install_path: 微信 OCR 安装路径
+            wxocr_plugin_path:         微信 OCR 插件路径
+        """
+        self._clients: dict[int, WeixinClient] = {}
+        self._default_kwargs = {
+            "background": background,
+            "idle_wait": idle_wait,
+            "lock_input": lock_input,
+            "resize": resize,
+            "ocr_engine": ocr_engine,
+            "wxocr_weixin_install_path": wxocr_weixin_install_path,
+            "wxocr_plugin_path": wxocr_plugin_path,
+        }
+        self._ee = EventEmitter()
+        self._stop_event: Optional[threading.Event] = None
+
+        # 默认连接所有已运行的微信客户端
+        self.connect_all()
+
+    # ---- 客户端管理 ----
+
+    def open(self, on_login: "callable | None" = None,
+             install_path: Optional[str] = None, timeout: float = 30,
+             **kwargs) -> int:
+        """
+        启动一个新的微信客户端并连接，返回 PID。
+
+        每次调用都会启动一个新进程（支持多开）。
+
+        Args:
+            on_login:     登录回调
+            install_path: 微信安装路径，None 时自动从注册表检测
+            timeout:      等待微信进程启动的超时时间（秒），默认 30 秒
+            **kwargs:     覆盖默认的 WeixinClient 参数
+
+        Returns:
+            新启动的微信进程 PID
+
+        Raises:
+            LoginError: 微信未安装或启动超时时抛出
+        """
+        # 获取安装路径
+        if not install_path:
+            install_path = get_weixin_install_path()
+
+        exe_path = os.path.join(install_path, "Weixin.exe")
+        if not os.path.exists(exe_path):
+            raise LoginError(f"微信可执行文件不存在: {exe_path}")
+
+        # 记录启动前已有的微信进程 PID
+        existing_pids = {p["pid"] for p in find_process("Weixin.exe")}
+
+        # 启动微信进程
+        proc = subprocess.Popen([exe_path])
+
+        # 等待新进程出现
+        pid = None
+        deadline = time.monotonic() + timeout
+        while time.monotonic() < deadline:
+            current_procs = find_process("Weixin.exe")
+            new_procs = [p for p in current_procs if p["pid"] not in existing_pids]
+            if new_procs:
+                pid = new_procs[0]["pid"]
+                break
+            time.sleep(0.5)
+
+        if not pid:
+            if proc.pid and psutil.pid_exists(proc.pid):
+                pid = proc.pid
+            else:
+                raise LoginError("微信启动超时，未检测到新微信进程")
+
+        logger.info(f"微信已启动，PID: {pid}")
+
+        # 等待窗口就绪后连接
+        time.sleep(2)
+        return self.connect(pid, on_login=on_login, **kwargs)
+
+    def connect(self, pid: int, on_login: "callable | None" = None, **kwargs) -> int:
+        """
+        连接已运行的微信客户端。
+
+        Args:
+            pid:      微信进程 PID
+            on_login: 登录回调
+            **kwargs: 覆盖默认的 WeixinClient 参数
+
+        Returns:
+            连接成功的 PID
+
+        Raises:
+            WindowNotFoundError: 指定 PID 的微信窗口未找到
+        """
+        if pid in self._clients:
+            client = self._clients[pid]
+            if client.is_online:
+                return pid
+
+        # 合并参数
+        params = {**self._default_kwargs, **kwargs}
+        client = WeixinClient(pid=pid, on_login=on_login, **params)
+        self._clients[pid] = client
+        return pid
+
+    def connect_all(self, on_login: "callable | None" = None, **kwargs) -> list[int]:
+        """
+        连接所有已运行的微信客户端。
+
+        Returns:
+            所有已连接的 PID 列表
+        """
+        connected: list[int] = []
+        seen_pids: set[int] = set()
+
+        for ctrl in auto.GetRootControl().GetChildren():
+            try:
+                if ctrl.ClassName == "mmui::MainWindow":
+                    proc_pid = ctrl.ProcessId
+                    if proc_pid and proc_pid not in seen_pids:
+                        seen_pids.add(proc_pid)
+                        try:
+                            self.connect(proc_pid, on_login=on_login, **kwargs)
+                            connected.append(proc_pid)
+                        except Exception as e:
+                            logger.warning(f"连接 PID={proc_pid} 失败: {e}")
+            except Exception:
+                continue
+
+        return connected
+
+    def disconnect(self, pid: int) -> None:
+        """
+        断开与指定微信客户端的连接（不关闭微信）。
+
+        Args:
+            pid: 要断开的微信进程 PID
+        """
+        client = self._clients.pop(pid, None)
+        if client:
+            client.move_back()
+            logger.info(f"已断开 PID={pid}")
+
+    def disconnect_all(self) -> None:
+        """断开所有已连接的微信客户端。"""
+        for pid in list(self._clients.keys()):
+            self.disconnect(pid)
+
+    def close(self, pid: int) -> None:
+        """
+        关闭指定微信客户端窗口并断开连接。
+
+        Args:
+            pid: 要关闭的微信进程 PID
+        """
+        client = self._clients.pop(pid, None)
+        if client:
+            client.move_back()
+            try:
+                client.close()
+            except Exception:
+                pass
+
+    def get_client(self, pid: int) -> WeixinClient:
+        """
+        获取指定 PID 的 WeixinClient 实例。
+
+        Args:
+            pid: 微信进程 PID
+
+        Returns:
+            WeixinClient 实例
+
+        Raises:
+            KeyError: PID 未连接
+        """
+        if pid not in self._clients:
+            raise KeyError(f"PID={pid} 未连接，请先调用 connect({pid})")
+        return self._clients[pid]
+
+    @property
+    def pids(self) -> list[int]:
+        """所有已连接的 PID 列表"""
+        return list(self._clients.keys())
+
+    @property
+    def clients(self) -> dict[int, WeixinClient]:
+        """所有已连接的 {pid: WeixinClient} 字典"""
+        return dict(self._clients)
+
+    def __len__(self) -> int:
+        return len(self._clients)
+
+    def __contains__(self, pid: int) -> bool:
+        return pid in self._clients
+
+    def __getitem__(self, pid: int) -> WeixinClient:
+        return self.get_client(pid)
+
+    # ---- 消息发送 ----
+
+    def send_text(self, pid: int, nickname: str, content: str, timeout: float = 0) -> "MessageStatus":
+        """发送文本消息"""
+        return self.get_client(pid).send_text(nickname, content, timeout)
+
+    def send_file(self, pid: int, nickname: str, file_path: "str | list[str]", timeout: float = 0) -> "MessageStatus":
+        """发送文件"""
+        return self.get_client(pid).send_file(nickname, file_path, timeout)
+
+    def send_image(self, pid: int, nickname: str, file_path: "str | list[str]", timeout: float = 0) -> "MessageStatus":
+        """发送图片"""
+        return self.get_client(pid).send_image(nickname, file_path, timeout)
+
+    def send_video(self, pid: int, nickname: str, file_path: "str | list[str]", timeout: float = 0) -> "MessageStatus":
+        """发送视频"""
+        return self.get_client(pid).send_video(nickname, file_path, timeout)
+
+    def send_at(self, pid: int, nickname: str, content: str, at_members: list[str], timeout: float = 0) -> "MessageStatus":
+        """在群聊中 @指定成员发送消息"""
+        return self.get_client(pid).send_at(nickname, content, at_members, timeout)
+
+    def send_emotion(self, pid: int, nickname: str, keyword: str = None, index: int = 1, timeout: float = 0) -> "MessageStatus":
+        """发送表情"""
+        return self.get_client(pid).send_emotion(nickname, keyword, index, timeout)
+
+    def send_collection(self, pid: int, nickname: str, keyword: str, timeout: float = 0) -> "MessageStatus":
+        """发送收藏内容"""
+        return self.get_client(pid).send_collection(nickname, keyword, timeout)
+
+    def send_card(self, pid: int, nickname: str, share: str) -> bool:
+        """发送名片"""
+        return self.get_client(pid).send_card(nickname, share)
+
+    # ---- 会话管理 ----
+
+    def open_session(self, pid: int, nickname: str) -> "Chat":
+        """打开会话"""
+        return self.get_client(pid).open_session(nickname)
+
+    def open_session_by_search(self, pid: int, nickname: str, chat_type: Optional[list[str]] = None, force_search: bool = False) -> "Chat":
+        """通过搜索打开会话"""
+        return self.get_client(pid).open_session_by_search(nickname, chat_type, force_search)
+
+    def close_session(self, pid: int, nickname: str) -> None:
+        """关闭会话"""
+        return self.get_client(pid).close_session(nickname)
+
+    def create_room(self, pid: int, nickname_list: list[str]) -> None:
+        """发起群聊"""
+        return self.get_client(pid).create_room(nickname_list)
+
+    def create_note(self, pid: int, content: str) -> None:
+        """创建笔记"""
+        return self.get_client(pid).create_note(content)
+
+    # ---- 联系人操作 ----
+
+    def get_contact_profile(self, pid: int, nickname: str) -> dict:
+        """获取联系人资料"""
+        return self.get_client(pid).get_contact_profile(nickname)
+
+    def set_contact_info(self, pid: int, nickname: str, **kwargs) -> None:
+        """设置联系人信息"""
+        return self.get_client(pid).set_contact_info(nickname, **kwargs)
+
+    def set_contact_remark(self, pid: int, nickname: str, remark: str) -> None:
+        """设置联系人备注"""
+        return self.get_client(pid).set_contact_remark(nickname, remark)
+
+    def add_contact_label(self, pid: int, nickname: str, labels: list[str]) -> None:
+        """添加联系人标签"""
+        return self.get_client(pid).add_contact_label(nickname, labels)
+
+    def remove_contact_label(self, pid: int, nickname: str, labels: list[str]) -> None:
+        """移除联系人标签"""
+        return self.get_client(pid).remove_contact_label(nickname, labels)
+
+    def set_contact_star(self, pid: int, nickname: str) -> None:
+        """设为星标朋友"""
+        return self.get_client(pid).set_contact_star(nickname)
+
+    def cancel_contact_star(self, pid: int, nickname: str) -> None:
+        """取消星标朋友"""
+        return self.get_client(pid).cancel_contact_star(nickname)
+
+    def black_contact(self, pid: int, nickname: str) -> None:
+        """加入黑名单"""
+        return self.get_client(pid).black_contact(nickname)
+
+    def unblack_contact(self, pid: int, nickname: str) -> None:
+        """移出黑名单"""
+        return self.get_client(pid).unblack_contact(nickname)
+
+    def delete_contact(self, pid: int, nickname: str) -> None:
+        """删除联系人"""
+        return self.get_client(pid).delete_contact(nickname)
+
+    # ---- 群聊操作 ----
+
+    def set_room_name(self, pid: int, nickname: str, name: str) -> None:
+        """设置群聊名称"""
+        return self.get_client(pid).set_room_name(nickname, name)
+
+    def set_room_announcement(self, pid: int, nickname: str, content: str) -> None:
+        """设置群公告"""
+        return self.get_client(pid).set_room_announcement(nickname, content)
+
+    def add_room_members(self, pid: int, nickname: str, members: list[str]) -> None:
+        """添加群成员"""
+        return self.get_client(pid).add_room_members(nickname, members)
+
+    def remove_room_members(self, pid: int, nickname: str, members: list[str]) -> None:
+        """移除群成员"""
+        return self.get_client(pid).remove_room_members(nickname, members)
+
+    def exit_room(self, pid: int, nickname: str) -> None:
+        """退出群聊"""
+        return self.get_client(pid).exit_room(nickname)
+
+    def pin_chat(self, pid: int, nickname: str) -> None:
+        """置顶会话"""
+        return self.get_client(pid).pin_chat(nickname)
+
+    def unpin_chat(self, pid: int, nickname: str) -> None:
+        """取消置顶"""
+        return self.get_client(pid).unpin_chat(nickname)
+
+    def mute_chat(self, pid: int, nickname: str) -> None:
+        """消息免打扰"""
+        return self.get_client(pid).mute_chat(nickname)
+
+    def unmute_chat(self, pid: int, nickname: str) -> None:
+        """取消免打扰"""
+        return self.get_client(pid).unmute_chat(nickname)
+
+    # ---- 朋友圈 ----
+
+    def get_moments(self, pid: int, count: int = 10, position: str = "top") -> list:
+        """获取朋友圈动态"""
+        return self.get_client(pid).get_moments(count, position)
+
+    def publish(self, pid: int, text: Optional[str] = None, images: list[str] = None,
+                video: str = None, **kwargs) -> bool:
+        """发布朋友圈"""
+        return self.get_client(pid).friend_circle.publish(text=text, images=images, video=video, **kwargs)
+
+    # ---- 统一消息监听 ----
+
+    def on(self, events: "Event | list[Event] | None" = None) -> "callable":
+        """
+        注册消息事件处理器（装饰器）。
+
+        回调签名: callback(client: WeixinClient, chat: SeparateChat, message: Message)
+        message.pid 可获取来源微信进程 PID。
+
+        用法::
+
+            @wx.on(Event.TEXT)
+            def on_text(client, chat, message):
+                print(f"[PID={message.pid}] {message.sender}: {message.content}")
+
+            @wx.on()  # 监听所有消息
+            def on_all(client, chat, message):
+                print(f"[PID={message.pid}] {message}")
+        """
+        def decorator(func):
+            if not events:
+                event_list = [Event.ALL]
+            elif isinstance(events, list):
+                event_list = events
+            else:
+                event_list = [events]
+            for event in event_list:
+                self._ee.on(event, func)
+            return func
+        return decorator
+
+    def once(self, events: "Event | list[Event] | None" = None) -> "callable":
+        """
+        注册一次性消息事件处理器（装饰器）。
+
+        回调签名: callback(client: WeixinClient, chat: SeparateChat, message: Message)
+        """
+        def decorator(func):
+            if not events:
+                event_list = [Event.ALL]
+            elif isinstance(events, list):
+                event_list = events
+            else:
+                event_list = [events]
+            for event in event_list:
+                self._ee.once(event, func)
+            return func
+        return decorator
+
+    def off(self, events: "Event | list[Event] | None" = None, func: "callable | None" = None) -> None:
+        """移除事件处理器"""
+        if events is None:
+            if func is None:
+                self._ee.remove_all_listeners()
+            else:
+                for event in list(self._ee.event_names()):
+                    self._ee.remove_listener(event, func)
+            return
+        event_list = events if isinstance(events, list) else [events]
+        for event in event_list:
+            if func is None:
+                self._ee.remove_all_listeners(event)
+            else:
+                self._ee.remove_listener(event, func)
+
+    def _emit(self, pid: int, client: WeixinClient, chat: "SeparateChat", message: "Message") -> None:
+        """触发消息事件，回调签名: callback(client, chat, message)"""
+        event_type = _MSG_CLASS_TO_EVENT.get(type(message), Event.OTHER)
+        self._ee.emit(event_type, client, chat, message)
+        self._ee.emit(Event.ALL, client, chat, message)
+
+    @property
+    def has_handlers(self) -> bool:
+        """是否注册了任何事件处理器"""
+        return bool(self._ee.event_names())
+
+    def add_chat_listen(self, pid: int, names: "str | list[str] | None" = None) -> list["SeparateChat"]:
+        """
+        为指定客户端注册聊天监听。
+
+        Args:
+            pid:   微信进程 PID
+            names: 联系人/群聊名称列表，None 时自动发现所有独立窗口
+
+        Returns:
+            注册成功的 SeparateChat 列表
+        """
+        client = self.get_client(pid)
+        return client.add_chat_listen(names)
+
+    def add_all_chats_listen(self) -> dict[int, list["SeparateChat"]]:
+        """
+        为所有已连接的客户端注册聊天监听（自动发现所有独立窗口）。
+
+        Returns:
+            {pid: [SeparateChat, ...]} 字典
+        """
+        result: dict[int, list["SeparateChat"]] = {}
+        for pid, client in self._clients.items():
+            chats = client.add_chat_listen(None)
+            if chats:
+                result[pid] = chats
+        return result
+
+    def remove_chat_listen(self, pid: int, names: "str | list[str] | None" = None) -> None:
+        """
+        移除指定客户端的聊天监听。
+
+        Args:
+            pid:   微信进程 PID
+            names: 要移除的名称，None 移除该客户端的所有监听
+        """
+        client = self.get_client(pid)
+        client.remove_chat_listen(names)
+
+    def run(self, interval: float = 0.1, idle_interval: float = 0.1) -> None:
+        """
+        启动统一消息监听（阻塞运行，Ctrl+C 退出）。
+
+        监听所有已通过 add_chat_listen 注册的客户端和聊天窗口。
+        消息通过 on/once 注册的处理器分发，回调带 pid 区分来源。
+
+        Args:
+            interval:      有新消息时的轮询间隔（秒）
+            idle_interval: 无新消息时的轮询间隔（秒）
+        """
+        if not self.has_handlers:
+            raise ValueError(
+                "未注册任何事件处理器，请使用 @wx.on(Event) 装饰器注册"
+            )
+
+        # 收集所有有监听的客户端
+        listen_clients: dict[int, WeixinClient] = {}
+        for pid, client in self._clients.items():
+            if hasattr(client, '_chat_listeners') and client._chat_listeners:
+                listen_clients[pid] = client
+
+        if not listen_clients:
+            raise RuntimeError("未注册任何监听，请先调用 add_chat_listen")
+
+        self._stop_event = threading.Event()
+        stop_event = self._stop_event
+        msg_queue: Queue[tuple[int, WeixinClient, SeparateChat, Message]] = Queue()
+        threads: dict[str, threading.Thread] = {}
+
+        def _watch_chat(pid: int, client: WeixinClient, chat: "SeparateChat", name: str) -> None:
+            known_rids: set[tuple] = set()
+            sender_cache: dict[tuple, tuple] = {}
+            first_scan = True
+            offscreen = client.background
+
+            if offscreen:
+                chat.move_offscreen()
+
+            while not stop_event.is_set():
+                if not chat.exists:
+                    break
+
+                try:
+                    visible = chat.get_visible_messages(sender_cache=sender_cache)
+                except Exception:
+                    if stop_event.wait(interval):
+                        break
+                    continue
+
+                curr_rids = {msg.runtime_id for msg in visible if msg.runtime_id}
+
+                if first_scan:
+                    known_rids = curr_rids
+                    first_scan = False
+                    if stop_event.wait(interval):
+                        break
+                    continue
+
+                new_rids = curr_rids - known_rids
+
+                if not new_rids:
+                    known_rids = curr_rids
+                    for rid in list(sender_cache):
+                        if rid not in curr_rids:
+                            del sender_cache[rid]
+                    if stop_event.wait(idle_interval):
+                        break
+                    continue
+
+                for msg in visible:
+                    if msg.runtime_id and msg.runtime_id in new_rids:
+                        msg.pid = pid
+                        msg_queue.put((pid, client, chat, msg))
+
+                known_rids = curr_rids
+
+                if stop_event.wait(interval):
+                    break
+
+            if chat.exists and offscreen:
+                try:
+                    chat.move_back()
+                except Exception:
+                    pass
+
+        # 为每个客户端的每个监听启动线程
+        for pid, client in listen_clients.items():
+            for name, chat in client._chat_listeners.items():
+                if not chat.exists:
+                    logger.warning("窗口已关闭，跳过: [PID=%d] %s", pid, name)
+                    continue
+                thread_name = f"listen-{pid}-{name}"
+                t = threading.Thread(
+                    target=_watch_chat,
+                    args=(pid, client, chat, name),
+                    daemon=True,
+                    name=thread_name,
+                )
+                threads[thread_name] = t
+                t.start()
+                logger.info("开始监听: [PID=%d] [%s] %s", pid, chat.chat_type, name)
+
+        if not threads:
+            raise RuntimeError("没有可监听的窗口")
+
+        # 输出监听列表
+        tree_lines = ["*监听列表"]
+        for pi, (pid, client) in enumerate(listen_clients.items()):
+            is_last_pid = pi == len(listen_clients) - 1
+            branch = "└── " if is_last_pid else "├── "
+            tree_lines.append(f"{branch}PID={pid}")
+            prefix = "    " if is_last_pid else "│   "
+            items = list(client._chat_listeners.items())
+            for ni, (name, chat) in enumerate(items):
+                is_last = ni == len(items) - 1
+                node = "└── " if is_last else "├── "
+                tree_lines.append(f"{prefix}{node}[{chat.chat_type}] {name}")
+
+        logger.info("\n" + "\n".join(tree_lines))
+        logger.info("统一消息监听已启动 (Ctrl+C 退出)...")
+
+        try:
+            while not stop_event.is_set():
+                alive = [n for n, t in threads.items() if t.is_alive()]
+                if not alive:
+                    logger.info("所有监听线程已退出")
+                    break
+
+                try:
+                    pid, client, chat, msg = msg_queue.get(timeout=0.1)
+                except Empty:
+                    continue
+                try:
+                    self._emit(pid, client, chat, msg)
+                except Exception:
+                    logger.exception("事件分发异常 [PID=%d] [%s]", pid, chat.current_name)
+        except KeyboardInterrupt:
+            pass
+        finally:
+            logger.info("正在停止监听线程...")
+            stop_event.set()
+            for t in threads.values():
+                t.join(timeout=3)
+            self._stop_event = None
+            logger.info("监听已停止")
+
+    def stop(self) -> None:
+        """
+        停止统一消息监听。
+
+        可从其他线程调用。
+        """
+        if self._stop_event is not None:
+            self._stop_event.set()
+        for client in self._clients.values():
+            client.move_back()
+
+    def __str__(self) -> str:
+        pids = self.pids
+        return f"Weixin(clients={len(pids)}, pids={pids})"
+
+    def __repr__(self) -> str:
+        return self.__str__()
