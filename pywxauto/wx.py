@@ -2405,7 +2405,7 @@ class Login(WeixinWindow):
         # 等待登录窗口消失
         for _ in range(timeout):
             if not self._win.Exists(maxSearchSeconds=1):
-                logger.info("已进入微信")
+                logger.debug("已进入微信")
                 return True
             time.sleep(1)
 
@@ -5497,7 +5497,7 @@ class FriendCircle(WeixinWindow):
         # 等待发布面板消失
         for _ in range(30):
             if not panel.Exists(maxSearchSeconds=1):
-                logger.info("朋友圈发布成功")
+                logger.debug("朋友圈发布成功")
                 return True
             time.sleep(1)
 
@@ -7323,7 +7323,7 @@ class Chat:
         if check_list.Exists(maxSearchSeconds=1):
             raise SendError("发送收藏失败，选择面板未关闭")
 
-        logger.info("收藏发送成功")
+        logger.debug("收藏发送成功")
         return self._check_last_message_status(timeout=timeout)
 
     # -- 发送表情 --
@@ -7429,7 +7429,7 @@ class Chat:
                 label = "自定义表情" if keyword is None else "表情"
                 raise SendError(f"发送{label}失败，表情面板未关闭")
 
-            logger.info("表情发送成功")
+            logger.debug("表情发送成功")
             return self.check_emotion_message_status(timeout=timeout)
 
         except Exception:
@@ -7716,7 +7716,7 @@ class Chat:
             # 5. 在弹窗中搜索、勾选接收者并点击发送
             self._search_and_select_receiver(receiver_nickname)
 
-            logger.info(f"名片发送成功: {contact_name} -> {receiver_nickname}")
+            logger.debug(f"名片发送成功: {contact_name} -> {receiver_nickname}")
             return True
         except Exception:
             # 出错时尝试关闭可能残留的弹窗
@@ -8520,7 +8520,7 @@ class Chat:
             input_wx.click(confirm_btn)
             time.sleep(0.3)
 
-            logger.info(f"清空聊天记录成功: {self.current_name}")
+            logger.debug(f"清空聊天记录成功: {self.current_name}")
 
         finally:
             # 4. 收回聊天信息面板
@@ -8604,7 +8604,7 @@ class Chat:
             input_wx.click(confirm_btn)
             time.sleep(0.3)
 
-            logger.info(f"清空群聊聊天记录成功: {self.current_name}")
+            logger.debug(f"清空群聊聊天记录成功: {self.current_name}")
 
         finally:
             # 6. 收回聊天信息面板
@@ -8681,7 +8681,7 @@ class Chat:
             if not confirm_btn.Exists(maxSearchSeconds=3):
                 raise RuntimeError("未找到'确定'确认按钮")
             input_wx.click(confirm_btn)
-            logger.info(f"退出群聊成功: {self.current_name}")
+            logger.debug(f"退出群聊成功: {self.current_name}")
 
         finally:
             # 退出群聊后面板可能已自动关闭，尝试收回
@@ -8841,7 +8841,7 @@ class Chat:
                     break
                 time.sleep(1)
 
-            logger.info(f"添加群成员成功: {self.current_name} -> {members}")
+            logger.debug(f"添加群成员成功: {self.current_name} -> {members}")
 
         finally:
             self._close_chat_info_panel()
@@ -9013,7 +9013,7 @@ class Chat:
                     break
                 time.sleep(1)
 
-            logger.info(f"移除群成员成功: {self.current_name} -> {members}")
+            logger.debug(f"移除群成员成功: {self.current_name} -> {members}")
 
         finally:
             self._close_chat_info_panel()
@@ -9113,7 +9113,7 @@ class Chat:
             self._toggle_ocr_switch(img, ocr_data, hwnd, switch_name, enable)
 
             action = "开启" if enable else "关闭"
-            logger.info(f"{action}{switch_name}成功: {self.current_name}")
+            logger.debug(f"{action}{switch_name}成功: {self.current_name}")
 
         finally:
             self._close_chat_info_panel()
@@ -9192,7 +9192,7 @@ class Chat:
             img = Image.open(io.BytesIO(png_bytes))
             self._toggle_ocr_switch(img, ocr_data, hwnd, "折叠该聊天", True)
 
-            logger.info(f"折叠群聊成功: {self.current_name}")
+            logger.debug(f"折叠群聊成功: {self.current_name}")
 
         finally:
             self._close_chat_info_panel()
@@ -9226,7 +9226,7 @@ class Chat:
             if "折叠该聊天" in ocr_data:
                 self._toggle_ocr_switch(img, ocr_data, hwnd, "折叠该聊天", False)
 
-            logger.info(f"取消折叠群聊成功: {self.current_name}")
+            logger.debug(f"取消折叠群聊成功: {self.current_name}")
 
         finally:
             self._close_chat_info_panel()
@@ -9554,7 +9554,7 @@ class Chat:
                     self._toggle_ocr_switch(
                         img, ocr_data, hwnd, switch_name, switch_val)
 
-            logger.info(f"设置群聊信息成功: {self.current_name}")
+            logger.debug(f"设置群聊信息成功: {self.current_name}")
 
         finally:
             self._close_chat_info_panel()
@@ -9601,7 +9601,7 @@ class Chat:
                 input_wx.click(sw)
                 time.sleep(0.3)
                 action = "开启" if enable else "关闭"
-                logger.info(f"{action}{name}成功: {self.current_name}")
+                logger.debug(f"{action}{name}成功: {self.current_name}")
         finally:
             self._close_chat_info_panel()
 
@@ -9703,7 +9703,7 @@ class Chat:
             if not fold_on:
                 input_wx.click(fold_sw)
                 time.sleep(0.3)
-                logger.info(f"折叠聊天成功: {self.current_name}")
+                logger.debug(f"折叠聊天成功: {self.current_name}")
         finally:
             self._close_chat_info_panel()
 
@@ -9731,7 +9731,7 @@ class Chat:
                 if toggle and toggle.ToggleState == 1:
                     input_wx.click(fold_sw)
                     time.sleep(0.3)
-                    logger.info(f"取消折叠聊天成功: {self.current_name}")
+                    logger.debug(f"取消折叠聊天成功: {self.current_name}")
         finally:
             self._close_chat_info_panel()
 
@@ -9841,7 +9841,7 @@ class Chat:
             # 点击搜索框 完成保存
             update_bth = self._win.ButtonControl(Name="修改")
             input_wx.click(update_bth)
-            logger.info(f"设置群聊名称成功: {name}")
+            logger.debug(f"设置群聊名称成功: {name}")
 
         finally:
             self._close_chat_info_panel()
@@ -9948,11 +9948,11 @@ class Chat:
 
             for i in range(10):
                 if not get_hwnd(pane_title):
-                    logger.info(f"设置群公告成功: {self.current_name}")
+                    logger.debug(f"设置群公告成功: {self.current_name}")
                     return
                 time.sleep(3)
 
-            logger.info(f"设置群公告失败: {self.current_name}")
+            logger.debug(f"设置群公告失败: {self.current_name}")
         finally:
             self._close_chat_info_panel()
 
@@ -10012,7 +10012,7 @@ class Chat:
             input_wx.paste(remark)
             input_wx.send_keys(self._win, "{Enter}")
 
-            logger.info(f"设置群聊备注成功: {self.current_name} -> {remark}")
+            logger.debug(f"设置群聊备注成功: {self.current_name} -> {remark}")
 
         finally:
             self._close_chat_info_panel()
@@ -10089,7 +10089,7 @@ class Chat:
             update_btn = self._win.ButtonControl(Name="修改")
             input_wx.click(update_btn)
 
-            logger.info(f"设置群内昵称成功: {self.current_name} -> {nickname}")
+            logger.debug(f"设置群内昵称成功: {self.current_name} -> {nickname}")
 
         finally:
             self._close_chat_info_panel()
@@ -10311,7 +10311,7 @@ class Chat:
                     if val:
                         result["finder_name"] = val
 
-            logger.info(f"获取联系人资料成功: {self.current_name}")
+            logger.debug(f"获取联系人资料成功: {self.current_name}")
             return result
 
         except Exception:
@@ -10551,7 +10551,7 @@ class Chat:
             if ok_btn.Exists(maxSearchSeconds=2):
                 input_wx.click(ok_btn)
 
-            logger.info(f"设置联系人信息成功: {self.current_name}")
+            logger.debug(f"设置联系人信息成功: {self.current_name}")
 
         except Exception:
             self._cleanup_profile()
@@ -10611,7 +10611,7 @@ class Chat:
             input_wx.click(ok_btn)
             time.sleep(0.3)
 
-            logger.info(f"设置备注成功: {self.current_name} -> {remark}")
+            logger.debug(f"设置备注成功: {self.current_name} -> {remark}")
 
         except Exception:
             self._cleanup_profile()
@@ -10661,7 +10661,7 @@ class Chat:
 
             new_labels = [l for l in labels if l not in existing_labels]
             if not new_labels:
-                logger.info(f"所有标签已存在，跳过: {self.current_name} -> {labels}")
+                logger.debug(f"所有标签已存在，跳过: {self.current_name} -> {labels}")
                 cancel_btn = remark_pop.ButtonControl(Name="取消")
                 if cancel_btn.Exists(maxSearchSeconds=1):
                     input_wx.click(cancel_btn)
@@ -10694,7 +10694,7 @@ class Chat:
                     input_wx.click(label_item)
                     time.sleep(0.3)
                 else:
-                    logger.info(f"搜索结果中未找到标签，跳过: {label}")
+                    logger.debug(f"搜索结果中未找到标签，跳过: {label}")
 
                 input_wx.send_keys(tag_edit, "{Ctrl}a{Del}")
                 time.sleep(0.2)
@@ -10705,7 +10705,7 @@ class Chat:
             )
             input_wx.click(ok_btn)
             time.sleep(0.3)
-            logger.info(f"添加标签成功: {self.current_name} -> {labels}")
+            logger.debug(f"添加标签成功: {self.current_name} -> {labels}")
 
         except Exception:
             self._cleanup_profile()
@@ -10755,7 +10755,7 @@ class Chat:
 
             to_remove = [l for l in labels if l in existing_labels]
             if not to_remove:
-                logger.info(f"标签均不存在，跳过: {self.current_name} -> {labels}")
+                logger.debug(f"标签均不存在，跳过: {self.current_name} -> {labels}")
                 cancel_btn = remark_pop.ButtonControl(Name="取消")
                 if cancel_btn.Exists(maxSearchSeconds=1):
                     input_wx.click(cancel_btn)
@@ -10781,7 +10781,7 @@ class Chat:
             )
             input_wx.click(ok_btn)
             time.sleep(0.3)
-            logger.info(f"移除标签成功: {self.current_name} -> {labels}")
+            logger.debug(f"移除标签成功: {self.current_name} -> {labels}")
 
         except Exception:
             self._cleanup_profile()
@@ -10835,7 +10835,7 @@ class Chat:
             # 过滤掉已存在的号码
             new_phones = [p for p in phones if p not in existing_phones]
             if not new_phones:
-                logger.info(f"所有电话号码已存在，跳过: {self.current_name} -> {phones}")
+                logger.debug(f"所有电话号码已存在，跳过: {self.current_name} -> {phones}")
                 cancel_btn = remark_pop.ButtonControl(Name="取消")
                 if cancel_btn.Exists(maxSearchSeconds=1):
                     input_wx.click(cancel_btn)
@@ -10887,7 +10887,7 @@ class Chat:
             )
             input_wx.click(ok_btn)
             time.sleep(0.3)
-            logger.info(f"添加电话号码成功: {self.current_name} -> {phones}")
+            logger.debug(f"添加电话号码成功: {self.current_name} -> {phones}")
 
         except Exception:
             self._cleanup_profile()
@@ -10969,7 +10969,7 @@ class Chat:
             input_wx.click(ok_btn)
             time.sleep(0.3)
 
-            logger.info(f"添加备注图片成功: {self.current_name} -> {images}")
+            logger.debug(f"添加备注图片成功: {self.current_name} -> {images}")
 
         except Exception:
             self._cleanup_profile()
@@ -11024,7 +11024,7 @@ class Chat:
 
             to_remove = [p for p in phones if p in existing_phones]
             if not to_remove:
-                logger.info(f"电话号码均不存在，跳过: {self.current_name} -> {phones}")
+                logger.debug(f"电话号码均不存在，跳过: {self.current_name} -> {phones}")
                 cancel_btn = remark_pop.ButtonControl(Name="取消")
                 if cancel_btn.Exists(maxSearchSeconds=1):
                     input_wx.click(cancel_btn)
@@ -11055,7 +11055,7 @@ class Chat:
             )
             input_wx.click(ok_btn)
             time.sleep(0.3)
-            logger.info(f"移除电话号码成功: {self.current_name} -> {phones}")
+            logger.debug(f"移除电话号码成功: {self.current_name} -> {phones}")
 
         except Exception:
             self._cleanup_profile()
@@ -11160,7 +11160,7 @@ class Chat:
                 if ok_btn.Exists(maxSearchSeconds=2):
                     input_wx.click(ok_btn)
                     time.sleep(0.3)
-                logger.info(f"删除备注图片成功: {self.current_name} -> 删除{deleted}张")
+                logger.debug(f"删除备注图片成功: {self.current_name} -> 删除{deleted}张")
             else:
                 cancel_btn = remark_pop.ButtonControl(Name="取消")
                 if cancel_btn.Exists(maxSearchSeconds=1):
@@ -11180,7 +11180,7 @@ class Chat:
             self._open_contact_profile()
             self._click_profile_menu_item("设为星标朋友")
             time.sleep(0.3)
-            logger.info(f"设为星标朋友操作完成: {self.current_name}")
+            logger.debug(f"设为星标朋友操作完成: {self.current_name}")
         except Exception:
             self._cleanup_profile()
             raise
@@ -11195,7 +11195,7 @@ class Chat:
             self._open_contact_profile()
             self._click_profile_menu_item("不再设为星标朋友")
             time.sleep(0.3)
-            logger.info(f"取消星标朋友操作完成: {self.current_name}")
+            logger.debug(f"取消星标朋友操作完成: {self.current_name}")
         except Exception:
             self._cleanup_profile()
             raise
@@ -11215,7 +11215,7 @@ class Chat:
             if confirm_btn.Exists(maxSearchSeconds=3):
                 input_wx.click(confirm_btn)
                 time.sleep(0.3)
-                logger.info(f"加入黑名单成功: {self.current_name}")
+                logger.debug(f"加入黑名单成功: {self.current_name}")
             else:
                 logger.warning(f"未找到确认按钮，加入黑名单可能未完成: {self.current_name}")
 
@@ -11233,7 +11233,7 @@ class Chat:
             self._open_contact_profile()
             self._click_profile_menu_item("移出黑名单")
             time.sleep(0.3)
-            logger.info(f"移出黑名单成功: {self.current_name}")
+            logger.debug(f"移出黑名单成功: {self.current_name}")
         except Exception:
             self._cleanup_profile()
             raise
@@ -11253,7 +11253,7 @@ class Chat:
             if confirm_btn.Exists(maxSearchSeconds=3):
                 input_wx.click(confirm_btn)
                 time.sleep(0.3)
-                logger.info(f"删除联系人成功: {self.current_name}")
+                logger.debug(f"删除联系人成功: {self.current_name}")
             else:
                 logger.warning(f"未找到'删除'确认按钮，删除联系人可能未完成: {self.current_name}")
 
@@ -11331,7 +11331,7 @@ class Chat:
                 input_wx.click(cancel_btn)
             time.sleep(0.3)
 
-            logger.info(f"获取朋友权限成功: {self.current_name} -> {result}")
+            logger.debug(f"获取朋友权限成功: {self.current_name} -> {result}")
             return result
 
         except Exception:
@@ -11433,7 +11433,7 @@ class Chat:
                     input_wx.click(cancel_btn)
                     time.sleep(0.2)
 
-            logger.info(f"设置朋友权限成功: {self.current_name} -> permission={permission}, "
+            logger.debug(f"设置朋友权限成功: {self.current_name} -> permission={permission}, "
                         f"hide_my={hide_my_posts}, hide_their={hide_their_posts}")
 
         except Exception:
@@ -11540,7 +11540,7 @@ class Chat:
             if cancel_btn.Exists(maxSearchSeconds=1):
                 input_wx.click(cancel_btn)
 
-            logger.info(f"收藏备注图片成功: {self.current_name} -> 收藏{collected}张")
+            logger.debug(f"收藏备注图片成功: {self.current_name} -> 收藏{collected}张")
             return collected
 
         except Exception:
@@ -11682,7 +11682,7 @@ class Chat:
             if cancel_btn.Exists(maxSearchSeconds=1):
                 input_wx.click(cancel_btn)
 
-            logger.info(f"保存备注图片成功: {self.current_name} -> {save_dir} ({saved}张)")
+            logger.debug(f"保存备注图片成功: {self.current_name} -> {save_dir} ({saved}张)")
             return saved
 
         except Exception:
