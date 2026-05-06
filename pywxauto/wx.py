@@ -2095,7 +2095,8 @@ class TransferMessage(Message):
         btn = win.ButtonControl(Name=button_name, searchDepth=10)
         if not btn.Exists(maxSearchSeconds=3):
             return False
-        btn.GetInvokePattern().Invoke()
+        # btn.GetInvokePattern().Invoke()
+        input_wx.click(btn)
         time.sleep(1)
         return True
 
@@ -3248,7 +3249,8 @@ class NoteEditorWindow(WeixinWindow):
         edit = dlg.ComboBoxControl(AutomationId="1148").EditControl()
         if not edit.Exists(0, 0):
             edit = dlg.EditControl(AutomationId="1148")
-        edit.GetValuePattern().SetValue(file_path)
+        # edit.GetValuePattern().SetValue(file_path)
+        input_wx.send_keys(edit, file_path)
         time.sleep(0.3)
         # Alt+O 点击打开
         input_wx.send_keys(dlg, "{Alt}O")
@@ -4172,7 +4174,8 @@ class Session:
             raise RuntimeError("添加朋友窗口中未找到搜索框")
         input_wx.click(search_edit)
         time.sleep(0.2)
-        search_edit.GetValuePattern().SetValue(keyword)
+        # search_edit.GetValuePattern().SetValue(keyword)
+        input_wx.send_keys(search_edit, keyword)
         time.sleep(0.3)
         search_btn = add_friend_win.ButtonControl(
             ClassName="mmui::XOutlineButton", Name="搜索",
@@ -4204,7 +4207,8 @@ class Session:
                 time.sleep(0.1)
                 input_wx.send_keys(msg_edit, "{Ctrl}a{Del}")
                 time.sleep(0.1)
-                msg_edit.GetValuePattern().SetValue(message)
+                # msg_edit.GetValuePattern().SetValue(message)
+                input_wx.send_keys(msg_edit, message)
                 time.sleep(0.2)
 
         # 填写备注
@@ -4217,7 +4221,8 @@ class Session:
                 time.sleep(0.1)
                 input_wx.send_keys(remark_edit, "{Ctrl}a{Del}")
                 time.sleep(0.1)
-                remark_edit.GetValuePattern().SetValue(remark)
+                # remark_edit.GetValuePattern().SetValue(remark)
+                input_wx.send_keys(remark_edit, remark)
                 time.sleep(0.2)
 
         # 设置朋友权限（单选：点击整行切换）
@@ -5472,7 +5477,8 @@ class FriendCircle(WeixinWindow):
         # 输入文字内容
         if text:
             edit = self._find_publish_input(panel)
-            edit.GetValuePattern().SetValue(text)
+            # edit.GetValuePattern().SetValue(text)
+            input_wx.send_keys(edit, text)
 
         # 设置提醒谁看
         if remind_contacts:
@@ -5825,7 +5831,8 @@ class FileManager(WeixinWindow):
         if not file_name_edit.Exists(maxSearchSeconds=3):
             raise RuntimeError("未找到文件名输入框")
 
-        file_name_edit.GetValuePattern().SetValue(file_path)
+        # file_name_edit.GetValuePattern().SetValue(file_path)
+        input_wx.send_keys(file_name_edit, file_path)
 
         # 如果目标文件已存在，先删除（避免覆盖确认弹窗）
         if os.path.exists(file_path):
@@ -5893,7 +5900,8 @@ class FileManager(WeixinWindow):
         if not file_name_edit.Exists(maxSearchSeconds=3):
             raise RuntimeError("未找到文件名输入框")
 
-        file_name_edit.GetValuePattern().SetValue(file_path)
+        # file_name_edit.GetValuePattern().SetValue(file_path)
+        input_wx.send_keys(file_name_edit, file_path)
 
         # 如果目标文件已存在，先删除（避免覆盖确认弹窗）
         if os.path.exists(file_path):
@@ -7574,21 +7582,7 @@ class Chat:
                 f"搜索结果共 {len(emotion_items)} 个表情"
             )
 
-        target = emotion_items[index - 1]
-        try:
-            target.GetInvokePattern().Invoke()
-        except Exception:
-            # InvokePattern 失败时回退到坐标点击
-            rect = target.BoundingRectangle
-            if rect.width() > 0 and rect.height() > 0:
-                auto.Click(
-                    int(rect.left + rect.width() / 2),
-                    int(rect.top + rect.height() / 2),
-                )
-            else:
-                raise RuntimeError(
-                    f"第 {index} 个表情不可见（offscreen），无法点击"
-                )
+        input_wx.click(emotion_items[index - 1])
 
     def _collect_emotion_items(self, control, result: list) -> None:
         """递归收集 ListItemControl 表情项。"""
@@ -9470,7 +9464,8 @@ class Chat:
 
                 publish_btn = announcement_pane.ButtonControl(Name="发布")
                 if publish_btn.Exists(maxSearchSeconds=3):
-                    publish_btn.GetInvokePattern().Invoke()
+                    # publish_btn.GetInvokePattern().Invoke()
+                    input_wx.click(publish_btn)
                 time.sleep(1)
 
                 # 等待群公告窗口关闭
@@ -9946,7 +9941,8 @@ class Chat:
             publish_btn = announcement_pane.ButtonControl(Name="发布")
             if not publish_btn.Exists(maxSearchSeconds=3):
                 raise RuntimeError("未找到'发布'按钮")
-            publish_btn.GetInvokePattern().Invoke()
+            # publish_btn.GetInvokePattern().Invoke()
+            input_wx.click(publish_btn)
 
             time.sleep(1)
 
@@ -10543,7 +10539,8 @@ class Chat:
                     if not edit.Exists(0, 0):
                         edit = dlg.EditControl(AutomationId="1148")
                     if edit.Exists(maxSearchSeconds=2):
-                        edit.GetValuePattern().SetValue(os.path.abspath(img_path))
+                        # edit.GetValuePattern().SetValue(os.path.abspath(img_path))
+                        input_wx.send_keys(edit, os.path.abspath(img_path))
                         input_wx.send_keys(dlg, "{Alt}O")
                         time.sleep(0.5)
 
@@ -10956,7 +10953,8 @@ class Chat:
                     raise RuntimeError("未找到文件名输入框")
 
                 abs_path = os.path.abspath(img_path)
-                edit.GetValuePattern().SetValue(abs_path)
+                # edit.GetValuePattern().SetValue(abs_path)
+                input_wx.send_keys(edit, abs_path)
                 time.sleep(0.3)
 
                 input_wx.send_keys(dlg, "{Alt}O")
