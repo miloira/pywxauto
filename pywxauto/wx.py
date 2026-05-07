@@ -13369,7 +13369,7 @@ class WeixinClient(WeixinWindow):
 
         移除后如果窗口在屏幕外（offscreen），会自动移回原位。
         """
-        if not hasattr(self, '_listeners'):
+        if not hasattr(self, '_chat_listeners'):
             return
 
         if names is None:
