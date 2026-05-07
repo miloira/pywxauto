@@ -3338,7 +3338,7 @@ class SessionItem:
     """会话列表中的一条会话"""
 
     def __init__(self, session: "Session | None" = None, *, name="", last_msg="", msg_time="",
-                 muted=False, unread="", active=False,
+                 muted=False, unread="", is_active=False,
                  runtime_id: tuple = ()):
         """
         初始化会话项。
@@ -3350,7 +3350,7 @@ class SessionItem:
             msg_time: 消息时间文本。
             muted: 是否消息免打扰。
             unread: 未读条数文本，如 "[9条]"。
-            active: 是否为当前选中（激活）的会话。
+            is_active: 是否为当前选中（激活）的会话。
             runtime_id: UI Automation RuntimeId，用于唯一标识控件。
         """
         self.session = session
@@ -3358,65 +3358,54 @@ class SessionItem:
         self.last_msg = last_msg
         self.msg_time = msg_time
         self.muted = muted
-        self.unread = unread       # 未读条数文本，如 "[9条]"
-        self.active = active       # 是否为当前选中（激活）的会话
-        self.runtime_id: tuple = runtime_id  # UI Automation RuntimeId
-
-    def __repr__(self):
-        muted_tag = " [免打扰]" if self.muted else ""
-        active_tag = " [激活]" if self.active else ""
-        return f"SessionItem({self.name!r}, {self.msg_time}{muted_tag}{active_tag})"
-
-    def _require_session(self) -> "Session":
-        if self.session is None:
-            raise RuntimeError("此 SessionItem 未关联 Session，无法执行操作")
-        return self.session
+        self.unread = unread
+        self.is_active = is_active
+        self.runtime_id = runtime_id
 
     def pin(self) -> None:
         """置顶会话"""
-        self._require_session()._session_context_action(self.name, "置顶")
+        self.session._session_context_action(self.name, "置顶")
 
     def unpin(self) -> None:
         """取消置顶会话"""
-        self._require_session()._session_context_action(self.name, "取消置顶")
+        self.session._session_context_action(self.name, "取消置顶")
 
     def mark_as_unread(self) -> None:
         """标为未读"""
-        self._require_session()._session_context_action(self.name, "标为未读")
+        self.session._session_context_action(self.name, "标为未读")
 
     def mark_as_read(self) -> None:
         """标为已读"""
-        self._require_session()._session_context_action(self.name, "标为已读")
+        self.session._session_context_action(self.name, "标为已读")
 
     def mute(self) -> None:
         """消息免打扰"""
-        self._require_session()._session_context_action(self.name, "消息免打扰")
+        self.session._session_context_action(self.name, "消息免打扰")
 
     def unmute(self) -> None:
         """允许消息通知"""
-        self._require_session()._session_context_action(self.name, "允许消息通知")
+        self.session._session_context_action(self.name, "允许消息通知")
 
     def separate(self) -> None:
         """独立窗口显示"""
-        self._require_session()._session_context_action(self.name, "独立窗口显示")
+        self.session._session_context_action(self.name, "独立窗口显示")
 
     def separate_by_click(self) -> "SeparateChat":
         """双击打开独立窗口，返回 SeparateChat 实例"""
-        session = self._require_session()
+        session = self.session
         if session.wx:
             session.wx.activate()
         item = session._ensure_session_visible(self.name)
         input_wx.click(item, click="double")
-        time.sleep(0.5)
         return SeparateChat(session.wx, self.name)
 
     def hide(self) -> None:
         """不显示该会话"""
-        self._require_session()._session_context_action(self.name, "不显示")
+        self.session._session_context_action(self.name, "不显示")
 
     def delete(self) -> None:
         """删除会话（危险操作，会清除聊天记录）"""
-        session = self._require_session()
+        session = session
         session._session_context_action(self.name, "删除")
         # 点击确认弹窗中的"删除"按钮
         confirm_btn = session._win.ButtonControl(Name="删除", ClassName="mmui::XOutlineButton")
@@ -3425,12 +3414,17 @@ class SessionItem:
         input_wx.click(confirm_btn)
 
     def open(self) -> None:
-        """打开该会话"""
-        self._require_session().open(self.name)
+        """激活会话"""
+        self.session.open(self.name)
 
     def close(self) -> None:
-        """关闭该会话（如果处于激活状态则取消选中）"""
-        self._require_session().close(self.name)
+        """取消激活（如果处于激活状态则取消选中）"""
+        self.session.close(self.name)
+
+    def __repr__(self):
+        muted_tag = " [免打扰]" if self.muted else ""
+        active_tag = " [激活]" if self.is_active else ""
+        return f"SessionItem({self.name!r}, {self.msg_time}{muted_tag}{active_tag})"
 
 
 class Navigator:
@@ -3523,7 +3517,7 @@ class Session:
             try:
                 pattern = ctrl.GetSelectionItemPattern()
                 if pattern and pattern.IsSelected:
-                    item.active = True
+                    item.is_active = True
             except Exception:
                 pass
             sessions.append(item)
