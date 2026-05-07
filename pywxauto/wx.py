@@ -2881,18 +2881,18 @@ class VoipCall(WeixinWindow):
     WINDOW_CLASS = "mmui::VOIPWindow"
     WINDOW_ID = "VOIPWindow"
 
-    def __init__(self, pid: int = None):
+    def __init__(self, chat: "Chat"):
         """
         初始化通话窗口控制实例，绑定 VOIPWindow 控件。
 
         Args:
-            pid: 微信进程 PID，传入时按 PID 精确匹配通话窗口。
+            chat: 发起通话的 Chat 或 SeparateChat 实例。
         """
-        self._pid = pid
+        self.chat = chat
         self._win = auto.WindowControl(
             ClassName=self.WINDOW_CLASS,
             AutomationId=self.WINDOW_ID,
-            ProcessId=pid or 0,
+            ProcessId=self.chat.wx.pid,
         )
 
     def _ensure_exists(self) -> None:
@@ -5577,7 +5577,7 @@ class FileManager(WeixinWindow):
         self.wx = wx
         self._win = auto.WindowControl(
             Name=self.WINDOW_NAME,
-            ProcessId=wx.pid or 0,
+            ProcessId=self.wx.pid,
             searchDepth=1,
         )
 
@@ -5585,7 +5585,7 @@ class FileManager(WeixinWindow):
         """查找并激活聊天文件窗口（独立窗口），通过 PID 精确匹配"""
         self._win = auto.WindowControl(
             Name=self.WINDOW_NAME,
-            ProcessId=self.wx.pid or 0,
+            ProcessId=self.wx.pid,
             searchDepth=1,
         )
         if self._win.Exists(maxSearchSeconds=3):
@@ -6127,6 +6127,10 @@ class Chat:
         # 4.1.8.28
         "content_view.top_content_view.title_h_view.left_v_view.left_content_v_view.left_ui_.big_title_line_h_view.current_chat_count_label",
     ]
+    SUB_TITLE_IDS = [
+        # 4.1.8.28
+        "content_view.top_content_view.title_h_view.left_v_view.left_content_v_view.left_ui_.sub_title_",
+    ]
 
     def __init__(self, wx: "Weixin"):
         """
@@ -6153,12 +6157,11 @@ class Chat:
         Chat: 激活微信主窗口
         SeparateChat: 子类覆盖此方法，激活独立窗口
         """
-        if self.wx:
-            self.wx.activate()
+        self.wx.activate()
 
     def __str__(self) -> str:
         try:
-            name = self.current_name
+            name = self.chat_name
             chat_type = self.chat_type
             return f"Chat(type={chat_type!r}, name={name!r})"
         except Exception as e:
@@ -6182,11 +6185,46 @@ class Chat:
                 return ctrl
         return None
 
+    def _find_sub_title_label(self) -> Optional[auto.TextControl]:
+        """查找副标题控件（存在时表示 current_chat_name_label 显示的是备注）"""
+        for aid in self.SUB_TITLE_IDS:
+            ctrl = self._win.TextControl(AutomationId=aid)
+            if ctrl.Exists(0, 0):
+                return ctrl
+        return None
+
     @property
-    def current_name(self) -> str:
-        """获取当前聊天对象名称"""
+    def chat_name(self) -> str:
+        """获取当前聊天对象名称（优先返回备注，无备注时返回原始名称）"""
         label = self._find_title_label()
         return label.Name if label else ""
+
+    @property
+    def nickname(self) -> Optional[str]:
+        """
+        获取聊天的原始名称（群名/昵称）。
+
+        当存在副标题控件时，副标题的 Name 为原始名称；
+        不存在时，私聊无法区分昵称和备注，返回 None。
+        """
+        sub = self._find_sub_title_label()
+        if sub:
+            return sub.Name
+        return None
+
+    @property
+    def remark(self) -> Optional[str]:
+        """
+        获取聊天备注名。
+
+        当存在副标题控件时，标题栏的 Name 为备注名；
+        不存在时，私聊无法区分昵称和备注，返回 None。
+        """
+        sub = self._find_sub_title_label()
+        if sub:
+            label = self._find_title_label()
+            return label.Name if label else None
+        return None
 
     @property
     def chat_type(self) -> str:
@@ -6258,7 +6296,7 @@ class Chat:
         # 倒序查找自己发的
         for ctrl in reversed(candidates):
             sender, sender_type, _ = self._detect_sender(
-                hwnd, ctrl, self.current_name or "对方",
+                hwnd, ctrl, self.chat_name or "对方",
             )
             if sender_type == SenderType.SELF:
                 return ctrl
@@ -6315,7 +6353,7 @@ class Chat:
         # 倒序查找最后一条自己发的消息
         for ctrl in reversed(candidates):
             sender, sender_type, _ = self._detect_sender(
-                hwnd, ctrl, self.current_name or "对方",
+                hwnd, ctrl, self.chat_name or "对方",
             )
             if sender_type != SenderType.SELF:
                 continue
@@ -6454,7 +6492,7 @@ class Chat:
 
         for ctrl in reversed(candidates):
             sender, sender_type, _ = self._detect_sender(
-                hwnd, ctrl, self.current_name or "对方",
+                hwnd, ctrl, self.chat_name or "对方",
             )
             if sender_type == SenderType.SELF:
                 return ctrl
@@ -6553,7 +6591,7 @@ class Chat:
 
         for ctrl in reversed(candidates):
             sender, sender_type, _ = self._detect_sender(
-                hwnd, ctrl, self.current_name or "对方",
+                hwnd, ctrl, self.chat_name or "对方",
             )
             if sender_type == SenderType.SELF:
                 return ctrl
@@ -6623,7 +6661,7 @@ class Chat:
 
         for ctrl in reversed(candidates):
             sender, sender_type, _ = self._detect_sender(
-                hwnd, ctrl, self.current_name or "对方",
+                hwnd, ctrl, self.chat_name or "对方",
             )
             if sender_type == SenderType.SELF:
                 return ctrl
@@ -6691,7 +6729,7 @@ class Chat:
 
         for ctrl in reversed(candidates):
             sender, sender_type, _ = self._detect_sender(
-                hwnd, ctrl, self.current_name or "对方",
+                hwnd, ctrl, self.chat_name or "对方",
             )
             if sender_type == SenderType.SELF:
                 return ctrl
@@ -6983,6 +7021,7 @@ class Chat:
             at_members: 要 @ 的成员昵称列表，传 ["所有人"] 可 @所有人
             timeout:    状态检测超时时间（秒），大于 0 时轮询等待发送完成，默认 0 不等待
         """
+        self._activate_window()
         self.clear_input()
         field = self._input_field
         if not field.Exists(maxSearchSeconds=2):
@@ -7609,7 +7648,7 @@ class Chat:
         if self.chat_type != "私聊":
             raise RuntimeError("发送名片仅支持私聊会话")
 
-        contact_name = self.current_name
+        contact_name = self.chat_name
         if not contact_name:
             raise RuntimeError("无法获取当前聊天联系人名称")
 
@@ -7874,15 +7913,15 @@ class Chat:
 
     @PIM.guard
     def voice_call(self) -> "VoipCall":
+        self._activate_window()
         self._click_voip_menu("语音通话")
-        pid = self.wx.pid if self.wx else None
-        return VoipCall(pid=pid)
+        return VoipCall(self)
 
     @PIM.guard
     def video_call(self) -> "VoipCall":
+        self._activate_window()
         self._click_voip_menu("视频通话")
-        pid = self.wx.pid if self.wx else None
-        return VoipCall(pid=pid)
+        return VoipCall(self)
 
     @PIM.guard
     def separate(self) -> "SeparateChat":
@@ -7894,7 +7933,7 @@ class Chat:
         """
         self._activate_window()
         
-        contact_name = self.current_name
+        contact_name = self.chat_name
         if not contact_name:
             raise RuntimeError("无法获取当前聊天对象名称")
 
@@ -7961,7 +8000,7 @@ class Chat:
             "mmui::ChatItemView": SystemMessage,
         }
 
-        chat_name = self.current_name or "对方"
+        chat_name = self.chat_name or "对方"
 
         messages: list[Message] = []
         for ctrl, _ in auto.WalkControl(lc):
@@ -8441,7 +8480,7 @@ class Chat:
             input_wx.click(confirm_btn)
             time.sleep(0.3)
 
-            logger.debug(f"清空聊天记录成功: {self.current_name}")
+            logger.debug(f"清空聊天记录成功: {self.chat_name}")
 
         finally:
             # 4. 收回聊天信息面板
@@ -8525,7 +8564,7 @@ class Chat:
             input_wx.click(confirm_btn)
             time.sleep(0.3)
 
-            logger.debug(f"清空群聊聊天记录成功: {self.current_name}")
+            logger.debug(f"清空群聊聊天记录成功: {self.chat_name}")
 
         finally:
             # 6. 收回聊天信息面板
@@ -8602,7 +8641,7 @@ class Chat:
             if not confirm_btn.Exists(maxSearchSeconds=3):
                 raise RuntimeError("未找到'确定'确认按钮")
             input_wx.click(confirm_btn)
-            logger.debug(f"退出群聊成功: {self.current_name}")
+            logger.debug(f"退出群聊成功: {self.chat_name}")
 
         finally:
             # 退出群聊后面板可能已自动关闭，尝试收回
@@ -8762,7 +8801,7 @@ class Chat:
                     break
                 time.sleep(1)
 
-            logger.debug(f"添加群成员成功: {self.current_name} -> {members}")
+            logger.debug(f"添加群成员成功: {self.chat_name} -> {members}")
 
         finally:
             self._close_chat_info_panel()
@@ -8934,7 +8973,7 @@ class Chat:
                     break
                 time.sleep(1)
 
-            logger.debug(f"移除群成员成功: {self.current_name} -> {members}")
+            logger.debug(f"移除群成员成功: {self.chat_name} -> {members}")
 
         finally:
             self._close_chat_info_panel()
@@ -9034,7 +9073,7 @@ class Chat:
             self._toggle_ocr_switch(img, ocr_data, hwnd, switch_name, enable)
 
             action = "开启" if enable else "关闭"
-            logger.debug(f"{action}{switch_name}成功: {self.current_name}")
+            logger.debug(f"{action}{switch_name}成功: {self.chat_name}")
 
         finally:
             self._close_chat_info_panel()
@@ -9113,7 +9152,7 @@ class Chat:
             img = Image.open(io.BytesIO(png_bytes))
             self._toggle_ocr_switch(img, ocr_data, hwnd, "折叠该聊天", True)
 
-            logger.debug(f"折叠群聊成功: {self.current_name}")
+            logger.debug(f"折叠群聊成功: {self.chat_name}")
 
         finally:
             self._close_chat_info_panel()
@@ -9147,7 +9186,7 @@ class Chat:
             if "折叠该聊天" in ocr_data:
                 self._toggle_ocr_switch(img, ocr_data, hwnd, "折叠该聊天", False)
 
-            logger.debug(f"取消折叠群聊成功: {self.current_name}")
+            logger.debug(f"取消折叠群聊成功: {self.chat_name}")
 
         finally:
             self._close_chat_info_panel()
@@ -9347,7 +9386,7 @@ class Chat:
                 auto.Click(click_x, click_y)
 
                 # 等待群公告窗口出现
-                pane_title = f"“{self.current_name}”的群公告"
+                pane_title = f"“{self.chat_name}”的群公告"
                 announcement_pane = auto.PaneControl(Name=pane_title)
                 if not announcement_pane.Exists(maxSearchSeconds=3):
                     raise RuntimeError("未找到群公告编辑窗口")
@@ -9475,7 +9514,7 @@ class Chat:
                     self._toggle_ocr_switch(
                         img, ocr_data, hwnd, switch_name, switch_val)
 
-            logger.debug(f"设置群聊信息成功: {self.current_name}")
+            logger.debug(f"设置群聊信息成功: {self.chat_name}")
 
         finally:
             self._close_chat_info_panel()
@@ -9522,7 +9561,7 @@ class Chat:
                 input_wx.click(sw)
                 time.sleep(0.3)
                 action = "开启" if enable else "关闭"
-                logger.debug(f"{action}{name}成功: {self.current_name}")
+                logger.debug(f"{action}{name}成功: {self.chat_name}")
         finally:
             self._close_chat_info_panel()
 
@@ -9624,7 +9663,7 @@ class Chat:
             if not fold_on:
                 input_wx.click(fold_sw)
                 time.sleep(0.3)
-                logger.debug(f"折叠聊天成功: {self.current_name}")
+                logger.debug(f"折叠聊天成功: {self.chat_name}")
         finally:
             self._close_chat_info_panel()
 
@@ -9652,7 +9691,7 @@ class Chat:
                 if toggle and toggle.ToggleState == 1:
                     input_wx.click(fold_sw)
                     time.sleep(0.3)
-                    logger.debug(f"取消折叠聊天成功: {self.current_name}")
+                    logger.debug(f"取消折叠聊天成功: {self.chat_name}")
         finally:
             self._close_chat_info_panel()
 
@@ -9814,7 +9853,7 @@ class Chat:
             auto.Click(click_x, click_y)
 
             # 判断群公告窗口是否出现
-            pane_title = f"“{self.current_name}”的群公告"
+            pane_title = f"“{self.chat_name}”的群公告"
             announcement_pane = auto.PaneControl(Name=pane_title)
             if not announcement_pane.Exists(maxSearchSeconds=3):
                 raise RuntimeError("未找到群公告编辑窗口")
@@ -9869,11 +9908,11 @@ class Chat:
 
             for i in range(10):
                 if not get_hwnd(pane_title):
-                    logger.debug(f"设置群公告成功: {self.current_name}")
+                    logger.debug(f"设置群公告成功: {self.chat_name}")
                     return
                 time.sleep(3)
 
-            logger.debug(f"设置群公告失败: {self.current_name}")
+            logger.debug(f"设置群公告失败: {self.chat_name}")
         finally:
             self._close_chat_info_panel()
 
@@ -9933,7 +9972,7 @@ class Chat:
             input_wx.paste(remark)
             input_wx.send_keys(self._win, "{Enter}")
 
-            logger.debug(f"设置群聊备注成功: {self.current_name} -> {remark}")
+            logger.debug(f"设置群聊备注成功: {self.chat_name} -> {remark}")
 
         finally:
             self._close_chat_info_panel()
@@ -10010,7 +10049,7 @@ class Chat:
             update_btn = self._win.ButtonControl(Name="修改")
             input_wx.click(update_btn)
 
-            logger.debug(f"设置群内昵称成功: {self.current_name} -> {nickname}")
+            logger.debug(f"设置群内昵称成功: {self.chat_name} -> {nickname}")
 
         finally:
             self._close_chat_info_panel()
@@ -10232,7 +10271,7 @@ class Chat:
                     if val:
                         result["finder_name"] = val
 
-            logger.debug(f"获取联系人资料成功: {self.current_name}")
+            logger.debug(f"获取联系人资料成功: {self.chat_name}")
             return result
 
         except Exception:
@@ -10472,7 +10511,7 @@ class Chat:
             if ok_btn.Exists(maxSearchSeconds=2):
                 input_wx.click(ok_btn)
 
-            logger.debug(f"设置联系人信息成功: {self.current_name}")
+            logger.debug(f"设置联系人信息成功: {self.chat_name}")
 
         except Exception:
             self._cleanup_profile()
@@ -10532,7 +10571,7 @@ class Chat:
             input_wx.click(ok_btn)
             time.sleep(0.3)
 
-            logger.debug(f"设置备注成功: {self.current_name} -> {remark}")
+            logger.debug(f"设置备注成功: {self.chat_name} -> {remark}")
 
         except Exception:
             self._cleanup_profile()
@@ -10582,7 +10621,7 @@ class Chat:
 
             new_labels = [l for l in labels if l not in existing_labels]
             if not new_labels:
-                logger.debug(f"所有标签已存在，跳过: {self.current_name} -> {labels}")
+                logger.debug(f"所有标签已存在，跳过: {self.chat_name} -> {labels}")
                 cancel_btn = remark_pop.ButtonControl(Name="取消")
                 if cancel_btn.Exists(maxSearchSeconds=1):
                     input_wx.click(cancel_btn)
@@ -10626,7 +10665,7 @@ class Chat:
             )
             input_wx.click(ok_btn)
             time.sleep(0.3)
-            logger.debug(f"添加标签成功: {self.current_name} -> {labels}")
+            logger.debug(f"添加标签成功: {self.chat_name} -> {labels}")
 
         except Exception:
             self._cleanup_profile()
@@ -10676,7 +10715,7 @@ class Chat:
 
             to_remove = [l for l in labels if l in existing_labels]
             if not to_remove:
-                logger.debug(f"标签均不存在，跳过: {self.current_name} -> {labels}")
+                logger.debug(f"标签均不存在，跳过: {self.chat_name} -> {labels}")
                 cancel_btn = remark_pop.ButtonControl(Name="取消")
                 if cancel_btn.Exists(maxSearchSeconds=1):
                     input_wx.click(cancel_btn)
@@ -10702,7 +10741,7 @@ class Chat:
             )
             input_wx.click(ok_btn)
             time.sleep(0.3)
-            logger.debug(f"移除标签成功: {self.current_name} -> {labels}")
+            logger.debug(f"移除标签成功: {self.chat_name} -> {labels}")
 
         except Exception:
             self._cleanup_profile()
@@ -10756,7 +10795,7 @@ class Chat:
             # 过滤掉已存在的号码
             new_phones = [p for p in phones if p not in existing_phones]
             if not new_phones:
-                logger.debug(f"所有电话号码已存在，跳过: {self.current_name} -> {phones}")
+                logger.debug(f"所有电话号码已存在，跳过: {self.chat_name} -> {phones}")
                 cancel_btn = remark_pop.ButtonControl(Name="取消")
                 if cancel_btn.Exists(maxSearchSeconds=1):
                     input_wx.click(cancel_btn)
@@ -10808,7 +10847,7 @@ class Chat:
             )
             input_wx.click(ok_btn)
             time.sleep(0.3)
-            logger.debug(f"添加电话号码成功: {self.current_name} -> {phones}")
+            logger.debug(f"添加电话号码成功: {self.chat_name} -> {phones}")
 
         except Exception:
             self._cleanup_profile()
@@ -10890,7 +10929,7 @@ class Chat:
             input_wx.click(ok_btn)
             time.sleep(0.3)
 
-            logger.debug(f"添加备注图片成功: {self.current_name} -> {images}")
+            logger.debug(f"添加备注图片成功: {self.chat_name} -> {images}")
 
         except Exception:
             self._cleanup_profile()
@@ -10945,7 +10984,7 @@ class Chat:
 
             to_remove = [p for p in phones if p in existing_phones]
             if not to_remove:
-                logger.debug(f"电话号码均不存在，跳过: {self.current_name} -> {phones}")
+                logger.debug(f"电话号码均不存在，跳过: {self.chat_name} -> {phones}")
                 cancel_btn = remark_pop.ButtonControl(Name="取消")
                 if cancel_btn.Exists(maxSearchSeconds=1):
                     input_wx.click(cancel_btn)
@@ -10976,7 +11015,7 @@ class Chat:
             )
             input_wx.click(ok_btn)
             time.sleep(0.3)
-            logger.debug(f"移除电话号码成功: {self.current_name} -> {phones}")
+            logger.debug(f"移除电话号码成功: {self.chat_name} -> {phones}")
 
         except Exception:
             self._cleanup_profile()
@@ -11081,7 +11120,7 @@ class Chat:
                 if ok_btn.Exists(maxSearchSeconds=2):
                     input_wx.click(ok_btn)
                     time.sleep(0.3)
-                logger.debug(f"删除备注图片成功: {self.current_name} -> 删除{deleted}张")
+                logger.debug(f"删除备注图片成功: {self.chat_name} -> 删除{deleted}张")
             else:
                 cancel_btn = remark_pop.ButtonControl(Name="取消")
                 if cancel_btn.Exists(maxSearchSeconds=1):
@@ -11108,7 +11147,7 @@ class Chat:
             )
             if unstar_item.Exists(0, 0):
                 input_wx.send_keys(self._win, "{Esc}")
-                logger.debug(f"已是星标朋友，跳过: {self.current_name}")
+                logger.debug(f"已是星标朋友，跳过: {self.chat_name}")
                 return
 
             menu_item = self._win.MenuItemControl(
@@ -11119,7 +11158,7 @@ class Chat:
                 raise RuntimeError("未找到'设为星标朋友'菜单项")
             input_wx.click(menu_item)
             time.sleep(0.3)
-            logger.debug(f"设为星标朋友成功: {self.current_name}")
+            logger.debug(f"设为星标朋友成功: {self.chat_name}")
         except Exception:
             self._cleanup_profile()
             raise
@@ -11141,7 +11180,7 @@ class Chat:
             )
             if star_item.Exists(0, 0):
                 input_wx.send_keys(self._win, "{Esc}")
-                logger.debug(f"非星标朋友，跳过: {self.current_name}")
+                logger.debug(f"非星标朋友，跳过: {self.chat_name}")
                 return
 
             menu_item = self._win.MenuItemControl(
@@ -11152,7 +11191,7 @@ class Chat:
                 raise RuntimeError("未找到'不再设为星标朋友'菜单项")
             input_wx.click(menu_item)
             time.sleep(0.3)
-            logger.debug(f"取消星标朋友成功: {self.current_name}")
+            logger.debug(f"取消星标朋友成功: {self.chat_name}")
         except Exception:
             self._cleanup_profile()
             raise
@@ -11174,7 +11213,7 @@ class Chat:
             )
             if unblack_item.Exists(0, 0):
                 input_wx.send_keys(self._win, "{Esc}")
-                logger.debug(f"已在黑名单中，跳过: {self.current_name}")
+                logger.debug(f"已在黑名单中，跳过: {self.chat_name}")
                 return
 
             menu_item = self._win.MenuItemControl(
@@ -11190,9 +11229,9 @@ class Chat:
             if confirm_btn.Exists(maxSearchSeconds=3):
                 input_wx.click(confirm_btn)
                 time.sleep(0.3)
-                logger.debug(f"加入黑名单成功: {self.current_name}")
+                logger.debug(f"加入黑名单成功: {self.chat_name}")
             else:
-                logger.warning(f"未找到确认按钮，加入黑名单可能未完成: {self.current_name}")
+                logger.warning(f"未找到确认按钮，加入黑名单可能未完成: {self.chat_name}")
 
         except Exception:
             self._cleanup_profile()
@@ -11215,7 +11254,7 @@ class Chat:
             )
             if black_item.Exists(0, 0):
                 input_wx.send_keys(self._win, "{Esc}")
-                logger.debug(f"不在黑名单中，跳过: {self.current_name}")
+                logger.debug(f"不在黑名单中，跳过: {self.chat_name}")
                 return
 
             menu_item = self._win.MenuItemControl(
@@ -11226,7 +11265,7 @@ class Chat:
                 raise RuntimeError("未找到'移出黑名单'菜单项")
             input_wx.click(menu_item)
             time.sleep(0.3)
-            logger.debug(f"移出黑名单成功: {self.current_name}")
+            logger.debug(f"移出黑名单成功: {self.chat_name}")
         except Exception:
             self._cleanup_profile()
             raise
@@ -11246,9 +11285,9 @@ class Chat:
             if confirm_btn.Exists(maxSearchSeconds=3):
                 input_wx.click(confirm_btn)
                 time.sleep(0.3)
-                logger.debug(f"删除联系人成功: {self.current_name}")
+                logger.debug(f"删除联系人成功: {self.chat_name}")
             else:
-                logger.warning(f"未找到'删除'确认按钮，删除联系人可能未完成: {self.current_name}")
+                logger.warning(f"未找到'删除'确认按钮，删除联系人可能未完成: {self.chat_name}")
 
         except Exception:
             self._cleanup_profile()
@@ -11324,7 +11363,7 @@ class Chat:
                 input_wx.click(cancel_btn)
             time.sleep(0.3)
 
-            logger.debug(f"获取朋友权限成功: {self.current_name} -> {result}")
+            logger.debug(f"获取朋友权限成功: {self.chat_name} -> {result}")
             return result
 
         except Exception:
@@ -11426,7 +11465,7 @@ class Chat:
                     input_wx.click(cancel_btn)
                     time.sleep(0.2)
 
-            logger.debug(f"设置朋友权限成功: {self.current_name} -> permission={permission}, "
+            logger.debug(f"设置朋友权限成功: {self.chat_name} -> permission={permission}, "
                         f"hide_my={hide_my_posts}, hide_their={hide_their_posts}")
 
         except Exception:
@@ -11533,7 +11572,7 @@ class Chat:
             if cancel_btn.Exists(maxSearchSeconds=1):
                 input_wx.click(cancel_btn)
 
-            logger.debug(f"收藏备注图片成功: {self.current_name} -> 收藏{collected}张")
+            logger.debug(f"收藏备注图片成功: {self.chat_name} -> 收藏{collected}张")
             return collected
 
         except Exception:
@@ -11675,7 +11714,7 @@ class Chat:
             if cancel_btn.Exists(maxSearchSeconds=1):
                 input_wx.click(cancel_btn)
 
-            logger.debug(f"保存备注图片成功: {self.current_name} -> {save_dir} ({saved}张)")
+            logger.debug(f"保存备注图片成功: {self.chat_name} -> {save_dir} ({saved}张)")
             return saved
 
         except Exception:
@@ -11720,17 +11759,15 @@ class SeparateChat(Chat, WeixinWindow):
             raise ValueError("contact_name 不能为空")
 
         self.wx = wx
-        pid = wx.pid if wx else None
-
         self._win = auto.WindowControl(
             ClassName=self.WINDOW_CLASS,
             Name=contact_name,
-            ProcessId=pid or 0,
+            ProcessId=self.wx.pid,
             searchDepth=1
         )
-        if not self._win.Exists(0, 0):
+        if not self.exists:
             # UIA 搜索失败时，通过 get_hwnd 按标题和 PID 查找
-            found_hwnd = get_hwnd(contact_name, pid=pid)
+            found_hwnd = get_hwnd(contact_name, pid=self.wx.pid)
             if found_hwnd:
                 self._win = auto.ControlFromHandle(found_hwnd)
                 if self._win is None or not self._win.Exists(0, 0):
@@ -11749,16 +11786,6 @@ class SeparateChat(Chat, WeixinWindow):
                     wx.CHAT_WINDOW_WIDTH, wx.CHAT_WINDOW_HEIGHT, True
                 )
 
-    @property
-    def exists(self) -> bool:
-        """独立窗口是否存在"""
-        return self._win.Exists(maxSearchSeconds=2)
-
-    @property
-    def is_pinned(self) -> bool:
-        """窗口是否已置顶"""
-        return self.is_topmost
-
     def _activate_window(self) -> None:
         """激活独立聊天窗口（覆盖 Chat 的主窗口激活）"""
         if background:
@@ -11770,56 +11797,6 @@ class SeparateChat(Chat, WeixinWindow):
         self._window.SetActive()
         self._window.SetFocus()
         time.sleep(0.2)
-
-    @PIM.guard
-    def send_text(self, content: str, timeout: float = 0) -> MessageStatus:
-        self.activate()
-        return super().send_text(content, timeout)
-
-    @PIM.guard
-    def send_file(self, file_path: "str | list[str]", timeout: float = 0) -> MessageStatus:
-        self.activate()
-        return super().send_file(file_path, timeout)
-
-    @PIM.guard
-    def send_image(self, file_path: "str | list[str]", timeout: float = 0) -> MessageStatus:
-        self.activate()
-        return super().send_image(file_path, timeout)
-
-    @PIM.guard
-    def send_video(self, file_path: "str | list[str]", timeout: float = 0) -> MessageStatus:
-        self.activate()
-        return super().send_video(file_path, timeout)
-
-    @PIM.guard
-    def send_at(self, content: str, at_members: list[str], timeout: float = 0) -> MessageStatus:
-        self.activate()
-        return super().send_at(content, at_members, timeout)
-
-    @PIM.guard
-    def send_collection(self, keyword: str, timeout: float = 0) -> MessageStatus:
-        self.activate()
-        return super().send_collection(keyword, timeout)
-
-    @PIM.guard
-    def send_emotion(self, keyword: str = None, index: int = 1, timeout: float = 0) -> MessageStatus:
-        self.activate()
-        return super().send_emotion(keyword, index, timeout)
-
-    @PIM.guard
-    def send_card(self, nickname: str) -> bool:
-        self.activate()
-        return super().send_card(nickname)
-
-    @PIM.guard
-    def voice_call(self) -> "VoipCall":
-        self.activate()
-        return super().voice_call()
-
-    @PIM.guard
-    def video_call(self) -> "VoipCall":
-        self.activate()
-        return super().video_call()
 
     def move_offscreen(self) -> None:
         """将窗口移到屏幕外（不可见但仍处于正常状态）。"""
@@ -11850,7 +11827,7 @@ class SeparateChat(Chat, WeixinWindow):
             return "SeparateChat(closed)"
         pid = self.wx.pid if self.wx else 0
         return (f"SeparateChat(pid={pid}, chat_type={self.chat_type!r}, "
-                f"name={self.current_name!r})")
+                f"name={self.chat_name!r})")
 
     def __repr__(self) -> str:
         return self.__str__()
@@ -13558,7 +13535,7 @@ class WeixinClient(WeixinWindow):
                 try:
                     self._emit(msg)
                 except Exception:
-                    logger.exception("事件分发异常 [%s]", chat.current_name)
+                    logger.exception("事件分发异常 [%s]", chat.chat_name)
         except KeyboardInterrupt:
             pass
         finally:
@@ -14236,7 +14213,7 @@ class Weixin:
                 try:
                     self._emit(pid, client, chat, msg)
                 except Exception:
-                    logger.exception("事件分发异常 [PID=%d] [%s]", pid, chat.current_name)
+                    logger.exception("事件分发异常 [PID=%d] [%s]", pid, chat.chat_name)
         except KeyboardInterrupt:
             pass
         finally:
