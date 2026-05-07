@@ -2250,10 +2250,10 @@ class WeixinWindow:
         self._window.SetFocus()
 
     def deactivate(self) -> None:
-        win32gui.SendMessage(hwnd, win32con.WM_ACTIVATE, win32con.WA_INACTIVE, 0)
+        win32gui.SendMessage(self._hwnd, win32con.WM_ACTIVATE, win32con.WA_INACTIVE, 0)
 
     def focus(self) -> None:
-        win32gui.SendMessage(hwnd, win32con.WM_SETFOCUS, 0, 0)
+        win32gui.SendMessage(self._hwnd, win32con.WM_SETFOCUS, 0, 0)
 
     def unfocus(self) -> None:
         win32gui.SendMessage(self._hwnd, win32con.WM_KILLFOCUS, 0, 0)
@@ -3391,9 +3391,8 @@ class SessionItem:
 
     def delete(self) -> None:
         """删除会话（危险操作，会清除聊天记录）"""
-        session = session
+        session = self.session
         session._session_context_action(self.name, "删除")
-        # 点击确认弹窗中的"删除"按钮
         confirm_btn = session._win.ButtonControl(Name="删除", ClassName="mmui::XOutlineButton")
         if not confirm_btn.Exists(maxSearchSeconds=2):
             raise RuntimeError("未找到删除确认弹窗")
