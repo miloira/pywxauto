@@ -3424,7 +3424,7 @@ class Navigator:
         "更多": "更多",
     }
 
-    def __init__(self, wx: "Weixin"):
+    def __init__(self, wx: "WeixinClient"):
         """
         初始化导航栏。
 
@@ -3462,7 +3462,7 @@ class Session:
               AutomationId="session_item_{name}"
     """
 
-    def __init__(self, wx: "Weixin"):
+    def __init__(self, wx: "WeixinClient"):
         """
         初始化会话列表面板。
 
@@ -4543,7 +4543,7 @@ class FriendCircle(WeixinWindow):
         "mmui::TimelineCell",         # 辅助行（如 "余下0条"）
     }
 
-    def __init__(self, wx: "Weixin"):
+    def __init__(self, wx: "WeixinClient"):
         """
         初始化朋友圈操作实例。
 
@@ -5567,7 +5567,7 @@ class FileManager(WeixinWindow):
     DOWNLOAD_MENU_ITEM_NAME = "下载"
     DELETE_MENU_ITEM_NAME = "删除"
 
-    def __init__(self, wx: "Weixin"):
+    def __init__(self, wx: "WeixinClient"):
         """
         初始化聊天文件管理器。
 
@@ -6132,7 +6132,7 @@ class Chat:
         "content_view.top_content_view.title_h_view.left_v_view.left_content_v_view.left_ui_.sub_title_",
     ]
 
-    def __init__(self, wx: "Weixin"):
+    def __init__(self, wx: "WeixinClient"):
         """
         初始化聊天区域。
 
