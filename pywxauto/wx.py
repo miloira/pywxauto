@@ -2221,6 +2221,11 @@ class WeixinWindow:
         return self._window.NativeWindowHandle
 
     @property
+    def exists(self) -> bool:
+        """窗口是否存在"""
+        return self._win.Exists(0, 0)
+
+    @property
     def is_topmost(self) -> bool:
         ex_style = win32gui.GetWindowLong(self._hwnd, win32con.GWL_EXSTYLE)
         return bool(ex_style & win32con.WS_EX_TOPMOST)
@@ -2363,11 +2368,6 @@ class Login(WeixinWindow):
             ProcessId=pid,
             searchDepth=1,
         )
-
-    @property
-    def exists(self) -> bool:
-        """登录窗口是否存在"""
-        return self._win.Exists(0, 0)
 
     @property
     def state(self) -> str:
@@ -2909,11 +2909,6 @@ class VoipCall(WeixinWindow):
             ProcessId=pid or 0,
         )
 
-    @property
-    def exists(self) -> bool:
-        """通话窗口是否存在"""
-        return self._win.Exists(maxSearchSeconds=2)
-
     def _ensure_exists(self) -> None:
         if not self._win.Exists(maxSearchSeconds=3):
             raise RuntimeError("通话窗口未找到")
@@ -3094,25 +3089,18 @@ class NoteEditor(WeixinWindow):
         self._handle = win.NativeWindowHandle
         self._win = win
 
-    def _refresh_win(self) -> None:
-        """通过句柄刷新窗口引用（防止窗口对象失效）"""
+    @property
+    def exists(self) -> bool:
+        """窗口是否存在（通过句柄刷新后检测）"""
         if self._handle:
             try:
                 self._win = auto.ControlFromHandle(self._handle)
             except Exception:
-                pass
-
-    @property
-    def exists(self) -> bool:
-        try:
-            self._refresh_win()
-            return self._win.Exists(maxSearchSeconds=2)
-        except Exception:
-            return False
+                return False
+        return self._win.Exists(0, 0)
 
     def _ensure_exists(self) -> None:
-        self._refresh_win()
-        if not self._win.Exists(maxSearchSeconds=3):
+        if not self.exists:
             raise RuntimeError("笔记编辑窗口未找到")
 
     def activate(self) -> None:
@@ -3139,10 +3127,8 @@ class NoteEditor(WeixinWindow):
         """
         使编辑器获得焦点。
 
-        force_click=True:  点击 mainContainer 区域强制聚焦（会清除选区）。
-                           适用于需要定位光标的操作（输入文本、清空等）。
-        force_click=False: 仅激活窗口，不点击编辑区域，保留当前选区。
-                           适用于格式快捷键（加粗、斜体等）。
+        force_click=True:  点击 mainContainer 强制聚焦（会清除选区）。
+        force_click=False: 仅激活窗口，保留当前选区（用于格式快捷键）。
         """
         self.activate()
         if force_click:
@@ -3151,14 +3137,15 @@ class NoteEditor(WeixinWindow):
                 input_wx.click(container)
                 time.sleep(0.3)
 
+    def _editor_shortcut(self, keys: str, force_click: bool = False, delay: float = 0.1) -> None:
+        """向编辑器发送快捷键的通用方法"""
+        self.focus_editor(force_click=force_click)
+        input_wx.send_keys(self._editor, keys)
+        time.sleep(delay)
+
     @property
     def content(self) -> str:
-        """
-        读取编辑器当前内容。
-
-        优先通过 ValuePattern 读取，
-        若为空则尝试 TextPattern.DocumentRange。
-        """
+        """读取编辑器当前内容（优先 ValuePattern，备选 TextPattern）"""
         self._ensure_exists()
         editor = self._editor
         if not editor.Exists(maxSearchSeconds=2):
@@ -3170,36 +3157,25 @@ class NoteEditor(WeixinWindow):
         if tp:
             doc_range = tp.DocumentRange
             if doc_range:
-                text = doc_range.GetText(-1)
-                return text if text else ""
+                return doc_range.GetText(-1) or ""
         return ""
 
     @PIM.guard
     def set_content(self, text: str) -> None:
-        """
-        设置编辑器内容（覆盖现有内容）。
-
-        通过 ValuePattern.SetValue 写入文本。
-        注意：这会替换编辑器中的全部内容。
-        """
+        """设置编辑器内容（覆盖现有内容，通过 ValuePattern.SetValue）"""
         self.focus_editor()
         editor = self._editor
         if not editor.Exists(maxSearchSeconds=2):
             raise RuntimeError("未找到笔记编辑器输入控件")
         vp = editor.GetValuePattern()
-        if vp:
-            vp.SetValue(text)
-            time.sleep(0.3)
-        else:
+        if not vp:
             raise RuntimeError("编辑器不支持 ValuePattern")
+        vp.SetValue(text)
+        time.sleep(0.3)
 
     @PIM.guard
     def type_text(self, text: str) -> None:
-        """
-        在编辑器中输入文本（追加到当前光标位置）。
-
-        text: 要输入的文本
-        """
+        """在编辑器中输入文本（追加到当前光标位置）"""
         self.focus_editor()
         editor = self._editor
         if not editor.Exists(maxSearchSeconds=2):
@@ -3210,18 +3186,12 @@ class NoteEditor(WeixinWindow):
     @PIM.guard
     def clear(self) -> None:
         """清空编辑器内容"""
-        self.focus_editor()
-        editor = self._editor
-        if editor.Exists(maxSearchSeconds=2):
-            input_wx.send_keys(editor, "{Ctrl}a{Del}")
-            time.sleep(0.2)
+        self._editor_shortcut("{Ctrl}a{Del}", force_click=True, delay=0.2)
 
     @PIM.guard
     def select_all(self) -> None:
         """全选编辑器内容"""
-        self.focus_editor()
-        input_wx.send_keys(self._editor, "{Ctrl}a")
-        time.sleep(0.1)
+        self._editor_shortcut("{Ctrl}a", force_click=True)
 
     # -- 富文本格式快捷键 --
     # 底部工具栏渲染在 WebView 内部，不暴露为 UI Automation 控件，
@@ -3229,174 +3199,119 @@ class NoteEditor(WeixinWindow):
 
     @PIM.guard
     def begin_voice_input(self) -> None:
-        """
-        开始语音输入：按下 Ctrl+Win 不松开。
-
-        使用 keybd_event 分别按下 VK_CONTROL 和 VK_LWIN，
-        保持按住状态直到调用 end_voice_input 释放。
-        """
+        """开始语音输入：按下 Ctrl+Win 不松开"""
         self.focus_editor(force_click=False)
-        VK_CONTROL = 0x11
-        VK_LWIN = 0x5B
-        KEYEVENTF_KEYDOWN = 0x0
-        ctypes.windll.user32.keybd_event(VK_CONTROL, 0, KEYEVENTF_KEYDOWN, 0)
-        ctypes.windll.user32.keybd_event(VK_LWIN, 0, KEYEVENTF_KEYDOWN, 0)
+        ctypes.windll.user32.keybd_event(0x11, 0, 0, 0)  # VK_CONTROL down
+        ctypes.windll.user32.keybd_event(0x5B, 0, 0, 0)  # VK_LWIN down
         time.sleep(0.1)
 
     @PIM.guard
     def end_voice_input(self) -> None:
-        """
-        结束语音输入：释放 Ctrl+Win 按键。
-
-        释放顺序与按下相反：先释放 Win，再释放 Ctrl。
-        """
-        VK_CONTROL = 0x11
-        VK_LWIN = 0x5B
-        KEYEVENTF_KEYUP = 0x2
-        ctypes.windll.user32.keybd_event(VK_LWIN, 0, KEYEVENTF_KEYUP, 0)
-        ctypes.windll.user32.keybd_event(VK_CONTROL, 0, KEYEVENTF_KEYUP, 0)
+        """结束语音输入：释放 Ctrl+Win 按键"""
+        ctypes.windll.user32.keybd_event(0x5B, 0, 0x2, 0)  # VK_LWIN up
+        ctypes.windll.user32.keybd_event(0x11, 0, 0x2, 0)  # VK_CONTROL up
         time.sleep(0.1)
 
     @PIM.guard
     def add_file(self, file_path: str) -> None:
-        """
-        通过 Ctrl+O 打开文件选择对话框，输入路径并确认添加文件。
-
-        file_path: 文件绝对路径
-        """
+        """通过 Ctrl+O 打开文件选择对话框，输入路径并确认添加文件"""
         self.focus_editor()
         input_wx.send_keys(self._editor, "{Ctrl}O")
         time.sleep(1)
 
-        # 系统文件选择对话框
         dlg = auto.WindowControl(ClassName="#32770")
         if not dlg.Exists(maxSearchSeconds=5):
             raise RuntimeError("文件选择对话框未弹出")
 
-        # Alt+N 激活文件名输入框，通过 ValuePattern 直接设置路径
         input_wx.send_keys(dlg, "{Alt}N")
         time.sleep(0.3)
         edit = dlg.ComboBoxControl(AutomationId="1148").EditControl()
         if not edit.Exists(0, 0):
             edit = dlg.EditControl(AutomationId="1148")
-        # edit.GetValuePattern().SetValue(file_path)
         input_wx.send_keys(edit, file_path)
         time.sleep(0.3)
-        # Alt+O 点击打开
         input_wx.send_keys(dlg, "{Alt}O")
         time.sleep(0.5)
 
     @PIM.guard
     def bold(self) -> None:
         """加粗（Ctrl+B）"""
-        self.focus_editor(force_click=False)
-        input_wx.send_keys(self._editor, "{Ctrl}B")
-        time.sleep(0.1)
+        self._editor_shortcut("{Ctrl}B")
 
     @PIM.guard
     def italic(self) -> None:
         """斜体（Ctrl+I）"""
-        self.focus_editor(force_click=False)
-        input_wx.send_keys(self._editor, "{Ctrl}I")
-        time.sleep(0.1)
+        self._editor_shortcut("{Ctrl}I")
 
     @PIM.guard
     def underline(self) -> None:
         """下划线（Ctrl+U）"""
-        self.focus_editor(force_click=False)
-        input_wx.send_keys(self._editor, "{Ctrl}U")
-        time.sleep(0.1)
+        self._editor_shortcut("{Ctrl}U")
 
     @PIM.guard
     def highlight(self) -> None:
         """高亮（Ctrl+Shift+H）"""
-        self.focus_editor(force_click=False)
-        input_wx.send_keys(self._editor, "{Ctrl}{Shift}H")
-        time.sleep(0.1)
+        self._editor_shortcut("{Ctrl}{Shift}H")
 
     @PIM.guard
     def undo(self) -> None:
         """撤销（Ctrl+Z）"""
-        self.focus_editor(force_click=False)
-        input_wx.send_keys(self._editor, "{Ctrl}z")
-        time.sleep(0.1)
+        self._editor_shortcut("{Ctrl}z")
 
     @PIM.guard
     def redo(self) -> None:
         """重做（Ctrl+Y）"""
-        self.focus_editor(force_click=False)
-        input_wx.send_keys(self._editor, "{Ctrl}y")
-        time.sleep(0.1)
+        self._editor_shortcut("{Ctrl}y")
 
     @PIM.guard
     def new_line(self) -> None:
         """换行（Enter）"""
-        self.focus_editor()
-        input_wx.send_keys(self._editor, "{Enter}")
-        time.sleep(0.1)
+        self._editor_shortcut("{Enter}", force_click=True)
 
     @PIM.guard
     def save(self) -> None:
         """保存笔记（Ctrl+S）"""
-        self.focus_editor(force_click=False)
-        input_wx.send_keys(self._editor, "{Ctrl}s")
-        time.sleep(0.3)
+        self._editor_shortcut("{Ctrl}s", delay=0.3)
 
     @PIM.guard
     def add_tags(self, *tags: str) -> None:
         """
-        添加标签。
+        添加标签（通过 Ctrl+T 打开标签弹窗，逐个输入）。
 
-        通过 Ctrl+T 打开标签输入弹窗，输入标签名后回车确认。
-        支持一次添加多个标签。
-
-        注意：标签弹窗渲染在 WebView 内部，不暴露为独立 UI Automation 控件，
-        Ctrl+T 打开后焦点转移到弹窗内的输入框，此时需要通过窗口级别
-        SendKeys 发送按键，而非通过 xeditorInputId 控件。
-
-        tags: 一个或多个标签名称
+        标签弹窗渲染在 WebView 内部，需通过窗口级别 SendKeys 输入。
         """
         self.focus_editor()
         for tag in tags:
             if not tag:
                 continue
-            # 通过窗口发送 Ctrl+T 打开标签弹窗
             input_wx.send_keys(self._editor, "{Ctrl}T")
             time.sleep(1)
-            # 标签弹窗内的输入框不暴露为 UI Automation 控件，
-            # 需要通过窗口级别 SendKeys 输入
             input_wx.send_keys(None, tag)
             time.sleep(0.3)
             input_wx.send_keys(None, "{Down}")
             input_wx.send_keys(None, "{Enter}")
             time.sleep(0.3)
-        # 按 Esc 关闭标签弹窗
         input_wx.send_keys(None, "{Esc}")
         time.sleep(0.2)
 
     @PIM.guard
     def paste(self) -> None:
         """粘贴剪贴板内容（Ctrl+V）"""
-        self.focus_editor()
-        input_wx.send_keys(self._editor, "{Ctrl}v")
-        time.sleep(0.2)
+        self._editor_shortcut("{Ctrl}v", force_click=True, delay=0.2)
 
     @PIM.guard
     def paste_file(self, file_path: str) -> None:
-        """
-        通过剪贴板粘贴文件到笔记中。
-
-        file_path: 文件路径
-        """
+        """通过剪贴板粘贴文件到笔记中"""
         self.focus_editor()
         input_wx.paste([file_path])
         time.sleep(0.5)
 
     def __str__(self) -> str:
-        if not self._win.Exists(0, 0):
+        if not self.exists:
             return "NoteEditor(closed)"
-        content = self.content
-        preview = content[:30] + "..." if len(content) > 30 else content
+        preview = self.content[:30]
+        if len(self.content) > 30:
+            preview += "..."
         return f"NoteEditor(content={preview!r})"
 
 
@@ -5684,13 +5599,17 @@ class FileManager(WeixinWindow):
         """
         self.wx = wx
         self._win = auto.WindowControl(
-            Name=self.WINDOW_NAME, searchDepth=1,
+            Name=self.WINDOW_NAME,
+            ProcessId=wx.pid or 0,
+            searchDepth=1,
         )
 
     def _find_window(self) -> Optional[auto.WindowControl]:
-        """查找并激活聊天文件窗口（独立窗口）"""
+        """查找并激活聊天文件窗口（独立窗口），通过 PID 精确匹配"""
         self._win = auto.WindowControl(
-            Name=self.WINDOW_NAME, searchDepth=1
+            Name=self.WINDOW_NAME,
+            ProcessId=self.wx.pid or 0,
+            searchDepth=1,
         )
         if self._win.Exists(maxSearchSeconds=3):
             if not background:
@@ -5754,52 +5673,6 @@ class FileManager(WeixinWindow):
         input_wx.click(filter_btn)
         time.sleep(0.5)
         return True
-
-    @PIM.guard
-    def close(self, method: str = "event") -> None:
-        """
-        关闭聊天文件管理器窗口。
-
-        Args:
-            method: 关闭方式
-                - "click": 点击窗口上的"关闭"按钮
-                - "event": 通过 WM_CLOSE 消息关闭（默认）
-        """
-        fm_win = self._find_window()
-        if not fm_win:
-            return
-
-        if method == "click":
-            self._close_by_click(fm_win)
-        elif method == "event":
-            self._close_by_event(fm_win)
-
-    def _close_by_click(self, fm_win) -> bool:
-        """通过点击"关闭"按钮关闭窗口"""
-        try:
-            close_btn = fm_win.ButtonControl(Name="关闭")
-            if close_btn.Exists(maxSearchSeconds=1):
-                input_wx.click(close_btn)
-                time.sleep(0.5)
-                if not fm_win.Exists(maxSearchSeconds=1):
-                    return True
-        except Exception:
-            pass
-        return False
-
-    def _close_by_event(self, fm_win) -> bool:
-        """通过 WM_CLOSE 消息关闭窗口"""
-        WM_CLOSE = 0x0010
-        try:
-            hwnd = fm_win.NativeWindowHandle
-            if hwnd:
-                ctypes.windll.user32.PostMessageW(hwnd, WM_CLOSE, 0, 0)
-                time.sleep(0.5)
-                if not fm_win.Exists(maxSearchSeconds=1):
-                    return True
-        except Exception:
-            pass
-        return False
 
     def _find_context_menu_by_point(self) -> Optional[auto.Control]:
         """
