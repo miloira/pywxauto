@@ -2870,7 +2870,7 @@ class Login(WeixinWindow):
         return f"Login(user={nick!r})"
 
 
-class VoipCallWindow:
+class VoipCall(WeixinWindow):
     """
     语音/视频通话窗口控制。
 
@@ -3040,58 +3040,14 @@ class VoipCallWindow:
         input_wx.click(btn)
         time.sleep(0.3)
 
-    @PIM.guard
-    def pin(self) -> None:
-        """置顶窗口"""
-        self._ensure_exists()
-        btn = self._win.ButtonControl(
-            ClassName="mmui::PinnedButton", Name="置顶",
-        )
-        if btn.Exists(0, 0):
-            input_wx.click(btn)
-            time.sleep(0.2)
-
-    @PIM.guard
-    def minimize(self) -> None:
-        """最小化通话窗口"""
-        self._ensure_exists()
-        btn = self._win.ButtonControl(
-            ClassName="mmui::XButton", Name="最小化",
-        )
-        if btn.Exists(0, 0):
-            input_wx.click(btn)
-            time.sleep(0.2)
-
-    @PIM.guard
-    def maximize(self) -> None:
-        """最大化通话窗口"""
-        self._ensure_exists()
-        btn = self._win.ButtonControl(
-            ClassName="mmui::XButton", Name="最大化",
-        )
-        if btn.Exists(0, 0):
-            input_wx.click(btn)
-            time.sleep(0.2)
-
-    @PIM.guard
-    def close(self) -> None:
-        """关闭通话窗口"""
-        self._ensure_exists()
-        btn = self._win.ButtonControl(
-            ClassName="mmui::XButton", Name="关闭",
-        )
-        if btn.Exists(0, 0):
-            input_wx.click(btn)
-            time.sleep(0.2)
-
     def __str__(self) -> str:
         if not self._win.Exists(0, 0):
-            return "VoipCallWindow(closed)"
-        return (f"VoipCallWindow(contact={self.contact_name!r}, "
+            return "VoipCall(closed)"
+        return (f"VoipCall(contact={self.contact_name!r}, "
                 f"status={self.status!r})")
 
 
-class NoteEditorWindow(WeixinWindow):
+class NoteEditor(WeixinWindow):
     """
     笔记编辑窗口控制。
 
@@ -3438,10 +3394,10 @@ class NoteEditorWindow(WeixinWindow):
 
     def __str__(self) -> str:
         if not self._win.Exists(0, 0):
-            return "NoteEditorWindow(closed)"
+            return "NoteEditor(closed)"
         content = self.content
         preview = content[:30] + "..." if len(content) > 30 else content
-        return f"NoteEditorWindow(content={preview!r})"
+        return f"NoteEditor(content={preview!r})"
 
 
 def _parse_session_name(raw: str, session: "Session | None" = None) -> "SessionItem":
@@ -4366,16 +4322,16 @@ class Session:
         time.sleep(0.5)
 
     @PIM.guard
-    def new_note(self) -> "NoteEditorWindow":
+    def new_note(self) -> "NoteEditor":
         """
         新建笔记，返回笔记编辑窗口对象。
 
         通过快捷操作菜单打开新建笔记窗口，
-        等待笔记编辑窗口出现后返回 NoteEditorWindow 实例。
+        等待笔记编辑窗口出现后返回 NoteEditor 实例。
         """
         self._quick_action("新建笔记")
         time.sleep(0.5)
-        return NoteEditorWindow(self.wx)
+        return NoteEditor(self.wx)
 
     def __str__(self) -> str:
         try:
@@ -8067,16 +8023,16 @@ class Chat:
         time.sleep(0.3)
 
     @PIM.guard
-    def voice_call(self) -> "VoipCallWindow":
+    def voice_call(self) -> "VoipCall":
         self._click_voip_menu("语音通话")
         pid = self.wx.pid if self.wx else None
-        return VoipCallWindow(pid=pid)
+        return VoipCall(pid=pid)
 
     @PIM.guard
-    def video_call(self) -> "VoipCallWindow":
+    def video_call(self) -> "VoipCall":
         self._click_voip_menu("视频通话")
         pid = self.wx.pid if self.wx else None
-        return VoipCallWindow(pid=pid)
+        return VoipCall(pid=pid)
 
     @PIM.guard
     def separate(self) -> "SeparateChat":
@@ -12006,12 +11962,12 @@ class SeparateChat(Chat, WeixinWindow):
         return super().send_card(nickname)
 
     @PIM.guard
-    def voice_call(self) -> "VoipCallWindow":
+    def voice_call(self) -> "VoipCall":
         self.activate()
         return super().voice_call()
 
     @PIM.guard
-    def video_call(self) -> "VoipCallWindow":
+    def video_call(self) -> "VoipCall":
         self.activate()
         return super().video_call()
 
@@ -12107,7 +12063,7 @@ class SeparateChat(Chat, WeixinWindow):
 
 ┌──────────────────────────┐  ┌──────────────────────────────┐
 │ mmui::LoginWindow        │  │ Chrome_WidgetWin_0 "笔记"     │
-│ (Login 登录窗口)          │  │ (NoteEditorWindow 笔记编辑)   │
+│ (Login 登录窗口)          │  │ (NoteEditor 笔记编辑)   │
 │                          │  │                              │
 │ [头像]                   │  │ ┌──────────────────────────┐ │
 │ 当前登录用户{昵称}        │  │ │ xeditorInputId           │ │
