@@ -2076,6 +2076,91 @@ class RedPacketMessage(Message):
     def type_label(self) -> str:
         return "红包消息"
 
+    def open(self) -> dict:
+        """
+        打开（拆开）红包。
+
+        流程:
+        1. 悬浮鼠标到红包消息，点击打开弹窗
+        2. 在弹窗中点击"拆开"按钮
+        3. 等待结果页面（mmui::PayRedEnvelopDetailWindow）出现
+        4. 截图 OCR 识别结果页面内容
+        5. 关闭结果页面
+
+        弹窗控件结构（在聊天窗口内）:
+        - 发送者: TextControl, Name="{昵称}发出的红包"
+        - 祝福语: TextControl, Name="{祝福语}"
+        - 拆开按钮: ButtonControl, Name="拆开", ClassName="mmui::XButton"
+        - 关闭按钮: ButtonControl, Name="关闭", ClassName="mmui::XButton"
+
+        Returns:
+            dict: {
+                "desc": str,   # OCR 识别文本拼接
+                "ocr": dict,   # OCR 原始结果 {text: {center, left_top, right_bottom, width, height}}
+            }
+            空字典表示拆开失败或无法识别
+        """
+        if not self.chat:
+            return {}
+
+        self.chat._activate_window()
+
+        if not self.hover():
+            return {}
+
+        ctrl = self._find_ctrl()
+        if not ctrl:
+            return {}
+
+        input_wx.click(ctrl)
+        time.sleep(0.5)
+
+        # 查找"拆开"按钮
+        open_btn = self.chat._win.ButtonControl(
+            ClassName="mmui::XButton",
+            Name="拆开",
+            searchDepth=10,
+        )
+        if open_btn.Exists(maxSearchSeconds=3):
+            input_wx.click(open_btn)
+
+        # 等待红包结果窗口出现，截图 OCR 识别
+        # 通过 ProcessId 过滤，避免多开场景下匹配到其他微信实例的窗口
+        pid = self.chat.wx.pid if self.chat.wx else 0
+        result = {}
+        pay_detail_win = auto.WindowControl(
+            ClassName="mmui::PayRedEnvelopDetailWindow",
+            ProcessId=pid,
+            searchDepth=1,
+        )
+        if pay_detail_win.Exists(maxSearchSeconds=5):
+            try:
+                hwnd = pay_detail_win.NativeWindowHandle or 0
+                if hwnd:
+                    png_bytes = capture_window(
+                        hwnd,
+                        offset_left=12,
+                        offset_right=22,
+                        offset_bottom=12,
+                        mode="print_window",
+                    )
+                    result = self.chat.wx.get_image_text(png_bytes)
+            except Exception:
+                pass
+
+            # 关闭结果窗口
+            try:
+                wp = pay_detail_win.GetWindowPattern()
+                if wp:
+                    wp.Close()
+            except Exception:
+                pass
+
+        return {
+            "desc": "\n".join(result),
+            "ocr": result,
+        }
+
     @staticmethod
     def parse(raw_name: str) -> tuple[str, str]:
         m = RedPacketMessage._RED_PACKET_RE.match(raw_name)
@@ -13451,7 +13536,7 @@ class WeixinClient(WeixinWindow):
         Note:
             后台模式下窗口会自动移到屏幕外，前台模式下保持原位。
         """
-        if not hasattr(self, '_listeners'):
+        if not hasattr(self, '_chat_listeners'):
             self._chat_listeners: dict[str, SeparateChat] = {}
         self._offscreen = background
 
@@ -13479,7 +13564,8 @@ class WeixinClient(WeixinWindow):
 
         if isinstance(names, str):
             names = [names]
-        elif isinstance(names, Iterable):
+
+        if isinstance(names, Iterable):
             result: list[SeparateChat] = []
             for name in names:
                 if not name:
@@ -13496,6 +13582,7 @@ class WeixinClient(WeixinWindow):
                     # 未打开，通过主窗口搜索并打开独立窗口
                     try:
                         main_chat = self.open_session_by_search(name)
+                        print(main_chat)
                         chat = main_chat.separate()
                     except Exception as e:
                         logger.error("打开独立窗口失败 [%s]: %s", name, e)
