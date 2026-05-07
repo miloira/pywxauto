@@ -2243,60 +2243,47 @@ class WeixinWindow:
     def is_visible(self) -> bool:
         return bool(win32gui.IsWindowVisible(self._hwnd))
 
-    @PIM.guard
     def activate(self) -> None:
         if self.is_minimized:
             self._window.Restore()
         self._window.SetActive()
         self._window.SetFocus()
 
-    @PIM.guard
     def deactivate(self) -> None:
         input_wm.deactivate_window(self._hwnd)
 
-    @PIM.guard
     def focus(self) -> None:
         input_wm.focus_window(self._hwnd)
 
-    @PIM.guard
     def unfocus(self) -> None:
         win32gui.SendMessage(self._hwnd, win32con.WM_KILLFOCUS, 0, 0)
 
-    @PIM.guard
     def pin(self) -> None:
         win32gui.SetWindowPos(self._hwnd, win32con.HWND_TOPMOST, 0, 0, 0, 0,
                               win32con.SWP_NOMOVE | win32con.SWP_NOSIZE)
 
-    @PIM.guard
     def unpin(self) -> None:
         win32gui.SetWindowPos(self._hwnd, win32con.HWND_NOTOPMOST, 0, 0, 0, 0,
                             win32con.SWP_NOMOVE | win32con.SWP_NOSIZE)
 
-    @PIM.guard
     def minimize(self) -> None:
         win32gui.ShowWindow(self._hwnd, win32con.SW_MINIMIZE)
 
-    @PIM.guard
     def maximize(self) -> None:
         win32gui.ShowWindow(self._hwnd, win32con.SW_MAXIMIZE)
 
-    @PIM.guard
     def restore(self) -> None:
         win32gui.ShowWindow(self._hwnd, win32con.SW_RESTORE)
 
-    @PIM.guard
     def close(self) -> None:
         win32gui.SendMessage(self._hwnd, win32con.WM_CLOSE, 0, 0)
 
-    @PIM.guard
     def show(self) -> None:
         win32gui.ShowWindow(self._hwnd, win32con.SW_SHOW)
 
-    @PIM.guard
     def hide(self) -> None:
         win32gui.ShowWindow(self._hwnd, win32con.SW_HIDE)
 
-    @PIM.guard
     def move_to(self, x: int, y: int) -> None:
         hwnd = self._hwnd
         rect = win32gui.GetWindowRect(hwnd)
@@ -2304,7 +2291,6 @@ class WeixinWindow:
         h = rect[3] - rect[1]
         win32gui.MoveWindow(hwnd, x, y, w, h, True)
 
-    @PIM.guard
     def resize_to(self, width: int, height: int) -> None:
         hwnd = self._hwnd
         rect = win32gui.GetWindowRect(hwnd)
@@ -12824,7 +12810,7 @@ class WeixinClient(WeixinWindow):
             time.sleep(0.3)
 
     @PIM.guard
-    def get_self_info2(self) -> dict:
+    def get_self_info(self) -> dict:
         """
         获取当前登录账号的个人资料（通过点击头像打开资料面板）。
 
@@ -13983,9 +13969,9 @@ class Weixin:
         """获取当前登录账号的个人资料（昵称、微信号）"""
         return self.get_client(pid).get_self_profile()
 
-    def get_self_info2(self, pid: int) -> dict:
+    def get_self_info(self, pid: int) -> dict:
         """通过点击头像打开资料面板获取个人资料（昵称、微信号）"""
-        return self.get_client(pid).get_self_info2()
+        return self.get_client(pid).get_self_info()
 
     # ---- 朋友圈 ----
 
