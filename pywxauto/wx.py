@@ -4214,7 +4214,6 @@ class Session:
         if not confirm_btn.Exists(maxSearchSeconds=1):
             raise RuntimeError("未找到确定按钮")
         input_wx.click(confirm_btn)
-        time.sleep(0.5)
 
     @PIM.guard
     def new_note(self) -> "NoteEditor":
@@ -4225,7 +4224,6 @@ class Session:
         等待笔记编辑窗口出现后返回 NoteEditor 实例。
         """
         self._quick_action("新建笔记")
-        time.sleep(0.5)
         return NoteEditor(self.wx)
 
     def __str__(self) -> str:
