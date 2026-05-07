@@ -29,6 +29,7 @@ import win32api
 import win32clipboard
 import win32con
 import win32gui
+import win32process
 import win32ui
 import winreg
 from PIL import Image
@@ -726,7 +727,7 @@ def get_wechat_version(version: int = 3) -> str:
 
     raise FileNotFoundError(f"未在注册表中找到微信{version}.x版本信息")
 
-def get_hwnd(title=None, mode="exact"):
+def get_hwnd(title=None, mode="exact", pid=None):
     """根据窗口标题获取窗口句柄
 
     Args:
@@ -735,17 +736,25 @@ def get_hwnd(title=None, mode="exact"):
             - "exact": 完全匹配
             - "wildcard": 通配符匹配（支持 * 和 ?）
             - "regex": 正则表达式匹配
+        pid: 进程 PID，传入时按 PID 过滤，None 不过滤
 
     Returns:
         匹配到的窗口句柄
     """
-    if title is None:
+    if title is None and pid is None:
         return win32gui.GetForegroundWindow()
 
     results = []
 
     def enum_callback(hwnd, _):
         if not win32gui.IsWindowVisible(hwnd):
+            return
+        if pid is not None:
+            _, win_pid = win32process.GetWindowThreadProcessId(hwnd)
+            if win_pid != pid:
+                return
+        if title is None:
+            results.append(hwnd)
             return
         window_title = win32gui.GetWindowText(hwnd)
         if not window_title:
@@ -3788,6 +3797,7 @@ class Session:
             chat_type:    优先匹配的分类，如 ["联系人", "群聊", "功能"]
             force_search: 是否强制走搜索流程，跳过标题检查和列表直接点击
         """
+        self.wx.activate()
         if not force_search:
             # 检查当前聊天对象是否已经是目标会话
             for aid in Chat.TITLE_LABEL_IDS:
@@ -3801,16 +3811,21 @@ class Session:
                 AutomationId=f"session_item_{name}",
             )
             if item.Exists(0, 0):
-                # 如果已激活则不重复点击
+                # 如果已激活，检查聊天区域标题是否匹配
                 try:
                     pattern = item.GetSelectionItemPattern()
                     if pattern and pattern.IsSelected:
+                        # 已选中但聊天区域可能未显示该会话，验证标题
+                        for aid in Chat.TITLE_LABEL_IDS:
+                            title = self._win.TextControl(AutomationId=aid)
+                            if title.Exists(0, 0) and title.Name == name:
+                                return
+                        # 标题不匹配，点击刷新
+                        input_wx.click(item)
                         return
                 except Exception:
                     pass
                 input_wx.click(item)
-                # item.Click(ratioX=rand_ratio(), ratioY=rand_ratio())
-                time.sleep(0.3)
                 return
 
         # 列表中没有（或强制搜索），走搜索
@@ -4050,6 +4065,14 @@ class Session:
         try:
             pattern = item.GetSelectionItemPattern()
             if pattern and pattern.IsSelected:
+                # 已激活但可能聊天区域未显示该会话（窗口之前未打开），
+                # 点击一下确保聊天区域切换到该会话
+                for aid in Chat.TITLE_LABEL_IDS:
+                    title = self._win.TextControl(AutomationId=aid)
+                    if title.Exists(0, 0) and title.Name == name:
+                        return
+                # 标题不匹配，说明聊天区域未显示，点击刷新
+                input_wx.click(item)
                 return
         except Exception:
             pass
@@ -4099,7 +4122,6 @@ class Session:
     def cancel_search(self) -> None:
         """取消搜索（按 Esc 退出搜索模式）"""
         input_wx.send_keys(self._win, "{Esc}")
-        time.sleep(0.2)
 
     @PIM.guard
     def search_contact(self, keyword: str) -> bool:
@@ -11986,7 +12008,14 @@ class SeparateChat(Chat, WeixinWindow):
             searchDepth=1
         )
         if not self._win.Exists(0, 0):
-            raise RuntimeError(f"独立聊天窗口未找到: {contact_name}")
+            # UIA 搜索失败时，通过 get_hwnd 按标题和 PID 查找
+            found_hwnd = get_hwnd(contact_name, pid=pid)
+            if found_hwnd:
+                self._win = auto.ControlFromHandle(found_hwnd)
+                if self._win is None or not self._win.Exists(0, 0):
+                    raise RuntimeError(f"独立聊天窗口未找到: {contact_name}")
+            else:
+                raise RuntimeError(f"独立聊天窗口未找到: {contact_name}")
 
     @property
     def exists(self) -> bool:
@@ -12000,7 +12029,15 @@ class SeparateChat(Chat, WeixinWindow):
 
     def _activate_window(self) -> None:
         """激活独立聊天窗口（覆盖 Chat 的主窗口激活）"""
-        self.activate()
+        if background:
+            return
+        # 最小化的窗口需要先还原才能激活
+        if self.is_minimized:
+            self.restore()
+            time.sleep(0.3)
+        self._window.SetActive()
+        self._window.SetFocus()
+        time.sleep(0.2)
 
     @PIM.guard
     def send_text(self, content: str, timeout: float = 0) -> MessageStatus:
@@ -12583,6 +12620,8 @@ class WeixinClient(WeixinWindow):
         """
         separate = self.get_separate_chat(nickname)
         if separate is not None:
+            if separate.is_minimized:
+                separate.restore()
             return separate
         return self.open_session_by_search(nickname, chat_type, force_search)
 
