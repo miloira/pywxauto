@@ -2250,10 +2250,10 @@ class WeixinWindow:
         self._window.SetFocus()
 
     def deactivate(self) -> None:
-        input_wm.deactivate_window(self._hwnd)
+        win32gui.SendMessage(hwnd, win32con.WM_ACTIVATE, win32con.WA_INACTIVE, 0)
 
     def focus(self) -> None:
-        input_wm.focus_window(self._hwnd)
+        win32gui.SendMessage(hwnd, win32con.WM_SETFOCUS, 0, 0)
 
     def unfocus(self) -> None:
         win32gui.SendMessage(self._hwnd, win32con.WM_KILLFOCUS, 0, 0)
