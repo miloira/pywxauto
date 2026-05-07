@@ -2211,129 +2211,113 @@ _MSG_CLASS_TO_EVENT: dict[type, Event] = {
 
 
 class WeixinWindow:
-    """
-    微信窗口基类，封装通用的窗口操作。
-
-    子类需要设置 self._win 为 uiautomation 的 WindowControl 实例。
-    提供 activate、pin、unpin、minimize、maximize、restore、close 等通用操作，
-    支持两种模式：
-    - event=True（默认）: 通过 Windows 消息 API 操作，不需要窗口可见
-    - event=False: 通过点击标题栏按钮操作，模拟用户行为
-    """
-
-    # 子类可覆盖，指定标题栏按钮的 ClassName
-    _PIN_BTN_CLASS = "mmui::PinnedButton"
-    _BTN_CLASS = "mmui::XButton"
 
     @property
     def _window(self) -> auto.WindowControl:
-        """获取窗口控件，子类可覆盖"""
         return self._win
 
     @property
+    def _hwnd(self) -> int:
+        return self._window.NativeWindowHandle
+
+    @property
     def is_topmost(self) -> bool:
-        """窗口是否已置顶"""
-        return self._window.IsTopmost()
+        ex_style = win32gui.GetWindowLong(self._hwnd, win32con.GWL_EXSTYLE)
+        return bool(ex_style & win32con.WS_EX_TOPMOST)
 
     @property
     def is_minimized(self) -> bool:
-        """窗口是否已最小化"""
-        return self._window.IsMinimize()
+        return bool(win32gui.IsIconic(self._hwnd))
 
     @property
     def is_maximized(self) -> bool:
-        """窗口是否已最大化"""
-        return self._window.IsMaximize()
+        placement = win32gui.GetWindowPlacement(self._hwnd)
+        return placement[1] == win32con.SW_SHOWMAXIMIZED
+
+    @property
+    def is_visible(self) -> bool:
+        return bool(win32gui.IsWindowVisible(self._hwnd))
 
     @PIM.guard
     def activate(self) -> None:
-        """激活窗口（置前并聚焦），后台模式下跳过"""
-        if background:
-            return
+        if self.is_minimized:
+            self._window.Restore()
         self._window.SetActive()
         self._window.SetFocus()
-        time.sleep(0.2)
 
     @PIM.guard
-    def pin(self, event: bool = True, simulate_move: bool = True) -> None:
-        """置顶窗口"""
-        if event:
-            self._window.SetTopmost(True)
-        else:
-            self.activate()
-            btn = self._window.ButtonControl(
-                ClassName=self._PIN_BTN_CLASS, Name="置顶",
-            )
-            if btn.Exists(0, 0):
-                input_wx.click(btn)
+    def deactivate(self) -> None:
+        input_wm.deactivate_window(self._hwnd)
 
     @PIM.guard
-    def unpin(self, event: bool = True, simulate_move: bool = True) -> None:
-        """取消置顶窗口"""
-        if event:
-            self._window.SetTopmost(False)
-        else:
-            self.activate()
-            btn = self._window.ButtonControl(
-                ClassName=self._PIN_BTN_CLASS, Name="取消置顶",
-            )
-            if btn.Exists(0, 0):
-                input_wx.click(btn)
+    def focus(self) -> None:
+        input_wm.focus_window(self._hwnd)
 
     @PIM.guard
-    def minimize(self, event: bool = True, simulate_move: bool = True) -> None:
-        """最小化窗口"""
-        if event:
-            self._window.Minimize()
-        else:
-            self.activate()
-            btn = self._window.ButtonControl(
-                ClassName=self._BTN_CLASS, Name="最小化",
-            )
-            if not btn.Exists(maxSearchSeconds=1):
-                raise RuntimeError("未找到最小化按钮")
-            input_wx.click(btn)
+    def unfocus(self) -> None:
+        win32gui.SendMessage(self._hwnd, win32con.WM_KILLFOCUS, 0, 0)
 
     @PIM.guard
-    def maximize(self, event: bool = True, simulate_move: bool = True) -> None:
-        """最大化/还原窗口"""
-        if event:
-            if self.is_maximized:
-                self._window.Restore()
-            else:
-                self._window.Maximize()
-        else:
-            self.activate()
-            for name in ("最大化", "还原"):
-                btn = self._window.ButtonControl(
-                    ClassName=self._BTN_CLASS, Name=name,
-                )
-                if btn.Exists(0, 0):
-                    input_wx.click(btn)
-                    return
-            raise RuntimeError("未找到最大化/还原按钮")
+    def pin(self) -> None:
+        win32gui.SetWindowPos(self._hwnd, win32con.HWND_TOPMOST, 0, 0, 0, 0,
+                              win32con.SWP_NOMOVE | win32con.SWP_NOSIZE)
 
+    @PIM.guard
+    def unpin(self) -> None:
+        win32gui.SetWindowPos(self._hwnd, win32con.HWND_NOTOPMOST, 0, 0, 0, 0,
+                            win32con.SWP_NOMOVE | win32con.SWP_NOSIZE)
+
+    @PIM.guard
+    def minimize(self) -> None:
+        win32gui.ShowWindow(self._hwnd, win32con.SW_MINIMIZE)
+
+    @PIM.guard
+    def maximize(self) -> None:
+        win32gui.ShowWindow(self._hwnd, win32con.SW_MAXIMIZE)
+
+    @PIM.guard
     def restore(self) -> None:
-        """还原窗口"""
-        self._window.Restore()
+        win32gui.ShowWindow(self._hwnd, win32con.SW_RESTORE)
 
     @PIM.guard
-    def close(self, event: bool = True, simulate_move: bool = True) -> None:
-        """关闭窗口"""
-        if event:
-            wp = self._window.GetWindowPattern()
-            if wp:
-                wp.Close()
-            else:
-                raise RuntimeError("窗口不支持 WindowPattern.Close")
-        else:
-            self.activate()
-            btn = self._window.ButtonControl(
-                ClassName=self._BTN_CLASS, Name="关闭",
-            )
-            if not btn.Exists(maxSearchSeconds=1):
-                raise RuntimeError("未找到关闭按钮")
-            input_wx.click(btn)
+    def close(self) -> None:
+        win32gui.SendMessage(self._hwnd, win32con.WM_CLOSE, 0, 0)
+
+    @PIM.guard
+    def show(self) -> None:
+        win32gui.ShowWindow(self._hwnd, win32con.SW_SHOW)
+
+    @PIM.guard
+    def hide(self) -> None:
+        win32gui.ShowWindow(self._hwnd, win32con.SW_HIDE)
+
+    @PIM.guard
+    def move_to(self, x: int, y: int) -> None:
+        hwnd = self._hwnd
+        rect = win32gui.GetWindowRect(hwnd)
+        w = rect[2] - rect[0]
+        h = rect[3] - rect[1]
+        win32gui.MoveWindow(hwnd, x, y, w, h, True)
+
+    @PIM.guard
+    def resize_to(self, width: int, height: int) -> None:
+        hwnd = self._hwnd
+        rect = win32gui.GetWindowRect(hwnd)
+        win32gui.MoveWindow(hwnd, rect[0], rect[1], width, height, True)
+
+    @property
+    def rect(self) -> tuple[int, int, int, int]:
+        return win32gui.GetWindowRect(self._hwnd)
+
+    @property
+    def size(self) -> tuple[int, int]:
+        r = self.rect
+        return (r[2] - r[0], r[3] - r[1])
+
+    @property
+    def position(self) -> tuple[int, int]:
+        r = self.rect
+        return (r[0], r[1])
 
 
 class Login(WeixinWindow):
@@ -3133,29 +3117,26 @@ class NoteEditorWindow(WeixinWindow):
     EDITOR_INPUT_ID = "xeditorInputId"
     MAIN_CONTAINER_ID = "mainContainer"
 
-    def __init__(self, handle: int = 0):
+    def __init__(self, wx: "WeixinClient"):
         """
         初始化笔记编辑窗口。
 
         Args:
-            handle: 窗口句柄。传 0 时自动查找名为"笔记"的 Chrome WebView 窗口，
-                传非零值时直接通过句柄绑定窗口（避免标题变化后找不到）。
+            wx: WeixinClient 实例，通过其 PID 精确查找并绑定笔记窗口。
 
         Raises:
             RuntimeError: 窗口未找到时抛出。
         """
-        if handle:
-            self._handle = handle
-            self._win = auto.ControlFromHandle(handle)
-        else:
-            win = auto.PaneControl(
-                ClassName=self.WINDOW_CLASS,
-                Name=self.WINDOW_NAME,
-            )
-            if not win.Exists(maxSearchSeconds=3):
-                raise RuntimeError("笔记编辑窗口未找到")
-            self._handle = win.NativeWindowHandle
-            self._win = win
+        self.wx = wx
+        win = auto.PaneControl(
+            ClassName=self.WINDOW_CLASS,
+            Name=self.WINDOW_NAME,
+            ProcessId=wx.pid
+        )
+        if not win.Exists(maxSearchSeconds=5):
+            raise RuntimeError("笔记编辑窗口未找到")
+        self._handle = win.NativeWindowHandle
+        self._win = win
 
     def _refresh_win(self) -> None:
         """通过句柄刷新窗口引用（防止窗口对象失效）"""
@@ -3181,63 +3162,6 @@ class NoteEditorWindow(WeixinWindow):
     def activate(self) -> None:
         self._ensure_exists()
         super().activate()
-
-    # -- 笔记窗口特有的 pin/unpin（Chrome WebView 按钮无 ClassName 区分） --
-
-    def pin(self, **kwargs) -> None:
-        """置顶窗口（通过标题栏按钮）"""
-        self._ensure_exists()
-        btn = self._win.ButtonControl(Name="置顶")
-        if btn.Exists(0, 0):
-            input_wx.click(btn)
-            time.sleep(0.2)
-
-    def unpin(self, **kwargs) -> None:
-        """取消置顶窗口"""
-        self._ensure_exists()
-        btn = self._win.ButtonControl(Name="取消置顶")
-        if btn.Exists(0, 0):
-            input_wx.click(btn)
-            time.sleep(0.2)
-
-    @property
-    def is_pinned(self) -> bool:
-        self._ensure_exists()
-        btn = self._win.ButtonControl(Name="取消置顶")
-        return btn.Exists(0, 0)
-
-    def minimize(self, **kwargs) -> None:
-        """最小化窗口（Chrome WebView 优先用窗口 API）"""
-        self._ensure_exists()
-        self._win.Minimize()
-        time.sleep(0.2)
-
-    def maximize(self, **kwargs) -> None:
-        """最大化/还原窗口"""
-        self._ensure_exists()
-        if self._win.IsMaximize():
-            self._win.Restore()
-        else:
-            self._win.Maximize()
-        time.sleep(0.2)
-
-    def close(self, **kwargs) -> None:
-        """关闭笔记窗口（窗口有两个关闭按钮，取可见的）"""
-        self._ensure_exists()
-        btns = self._win.GetChildren()
-        for child in btns:
-            btn = child.ButtonControl(Name="关闭")
-            if btn.Exists(0, 0):
-                rect = btn.BoundingRectangle
-                if rect.width() > 0 and rect.height() > 0:
-                    input_wx.click(btn)
-                    time.sleep(0.2)
-                    return
-        wp = self._win.GetWindowPattern()
-        if wp:
-            wp.Close()
-        else:
-            raise RuntimeError("未找到可用的关闭按钮")
 
     # -- 编辑器操作 --
 
@@ -4447,20 +4371,11 @@ class Session:
         新建笔记，返回笔记编辑窗口对象。
 
         通过快捷操作菜单打开新建笔记窗口，
-        等待笔记编辑窗口出现后，通过句柄锁定窗口实例并返回。
+        等待笔记编辑窗口出现后返回 NoteEditorWindow 实例。
         """
         self._quick_action("新建笔记")
-        # 等待笔记窗口出现（新建时标题为"笔记"）
-        win = auto.PaneControl(
-            ClassName=NoteEditorWindow.WINDOW_CLASS,
-            Name=NoteEditorWindow.WINDOW_NAME,
-        )
-        if not win.Exists(maxSearchSeconds=5):
-            raise RuntimeError("新建笔记窗口未打开")
         time.sleep(0.5)
-        # 通过句柄锁定窗口，避免标题变化后找不到
-        handle = win.NativeWindowHandle
-        return NoteEditorWindow(handle=handle)
+        return NoteEditorWindow(self.wx)
 
     def __str__(self) -> str:
         try:
@@ -12018,7 +11933,7 @@ class SeparateChat(Chat, WeixinWindow):
                 raise RuntimeError(f"独立聊天窗口未找到: {contact_name}")
 
         # 如果关联的 WeixinClient 启用了 resize，调整聊天窗口大小
-        if wx and wx.resize:
+        if wx and wx._auto_resize:
             hwnd = self._win.NativeWindowHandle
             if hwnd:
                 rect = win32gui.GetWindowRect(hwnd)
@@ -12329,7 +12244,7 @@ class WeixinClient(WeixinWindow):
         else:
             self._rapid_ocr = RapidOCR()
 
-        self.resize = resize
+        self._auto_resize = resize
         hwnd = self._win.NativeWindowHandle
         if resize and hwnd:
             # 根据桌面大小计算窗口尺寸：宽高为桌面的 1/6
