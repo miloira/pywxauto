@@ -7008,7 +7008,7 @@ class Chat:
     @PIM.guard
     def send_text(self, content: str, timeout: float = 0) -> MessageStatus:
         """
-        在当前会话中发送文本消息，返回发送状态。
+        在当前会话中发送文本，返回发送状态。
 
         Args:
             content: 文本内容
@@ -12477,7 +12477,7 @@ class WeixinClient(WeixinWindow):
         return self.session.close(nickname)
 
     def send_text(self, nickname: str, content: str, timeout: float = 0) -> MessageStatus:
-        """发送文本消息"""
+        """发送文本"""
         return self.chat_with(nickname).send_text(content, timeout)
 
     def send_file(self, nickname: str, file_path: "str | list[str]", timeout: float = 0) -> MessageStatus:
@@ -12493,7 +12493,7 @@ class WeixinClient(WeixinWindow):
         return self.chat_with(nickname).send_video(file_path, timeout)
 
     def send_at(self, nickname: str, content: str, at_members: list[str], timeout: float = 0) -> MessageStatus:
-        """在群聊中 @指定成员发送消息"""
+        """发送群@消息"""
         return self.chat_with(nickname).send_at(content, at_members, timeout)
 
     def send_collection(self, nickname: str, keyword: str, timeout: float = 0) -> MessageStatus:
@@ -12501,20 +12501,11 @@ class WeixinClient(WeixinWindow):
         return self.chat_with(nickname).send_collection(keyword, timeout)
 
     def send_emotion(self, nickname: str, keyword: str = None, index: int = 1, timeout: float = 0) -> MessageStatus:
-        """发送表情，keyword 为 None 时发送自定义表情"""
+        """发送表情"""
         return self.chat_with(nickname).send_emotion(keyword, index, timeout)
 
     def send_card(self, nickname: str, share: str) -> bool:
-        """
-        将指定联系人的名片发送给接收者。
-
-        Args:
-            nickname: 接收名片的联系人昵称
-            share: 要分享名片的联系人昵称
-
-        Returns:
-            True 发送成功
-        """
+        """发送名片"""
         return self.chat_with(share).send_card(nickname)
 
     @PIM.guard
@@ -12924,8 +12915,6 @@ class WeixinClient(WeixinWindow):
         # 截图微信按钮区域
         try:
             png_bytes = capture_control(hwnd, wx_btn, mode="print_window")
-            # with open("_debug_check_new_msg.png", "wb") as f:
-            #     f.write(png_bytes)
         except Exception:
             return 0
 
@@ -14062,7 +14051,7 @@ class Weixin:
     # ---- 消息发送 ----
 
     def send_text(self, pid: int, nickname: str, content: str, timeout: float = 0) -> "MessageStatus":
-        """发送文本消息"""
+        """发送文本"""
         return self.get_client(pid).send_text(nickname, content, timeout)
 
     def send_file(self, pid: int, nickname: str, file_path: "str | list[str]", timeout: float = 0) -> "MessageStatus":
@@ -14078,7 +14067,7 @@ class Weixin:
         return self.get_client(pid).send_video(nickname, file_path, timeout)
 
     def send_at(self, pid: int, nickname: str, content: str, at_members: list[str], timeout: float = 0) -> "MessageStatus":
-        """在群聊中 @指定成员发送消息"""
+        """发送群@消息"""
         return self.get_client(pid).send_at(nickname, content, at_members, timeout)
 
     def send_emotion(self, pid: int, nickname: str, keyword: str = None, index: int = 1, timeout: float = 0) -> "MessageStatus":
