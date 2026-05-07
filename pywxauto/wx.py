@@ -4112,6 +4112,7 @@ class Session:
         add_friend_win = auto.WindowControl(
             ClassName="mmui::AddFriendWindow",
             AutomationId="AddFriendWindow",
+            ProcessId=self.wx.pid
         )
         if not add_friend_win.Exists(maxSearchSeconds=3):
             raise RuntimeError("添加朋友窗口未打开")
@@ -4138,6 +4139,10 @@ class Session:
         # --- 第2步：点击"添加到通讯录" ---
         add_btn = add_friend_win.ButtonControl(Name="添加到通讯录")
         if not add_btn.Exists(maxSearchSeconds=3):
+            # 检查是否已经是好友（出现"发消息"按钮）
+            chat_btn = add_friend_win.ButtonControl(Name="发消息")
+            if chat_btn.Exists(0, 0):
+                raise RuntimeError("对方已经是好友，无需添加")
             raise RuntimeError("未找到'添加到通讯录'按钮，可能搜索无结果")
         input_wx.click(add_btn)
         time.sleep(1)
