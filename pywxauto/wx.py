@@ -13345,7 +13345,6 @@ class WeixinClient(WeixinWindow):
                     # 未打开，通过主窗口搜索并打开独立窗口
                     try:
                         main_chat = self.open_session_by_search(name)
-                        print(main_chat)
                         chat = main_chat.separate()
                     except Exception as e:
                         logger.error("打开独立窗口失败 [%s]: %s", name, e)
