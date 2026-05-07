@@ -3205,7 +3205,7 @@ class NoteEditor(WeixinWindow):
         input_wx.send_keys(self._editor, "{Ctrl}O")
         time.sleep(1)
 
-        dlg = auto.WindowControl(ClassName="#32770")
+        dlg = auto.WindowControl(ClassName="#32770", ProcessId=self.wx.pid)
         if not dlg.Exists(maxSearchSeconds=5):
             raise RuntimeError("文件选择对话框未弹出")
 
@@ -4148,7 +4148,7 @@ class Session:
         time.sleep(1)
 
         # --- 第3步：填写申请表单 ---
-        verify_win = auto.WindowControl(ClassName="mmui::VerifyFriendWindow")
+        verify_win = auto.WindowControl(ClassName="mmui::VerifyFriendWindow", ProcessId=self.wx.pid)
         if not verify_win.Exists(maxSearchSeconds=3):
             raise RuntimeError("申请添加朋友窗口未打开")
 
@@ -6990,7 +6990,7 @@ class Chat:
         time.sleep(0.5)
 
         # 等待文件选择对话框弹出（系统 #32770 对话框）
-        dlg = auto.WindowControl(ClassName="#32770")
+        dlg = auto.WindowControl(ClassName="#32770", ProcessId=self.wx.pid)
         if not dlg.Exists(maxSearchSeconds=5):
             raise RuntimeError("文件选择对话框未弹出")
 
@@ -7385,6 +7385,7 @@ class Chat:
             emoji_popover = auto.WindowControl(
                 ClassName=self.EMOJI_POPOVER_CLASS,
                 AutomationId=self.EMOJI_POPOVER_ID,
+                ProcessId=self.wx.pid,
                 searchDepth=1
             )
             if emoji_popover.Exists(maxSearchSeconds=1):
@@ -7406,6 +7407,7 @@ class Chat:
         popover = auto.WindowControl(
             ClassName=self.EMOJI_POPOVER_CLASS,
             AutomationId=self.EMOJI_POPOVER_ID,
+            ProcessId=self.wx.pid,
             searchDepth=1
         )
         if not popover.Exists(maxSearchSeconds=3):
@@ -7423,6 +7425,7 @@ class Chat:
         emoji_popover = auto.WindowControl(
             ClassName=self.EMOJI_POPOVER_CLASS,
             AutomationId=self.EMOJI_POPOVER_ID,
+            ProcessId=self.wx.pid,
             searchDepth=1
         )
         if emoji_popover.Exists(maxSearchSeconds=0.5):
@@ -7461,6 +7464,7 @@ class Chat:
             emoji_popover = auto.WindowControl(
                 ClassName=self.EMOJI_POPOVER_CLASS,
                 AutomationId=self.EMOJI_POPOVER_ID,
+                ProcessId=self.wx.pid,
             )
             if emoji_popover.Exists(maxSearchSeconds=0.5):
                 input_wx.send_keys(emoji_popover, "{Esc}")
@@ -7768,6 +7772,7 @@ class Chat:
         # 重新获取 picker_win，避免控件缓存问题
         fresh_picker = auto.WindowControl(
             ClassName="mmui::SessionPickerWindow",
+            ProcessId=self.wx.pid,
         )
         if not fresh_picker.Exists(maxSearchSeconds=3):
             raise RuntimeError("'微信发送给'弹窗已关闭")
@@ -10496,7 +10501,7 @@ class Chat:
                     if not add_img_btn.Exists(maxSearchSeconds=2):
                         break
                     input_wx.click(add_img_btn)
-                    dlg = auto.WindowControl(ClassName="#32770")
+                    dlg = auto.WindowControl(ClassName="#32770", ProcessId=self.wx.pid)
                     if not dlg.Exists(maxSearchSeconds=5):
                         break
                     input_wx.send_keys(dlg, "{Alt}N")
@@ -10905,7 +10910,7 @@ class Chat:
                 input_wx.click(add_img_btn)
                 time.sleep(1)
 
-                dlg = auto.WindowControl(ClassName="#32770")
+                dlg = auto.WindowControl(ClassName="#32770", ProcessId=self.wx.pid)
                 if not dlg.Exists(maxSearchSeconds=5):
                     raise RuntimeError("文件选择对话框未弹出")
 
@@ -11686,7 +11691,7 @@ class Chat:
                 # 等待系统文件保存对话框
                 dlg = remark_pop.WindowControl(ClassName="#32770")
                 if not dlg.Exists(maxSearchSeconds=5):
-                    dlg = auto.WindowControl(ClassName="#32770")
+                    dlg = auto.WindowControl(ClassName="#32770", ProcessId=self.wx.pid)
                     if not dlg.Exists(maxSearchSeconds=3):
                         continue
 
@@ -12894,7 +12899,7 @@ class WeixinClient(WeixinWindow):
 
                             input_wx.click(save_btn)
 
-                            save_dlg = auto.WindowControl(ClassName="#32770")
+                            save_dlg = auto.WindowControl(ClassName="#32770", ProcessId=self.pid)
                             if save_dlg.Exists(maxSearchSeconds=5):
                                 file_edit = save_dlg.EditControl(AutomationId="1001")
                                 if file_edit.Exists(maxSearchSeconds=2):
