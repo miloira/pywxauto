@@ -12017,6 +12017,17 @@ class SeparateChat(Chat, WeixinWindow):
             else:
                 raise RuntimeError(f"独立聊天窗口未找到: {contact_name}")
 
+        # 如果关联的 WeixinClient 启用了 resize，调整聊天窗口大小
+        if wx and wx.resize:
+            hwnd = self._win.NativeWindowHandle
+            if hwnd:
+                rect = win32gui.GetWindowRect(hwnd)
+                x, y = rect[0], rect[1]
+                ctypes.windll.user32.MoveWindow(
+                    hwnd, x, y,
+                    wx.CHAT_WINDOW_WIDTH, wx.CHAT_WINDOW_HEIGHT, True
+                )
+
     @property
     def exists(self) -> bool:
         """独立窗口是否存在"""
@@ -12198,6 +12209,8 @@ class WeixinClient(WeixinWindow):
     WINDOW_REGEX = "微信|Weixin"
     WINDOW_WIDTH = 1200
     WINDOW_HEIGHT = 1000
+    CHAT_WINDOW_WIDTH = 400
+    CHAT_WINDOW_HEIGHT = 1000
     SHORTCUTS = {
         "发送消息": "Enter",
         "语音输入文字": "Ctrl+Win",
@@ -12213,7 +12226,7 @@ class WeixinClient(WeixinWindow):
         background: bool = False, 
         idle_wait: float = 0, 
         lock_input: bool = False, 
-        resize: bool = True,
+        resize: bool = False,
         install_path: Optional[str] = None,
         ocr_engine: str = "wcocr",
         wxocr_weixin_install_path: Optional[str] = None, 
@@ -12235,8 +12248,8 @@ class WeixinClient(WeixinWindow):
                 默认 0 表示不等待。
             lock_input: True 时在自动化操作期间锁定物理键盘鼠标（需管理员权限），
                 默认 False。
-            resize: True 时将微信窗口设置为固定大小（1200x1000），
-                False 时保持原窗口大小。默认 True。
+            resize: True 时根据桌面大小自动调整微信窗口尺寸（宽高为桌面的 1/3 1/2），
+                False 时保持原窗口大小。默认 False。
             install_path: 微信安装路径，None 时自动从注册表检测。
             ocr_engine: OCR 引擎选择，可选值：
                 - "wcocr": 使用微信自带 OCR（默认，速度快）
@@ -12319,8 +12332,17 @@ class WeixinClient(WeixinWindow):
         self.resize = resize
         hwnd = self._win.NativeWindowHandle
         if resize and hwnd:
-            rect = win32gui.GetWindowRect(hwnd)
-            x, y = rect[0], rect[1]
+            # 根据桌面大小计算窗口尺寸：宽高为桌面的 1/6
+            desktop_width = win32api.GetSystemMetrics(win32con.SM_CXSCREEN)
+            desktop_height = win32api.GetSystemMetrics(win32con.SM_CYSCREEN)
+            self.WINDOW_WIDTH = desktop_width // 3
+            self.WINDOW_HEIGHT = desktop_height // 2
+            # 聊天窗口宽度为微信窗口的 1/3，高度与微信窗口一致
+            self.CHAT_WINDOW_WIDTH = self.WINDOW_WIDTH // 3
+            self.CHAT_WINDOW_HEIGHT = self.WINDOW_HEIGHT
+            # 将微信窗口移动到屏幕中心
+            x = (desktop_width - self.WINDOW_WIDTH) // 2
+            y = (desktop_height - self.WINDOW_HEIGHT) // 2
             ctypes.windll.user32.MoveWindow(hwnd, x, y,
                                             self.WINDOW_WIDTH, self.WINDOW_HEIGHT, True)
         if background and hwnd:
@@ -12349,15 +12371,6 @@ class WeixinClient(WeixinWindow):
             x, y, w, h = self._main_offscreen_rect
             ctypes.windll.user32.MoveWindow(hwnd, x, y, w, h, True)
         self._main_offscreen_rect = None
-
-    @staticmethod
-    def find_wechat_window() -> bool:
-        """检查微信主窗口（mmui::MainWindow）是否存在"""
-        win = auto.WindowControl(
-            ClassName="mmui::MainWindow",
-            searchDepth=1,
-        )
-        return win.Exists(0, 0)
 
     @staticmethod
     def find_wechat_window_by_pid(pid: int) -> bool:
@@ -13873,7 +13886,7 @@ class Weixin:
         background: bool = False,
         idle_wait: float = 0,
         lock_input: bool = False,
-        resize: bool = True,
+        resize: bool = False,
         ocr_engine: str = "wcocr",
         wxocr_weixin_install_path: Optional[str] = None,
         wxocr_plugin_path: Optional[str] = None,
@@ -13884,13 +13897,16 @@ class Weixin:
         这些参数作为默认值，在 open/connect 创建 WeixinClient 时使用。
 
         Args:
-            background:  后台模式
-            idle_wait:   物理输入等待时间
-            lock_input:  是否锁定物理输入
-            resize:      是否调整窗口大小
-            ocr_engine:  OCR 引擎
-            wxocr_weixin_install_path: 微信 OCR 安装路径
-            wxocr_plugin_path:         微信 OCR 插件路径
+            background:  后台模式，通过 SendMessage 发送虚拟消息，不需要窗口在前台
+            idle_wait:   物理输入等待时间（秒），大于 0 时自动启动物理输入监控
+            lock_input:  是否在操作期间锁定物理键盘鼠标（需管理员权限）
+            resize:      是否根据桌面大小自动调整微信窗口尺寸并居中显示，
+                         True 时微信窗口宽高为桌面的 1/3 和 1/2，
+                         聊天独立窗口宽度为微信窗口的 1/3，高度与微信窗口一致。
+                         默认 False 保持原窗口大小。
+            ocr_engine:  OCR 引擎，"wcocr"（微信自带）或 "rapidocr"
+            wxocr_weixin_install_path: 微信 OCR 安装路径，None 时自动检测
+            wxocr_plugin_path:         微信 OCR 插件路径，None 时自动检测
         """
         self._clients: dict[int, WeixinClient] = {}
         self._default_kwargs = {
