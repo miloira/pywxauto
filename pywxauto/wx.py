@@ -1584,6 +1584,7 @@ class Message:
         self.runtime_id: tuple = runtime_id
         self.bubble_rect: tuple = bubble_rect
         self.msg_id: int = 0  # 消息唯一标识，由 get_visible_messages 计算
+        self.control: object = None  # 消息控件引用（uiautomation Control）
         self.chat: object = None
         self.pid: int = 0  # 来源微信客户端的进程 PID
 
@@ -1603,7 +1604,7 @@ class Message:
             "status": self.status.value,
         }
         _base_keys = {"sender", "sender_type", "content", "raw_name",
-                      "status", "runtime_id", "chat", "msg_id"}
+                      "status", "runtime_id", "chat", "msg_id", "control"}
         for key, value in self.__dict__.items():
             if key.startswith("_") or key in _base_keys:
                 continue
@@ -1617,15 +1618,15 @@ class Message:
     def __repr__(self) -> str:
         cls = self.__class__.__name__
         status_tag = f", status={self.status.value}" if self.status != MessageStatus.UNKNOWN else ""
-        return (f"{cls}(sender_type={self.sender_type.value}, "
+        return (f"{cls}(msg_id={self.msg_id}, sender_type={self.sender_type.value}, "
                 f"sender={self.sender!r}, content={self.content!r}{status_tag})")
 
     def __str__(self) -> str:
         cls = self.__class__.__name__
-        _skip = {"chat", "runtime_id", "raw_name", "bubble_rect"}
-        parts = []
+        _skip = {"chat", "runtime_id", "raw_name", "bubble_rect", "control"}
+        parts = [f"msg_id={self.msg_id}"]
         for key, value in self.__dict__.items():
-            if key.startswith("_") or key in _skip:
+            if key.startswith("_") or key in _skip or key == "msg_id":
                 continue
             if isinstance(value, Enum):
                 parts.append(f"{key}={value.value}")
@@ -1634,70 +1635,107 @@ class Message:
         return f"{cls}({', '.join(parts)})"
 
     def _find_ctrl(self) -> "auto.Control | None":
-        if not self.chat or not self.runtime_id:
+        """
+        在当前可见的消息列表中查找此消息对应的控件。
+
+        优先使用已缓存的 control 引用，其次通过 runtime_id 在控件树中匹配。
+        避免调用 get_visible_messages 以防止截图导致的闪烁。
+        """
+        if not self.chat:
             return None
+
+        # 优先使用已缓存的 control 引用
+        if self.control is not None:
+            try:
+                # 验证控件仍然有效（未被回收）
+                _ = self.control.BoundingRectangle
+                return self.control
+            except Exception:
+                self.control = None
+
+        # 通过 runtime_id 在控件树中匹配
+        if not self.runtime_id:
+            return None
+
         lc = self.chat._message_list
         if not lc.Exists(maxSearchSeconds=2):
             return None
+
         for ctrl, _ in auto.WalkControl(lc):
             if ctrl.ControlType != auto.ControlType.ListItemControl:
                 continue
             try:
                 rid = tuple(ctrl.GetRuntimeId())
             except Exception:
-                continue
+                rid = ()
             if rid == self.runtime_id:
+                self.control = ctrl
                 return ctrl
+
         return None
 
-    def scroll_to_visible(self) -> bool:
-        if not self.chat or not self.runtime_id:
+    def scroll_to_visible(self, max_scroll: int = 30) -> bool:
+        """
+        将消息滚动到可见区域。
+
+        智能策略：
+        1. 先检查消息是否已在可见区域，是则直接返回（不触发任何滚动）
+        2. 不在可见区域时，向上平滑滚动查找，最多滚动 max_scroll 次
+        3. 超过最大滚动次数仍未找到，调用 page_end 回到最新消息位置，返回 False
+
+        Args:
+            max_scroll: 最大滚动次数，默认 30 次。超过后放弃查找并回到底部。
+
+        Returns:
+            True 消息已在可见区域，False 未找到或超出滚动范围
+        """
+        if not self.chat:
             return False
 
         lc = self.chat._message_list
         if not lc.Exists(maxSearchSeconds=2):
             return False
 
+        # 1. 先检查消息是否已在可见区域
         ctrl = self._find_ctrl()
         if ctrl:
             return self._ensure_visible(lc, ctrl)
 
-        # 需要滚动查找，暂停监听线程扫描
+        # 2. 不在可见区域，向上平滑滚动查找
         self.chat._scan_paused = True
         try:
-            for _ in range(50):
-                lc.WheelUp(wheelTimes=5)
-                time.sleep(0.15)
+            rect = lc.BoundingRectangle
+            cx = (rect.left + rect.right) // 2
+            cy = (rect.top + rect.bottom) // 2
+
+            for _ in range(max_scroll):
+                scroll_at(cx, cy, 120 * 1)  # 向上滚动（每次 3 格，更平滑）
                 ctrl = self._find_ctrl()
                 if ctrl:
                     return self._ensure_visible(lc, ctrl)
 
-            for _ in range(50):
-                lc.WheelDown(wheelTimes=5)
-                time.sleep(0.15)
-            for _ in range(50):
-                lc.WheelDown(wheelTimes=5)
-                time.sleep(0.15)
-                ctrl = self._find_ctrl()
-                if ctrl:
-                    return self._ensure_visible(lc, ctrl)
-
+            # 3. 超过最大滚动次数，回到底部
+            self.chat.page_end()
             return False
         finally:
             self.chat._scan_paused = False
 
     @staticmethod
     def _ensure_visible(lc, ctrl) -> bool:
+        """确保控件完全在列表可见区域内，必要时微调滚动。"""
         list_rect = lc.BoundingRectangle
+        cx = (list_rect.left + list_rect.right) // 2
+        cy = (list_rect.top + list_rect.bottom) // 2
+
         for _ in range(10):
             ctrl_rect = ctrl.BoundingRectangle
             if ctrl_rect.top >= list_rect.top and ctrl_rect.bottom <= list_rect.bottom - 10:
                 return True
             if ctrl_rect.top < list_rect.top:
-                lc.WheelUp(wheelTimes=2)
+                scroll_at(cx, cy, 120)  # 向上微调 1 格
             else:
-                lc.WheelDown(wheelTimes=2)
-            time.sleep(0.2)
+                scroll_at(cx, cy, -120)  # 向下微调 1 格
+            time.sleep(0.1)
         return True
 
     def hover(self) -> bool:
@@ -1797,8 +1835,10 @@ class Message:
         右键点击消息气泡，在菜单中点击"引用"，
         输入框进入引用模式，可继续输入回复内容。
 
-        Returns:
-            True 引用成功
+        智能滚动策略：
+        - 消息在可见区域内时直接操作，不触发任何滚动
+        - 消息不在可见区域时向上滚动查找（最多 20 次）
+        - 超出范围时自动回到底部
         """
         self._click_context_menu("引用")
 
@@ -6517,6 +6557,26 @@ class Chat:
         if field.Exists(maxSearchSeconds=2):
             input_wx.send_keys(field, "{Ctrl}a{Del}")
 
+    @PIM.guard
+    def cancel_reply(self) -> bool:
+        """
+        取消当前输入框中的引用消息。
+
+        点击输入框上方的"删除引用消息"按钮，取消引用状态。
+        如果当前没有引用消息（按钮不存在），则不操作并返回 False。
+
+        Returns:
+            True 取消成功，False 当前无引用消息
+        """
+        btn = self._win.ButtonControl(
+            ClassName="mmui::XButton",
+            Name="删除引用消息",
+        )
+        if not btn.Exists(maxSearchSeconds=1):
+            return False
+        input_wx.click(btn)
+        return True
+
     def _resolve_reply_to(self, reply_to: "Message | int | None") -> None:
         """
         解析 reply_to 参数并执行引用操作。
@@ -8209,6 +8269,23 @@ class Chat:
             AutomationId="chat_message_list",
         )
 
+    @PIM.guard
+    def page_end(self) -> None:
+        """
+        将消息列表滚动到底部（最新消息处）。
+
+        通过向消息列表发送 End 快捷键实现快速跳转到底部。
+        如果消息列表不存在则不操作。
+        """
+        lc = self._message_list
+        if not lc.Exists(maxSearchSeconds=2):
+            return
+        self._activate_window()
+        input_wx.focus(lc)
+        time.sleep(0.1)
+        input_wx.send_keys(lc, "{End}")
+        time.sleep(0.3)
+
     def get_visible_messages(self, sender_cache: dict[tuple, tuple] = None) -> list[Message]:
         """
         获取当前可见的消息列表，返回具体消息子类实例。
@@ -8310,6 +8387,7 @@ class Chat:
                                       runtime_id=rid)
             msg.bubble_rect = bubble_rect
             msg.chat = self
+            msg.control = ctrl
             msg.msg_id = hash((rid, msg.__class__.__name__, raw_name, sender_type, msg.content))
             messages.append(msg)
         return messages
@@ -13604,6 +13682,9 @@ class WeixinClient(WeixinWindow):
             sender_cache: dict[tuple, tuple] = {}
             first_scan = True
 
+            # 监听前滚动到最新消息
+            chat.page_end()
+
             if self._offscreen:
                 chat.move_offscreen()
 
@@ -14307,6 +14388,9 @@ class Weixin:
             sender_cache: dict[tuple, tuple] = {}
             first_scan = True
             offscreen = client.background
+
+            # 监听前滚动到最新消息
+            chat.page_end()
 
             if offscreen:
                 chat.move_offscreen()
