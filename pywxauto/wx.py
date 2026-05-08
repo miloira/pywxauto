@@ -2310,6 +2310,31 @@ class WeixinWindow:
         r = self.rect
         return (r[0], r[1])
 
+    def move_offscreen(self) -> None:
+        """将窗口移到屏幕外（不可见但仍处于正常状态）。"""
+        hwnd = self._hwnd
+        rect = self._win.BoundingRectangle
+        self._offscreen_rect = (rect.left, rect.top,
+                                rect.width(), rect.height())
+        ctypes.windll.user32.MoveWindow(hwnd, -9999, -9999,
+                                        rect.width(), rect.height(), True)
+
+    def move_back(self) -> None:
+        """将窗口从屏幕外移回原始位置。"""
+        offscreen_rect = getattr(self, '_offscreen_rect', None)
+        if not offscreen_rect:
+            return
+        hwnd = self._hwnd
+        x, y, w, h = offscreen_rect
+        ctypes.windll.user32.MoveWindow(hwnd, x, y, w, h, True)
+        self._offscreen_rect = None
+
+    @property
+    def is_offscreen(self) -> bool:
+        """窗口是否在屏幕外"""
+        rect = self._win.BoundingRectangle
+        return rect.right <= 0
+
 
 class Login(WeixinWindow):
     """
@@ -6047,11 +6072,6 @@ class FileManager(WeixinWindow):
         return [f for f in all_files
                 if f.file_date == today_str or f.file_date == today_formatted]
 
-    @property
-    def exists(self) -> bool:
-        """聊天文件窗口是否存在"""
-        return self._win.Exists(maxSearchSeconds=1)
-
     def __str__(self) -> str:
         if self._win.Exists(0, 0):
             return "FileManager(open)"
@@ -6203,8 +6223,6 @@ class Chat:
             return "未知"
         return "群聊" if self._find_member_count_label() else "私聊"
 
-    # -- 输入框 --
-
     @property
     def _input_field(self) -> auto.EditControl:
         return self._win.EditControl(
@@ -6217,8 +6235,6 @@ class Chat:
         field = self._input_field
         if field.Exists(maxSearchSeconds=2):
             input_wx.send_keys(field, "{Ctrl}a{Del}")
-
-    # -- 发送消息 --
 
     # ClassName -> 消息类型映射（供状态检测使用）
     _TEXT_CLASS_NAMES = {"mmui::ChatTextItemView"}
@@ -9676,8 +9692,6 @@ class Chat:
         else:
             self.unfold_contact_chat()
 
-    # ---- 群聊信息面板操作（仅群聊可用） ----
-
     def _ensure_room_chat(self) -> None:
         """确保当前是群聊会话，否则抛出异常"""
         if self.chat_type != "群聊":
@@ -10020,8 +10034,6 @@ class Chat:
 
         finally:
             self._close_chat_info_panel()
-
-    # ---- 联系人资料面板操作（仅私聊可用） ----
 
     def _ensure_contact_chat(self) -> None:
         """确保当前是私聊会话，否则抛出异常"""
@@ -11764,30 +11776,6 @@ class SeparateChat(Chat, WeixinWindow):
         self._window.SetActive()
         self._window.SetFocus()
 
-    def move_offscreen(self) -> None:
-        """将窗口移到屏幕外（不可见但仍处于正常状态）。"""
-        hwnd = self._win.NativeWindowHandle
-        rect = self._win.BoundingRectangle
-        self._offscreen_rect = (rect.left, rect.top,
-                                rect.width(), rect.height())
-        ctypes.windll.user32.MoveWindow(hwnd, -9999, -9999,
-                                        rect.width(), rect.height(), True)
-
-    def move_back(self) -> None:
-        """将窗口从屏幕外移回原始位置"""
-        if not hasattr(self, '_offscreen_rect') or not self._offscreen_rect:
-            return
-        hwnd = self._win.NativeWindowHandle
-        x, y, w, h = self._offscreen_rect
-        ctypes.windll.user32.MoveWindow(hwnd, x, y, w, h, True)
-        self._offscreen_rect = None
-
-    @property
-    def is_offscreen(self) -> bool:
-        """窗口是否在屏幕外"""
-        rect = self._win.BoundingRectangle
-        return rect.right <= 0
-
     def __str__(self) -> str:
         if not self._win.Exists(0, 0):
             return "SeparateChat(closed)"
@@ -11942,7 +11930,6 @@ class WeixinClient(WeixinWindow):
         self.install_path = install_path or get_weixin_install_path()
         self._ee = EventEmitter()
         self._on_login = on_login
-        self._main_offscreen_rect = None
 
         ensure_narrator_registry()
 
@@ -12009,11 +11996,7 @@ class WeixinClient(WeixinWindow):
             ctypes.windll.user32.MoveWindow(hwnd, x, y,
                                             self.WINDOW_WIDTH, self.WINDOW_HEIGHT, True)
         if background and hwnd:
-            rect = win32gui.GetWindowRect(hwnd)
-            self._main_offscreen_rect = (rect[0], rect[1],
-                                         rect[2] - rect[0], rect[3] - rect[1])
-            ctypes.windll.user32.MoveWindow(hwnd, -9999, -9999,
-                                            rect[2] - rect[0], rect[3] - rect[1], True)
+            self.move_offscreen()
 
         self.navigator = Navigator(self)
         self.session = Session(self)
@@ -12024,16 +12007,6 @@ class WeixinClient(WeixinWindow):
     def __del__(self):
         self.move_back()
         logger.info(f"微信客户端({self.version}) - 已断开")
-
-    def move_back(self) -> None:
-        """将主窗口从屏幕外移回原始位置（仅后台模式下有效）"""
-        if not self._main_offscreen_rect:
-            return
-        hwnd = self._win.NativeWindowHandle
-        if hwnd:
-            x, y, w, h = self._main_offscreen_rect
-            ctypes.windll.user32.MoveWindow(hwnd, x, y, w, h, True)
-        self._main_offscreen_rect = None
 
     @staticmethod
     def find_wechat_window_by_pid(pid: int) -> bool:
