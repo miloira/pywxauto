@@ -3428,6 +3428,7 @@ class Navigator:
         self._tabbar = self._win.ToolBarControl(ClassName="mmui::MainTabBar", searchDepth=5)
 
     def switch_to(self, tab_name: str) -> None:
+        self.wx.activate()
         if tab_name not in self.TABS:
             raise ValueError(f"未知标签页: {tab_name}，可选: {list(self.TABS.keys())}")
 
@@ -5566,21 +5567,8 @@ class FileManager(WeixinWindow):
             searchDepth=1,
         )
 
-    def _find_window(self) -> Optional[auto.WindowControl]:
-        """查找并激活聊天文件窗口（独立窗口），通过 PID 精确匹配"""
-        self._win = auto.WindowControl(
-            Name=self.WINDOW_NAME,
-            ProcessId=self.wx.pid,
-            searchDepth=1,
-        )
-        if self._win.Exists(maxSearchSeconds=3):
-            if not background:
-                self._win.SetActive()
-            return self._win
-        return None
-
     @PIM.guard
-    def open(self, filter_type: str = "") -> bool:
+    def open(self, filter_type: Optional[str] = None) -> bool:
         """
         打开聊天文件管理器窗口。
 
@@ -5589,42 +5577,35 @@ class FileManager(WeixinWindow):
                 - "全部"、"文档"、"表格"、"图片"、"视频"等
                 - "": 不筛选（默认）
         """
-        self.wx.activate()
+        if not self.exists:
+            self.wx.navigator.switch_to("更多")
+            chat_file_btn = self.wx._win.ButtonControl(
+                Name="聊天文件", searchDepth=10
+            )
+            if not chat_file_btn.Exists(maxSearchSeconds=3):
+                raise RuntimeError("未找到'聊天文件'按钮")
 
-        # 先关闭已有的文件管理器窗口
-        self.close()
+            input_wx.click(chat_file_btn)
 
-        # 通过导航栏 TabBar 缩小搜索范围，点击"更多"按钮
-        self.wx.navigator.switch_to("更多")
+            if not self.exists:
+                raise RuntimeError("聊天文件窗口未能打开")
+        self.activate()
 
-        # 点击"聊天文件"按钮
-        chat_file_btn = self.wx._win.ButtonControl(
-            Name="聊天文件", searchDepth=10
-        )
-        if not chat_file_btn.Exists(maxSearchSeconds=3):
-            raise RuntimeError("未找到'聊天文件'按钮")
-
-        input_wx.click(chat_file_btn)
-        time.sleep(1)
-
-        # 验证文件管理器窗口已打开
-        fm_win = self._find_window()
-        if not fm_win:
-            raise RuntimeError("聊天文件窗口未能打开")
-
-        # 如果指定了筛选类型，点击对应的筛选按钮
         if filter_type:
-            self._click_filter(fm_win, filter_type)
+            self._click_filter(filter_type)
 
         return True
 
-    def _click_filter(self, fm_win, filter_name: str) -> bool:
+    def _click_filter(self, filter_name: str) -> bool:
         """
         点击聊天文件窗口中的文件类型筛选按钮。
 
         已知的筛选选项: "全部"、"文档"、"表格"、"图片"、"视频"等。
         """
-        filter_btn = fm_win.ListItemControl(
+        if not self.exists:
+            raise RuntimeError("聊天文件窗口未打开")
+        self.activate()
+        filter_btn = self._win.ListItemControl(
             Name=filter_name,
             ClassName=self.FILE_TYPE_FILTER_CLASS,
             searchDepth=10,
@@ -5633,7 +5614,6 @@ class FileManager(WeixinWindow):
             raise RuntimeError(f"未找到'{filter_name}'筛选按钮")
 
         input_wx.click(filter_btn)
-        time.sleep(0.5)
         return True
 
     def _find_context_menu_by_point(self) -> Optional[auto.Control]:
@@ -5696,9 +5676,9 @@ class FileManager(WeixinWindow):
             file_cell: mmui::FileListCell 控件对象（从 get_all_files 返回的 ChatFile._cell）
             file_path: 完整的保存路径（含文件名），如 "C:\\download\\test.xlsx"
         """
-        fm_win = self._find_window()
-        if not fm_win:
+        if not self.exists:
             raise RuntimeError("聊天文件窗口未打开")
+        self.activate()
 
         # 确保目标目录存在
         dir_path = os.path.dirname(file_path)
@@ -5728,7 +5708,7 @@ class FileManager(WeixinWindow):
         time.sleep(1)
 
         # 3. 查找 Windows 文件保存对话框（聊天文件窗口的子窗口）
-        save_dialog = fm_win.WindowControl(ClassName="#32770", searchDepth=3)
+        save_dialog = self._win.WindowControl(ClassName="#32770", searchDepth=3)
         if not save_dialog.Exists(maxSearchSeconds=5):
             raise RuntimeError("未找到 Windows 文件保存对话框")
 
@@ -5765,9 +5745,9 @@ class FileManager(WeixinWindow):
             file_cell: mmui::FileListCell 控件对象（从 get_all_files 返回的 ChatFile._cell）
             file_path: 完整的保存路径（含文件名），如 "C:\\download\\test.xlsx"
         """
-        fm_win = self._find_window()
-        if not fm_win:
+        if not self.exists:
             raise RuntimeError("聊天文件窗口未打开")
+        self.activate()
 
         # 确保目标目录存在
         dir_path = os.path.dirname(file_path)
@@ -5797,7 +5777,7 @@ class FileManager(WeixinWindow):
         time.sleep(1)
 
         # 3. 查找 Windows 文件保存对话框（聊天文件窗口的子窗口）
-        save_dialog = fm_win.WindowControl(ClassName="#32770", searchDepth=3)
+        save_dialog = self._win.WindowControl(ClassName="#32770", searchDepth=3)
         if not save_dialog.Exists(maxSearchSeconds=5):
             raise RuntimeError("未找到 Windows 文件保存对话框")
 
@@ -5839,9 +5819,9 @@ class FileManager(WeixinWindow):
         Returns:
             True 删除成功，False 删除失败
         """
-        fm_win = self._find_window()
-        if not fm_win:
+        if not self.exists:
             raise RuntimeError("聊天文件窗口未打开")
+        self.activate()
 
         # 1. 右键点击文件项
         input_wx.click(file_cell, button="right")
@@ -5899,9 +5879,9 @@ class FileManager(WeixinWindow):
         Raises:
             RuntimeError: 聊天文件窗口未打开、右键菜单未弹出或未找到"下载"菜单项时抛出
         """
-        fm_win = self._find_window()
-        if not fm_win:
+        if not self.exists:
             raise RuntimeError("聊天文件窗口未打开")
+        self.activate()
 
         # 1. 右键点击文件项
         input_wx.click(file_cell, button="right")
@@ -6048,12 +6028,12 @@ class FileManager(WeixinWindow):
 
     def get_all_files(self) -> list[ChatFile]:
         """获取聊天文件窗口中所有可见的文件列表"""
-        fm_win = self._find_window()
-        if not fm_win:
+        if not self.exists:
             raise RuntimeError("聊天文件窗口未打开")
+        self.activate()
 
         files = []
-        for cell in self._find_all_file_cells(fm_win):
+        for cell in self._find_all_file_cells(self._win):
             chat_file = self.parse_file_cell_text(cell.Name)
             if chat_file:
                 chat_file._cell = cell
