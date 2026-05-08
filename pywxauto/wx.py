@@ -6210,8 +6210,6 @@ class Chat:
         except Exception as e:
             return f"Chat(error={e!r})"
 
-    # -- 标题栏 --
-
     def _find_title_label(self) -> Optional[auto.TextControl]:
         """查找标题栏名称控件（兼容多版本 AutomationId）"""
         for aid in self.TITLE_LABEL_IDS:
