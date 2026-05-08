@@ -12891,7 +12891,7 @@ class WeixinClient(WeixinWindow):
         """
         通过快捷键名称执行对应的键盘快捷键。
 
-        支持的快捷键名称（见 Weixin.SHORTCUTS）：
+        支持的快捷键名称（见 WeixinClient.SHORTCUTS）：
         - "发送消息":     Enter
         - "语音输入文字": Ctrl+Win
         - "截图":         Alt+A
@@ -12906,7 +12906,7 @@ class WeixinClient(WeixinWindow):
         Raises:
             ValueError: 名称未注册且无法解析为按键组合时抛出
         """
-        combo = Weixin.SHORTCUTS.get(name, name)
+        combo = WeixinClient.SHORTCUTS.get(name, name)
         # 将 "Ctrl+Alt+W" 格式转为 SendKeys 格式 "{Ctrl}{Alt}w"
         _MOD_KEYS = {"ctrl", "alt", "shift", "win"}
         _SPECIAL_KEYS = {
