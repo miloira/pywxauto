@@ -1674,6 +1674,7 @@ class Message:
 
         return None
 
+    @PIM.guard
     def scroll_to_visible(self, max_scroll: int = 30) -> bool:
         """
         将消息滚动到可见区域。
@@ -1738,7 +1739,47 @@ class Message:
             time.sleep(0.1)
         return True
 
+    @PIM.guard
+    def view(self) -> None:
+        """
+        查看/打开消息内容。
+
+        通过先悬浮到消息气泡位置再点击触发查看操作：
+        - 图片消息: 打开图片预览窗口
+        - 视频消息: 打开视频播放窗口
+        - 文件消息: 打开文件（使用默认程序）
+        - 链接/卡片消息: 打开链接详情
+        - 语音消息: 播放语音
+        - 其他消息: 点击气泡（触发默认行为）
+
+        Raises:
+            RuntimeError: 消息未关联 chat 或控件未找到时抛出
+        """
+        if not self.chat:
+            raise RuntimeError("消息未关联聊天窗口，无法查看消息")
+
+        self.chat._activate_window()
+
+        if not self.hover():
+            raise RuntimeError("无法悬浮到消息位置")
+
+        # hover 后鼠标已在气泡位置，原地点击
+        if not background:
+            x, y = auto.GetCursorPos()
+            auto.Click(x, y)
+        else:
+            ctrl = self._find_ctrl()
+            if not ctrl:
+                raise RuntimeError("未找到消息控件")
+            input_wx.click(ctrl)
+
+    @PIM.guard
     def hover(self) -> bool:
+        if not self.chat:
+            return False
+
+        self.chat._activate_window()
+
         if not self.scroll_to_visible():
             return False
 
@@ -1828,6 +1869,7 @@ class Message:
         input_wx.click(menu_item)
         time.sleep(0.3)
 
+    @PIM.guard
     def refer(self) -> None:
         """
         引用此条消息。
@@ -1842,6 +1884,7 @@ class Message:
         """
         self._click_context_menu("引用")
 
+    @PIM.guard
     def copy(self) -> str:
         """
         复制此条消息内容到剪贴板并返回。
@@ -1855,6 +1898,7 @@ class Message:
         self._click_context_menu("复制")
         return get_clipboard()
 
+    @PIM.guard
     def collect(self) -> None:
         """
         收藏此条消息。
@@ -1866,6 +1910,7 @@ class Message:
         """
         self._click_context_menu("收藏")
 
+    @PIM.guard
     def translate(self) -> bool:
         """
         翻译此条消息。
@@ -1878,6 +1923,7 @@ class Message:
         """
         self._click_context_menu("翻译")
 
+    @PIM.guard
     def forward(self, nicknames: "str | list[str]", remark: Optional[str] = None) -> bool:
         """
         转发此条消息给指定联系人。
@@ -1997,6 +2043,7 @@ class Message:
 
         input_wx.click(send_btn)
 
+    @PIM.guard
     def search(self) -> None:
         """
         搜一搜此条消息内容。
@@ -2009,6 +2056,7 @@ class Message:
         """
         self._click_context_menu("搜一搜")
 
+    @PIM.guard
     def revoke(self) -> None:
         """
         撤回此条消息（仅限自己发送的消息，且在 2 分钟内）。
@@ -2020,6 +2068,7 @@ class Message:
         """
         self._click_context_menu("撤回")
 
+    @PIM.guard
     def zoom_read(self) -> None:
         """
         放大阅读此条消息。
@@ -2029,6 +2078,105 @@ class Message:
         """
         self._click_context_menu("放大阅读")
 
+    @PIM.guard
+    def add_to_emotion(self) -> None:
+        """
+        将此条消息添加到自定义表情。
+
+        右键点击消息气泡，在菜单中点击"添加到表情"。
+        适用于图片消息和动画表情消息。
+
+        Raises:
+            RuntimeError: 消息未关联 chat、hover 失败、菜单未弹出或
+                         "添加到表情"选项未找到时抛出
+        """
+        self._click_context_menu("添加到表情")
+
+    @PIM.guard
+    def save_as(self, file_path: str) -> bool:
+        """
+        将消息内容另存为到指定路径。
+
+        右键点击消息气泡，在菜单中点击"另存为..."，
+        在弹出的系统文件保存对话框中输入保存路径并点击保存。
+        适用于图片、视频、文件等可保存的消息类型。
+
+        Args:
+            file_path: 完整的保存路径（含文件名），如 "C:\\download\\image.png"
+
+        Returns:
+            True 保存成功，False 保存失败
+
+        Raises:
+            RuntimeError: 消息未关联 chat、hover 失败、菜单未弹出或
+                         "另存为..."选项未找到时抛出
+        """
+        if not self.chat:
+            raise RuntimeError("消息未关联聊天窗口，无法执行另存为操作")
+
+        # 确保目标目录存在
+        dir_path = os.path.dirname(file_path)
+        if dir_path:
+            os.makedirs(dir_path, exist_ok=True)
+
+        self._click_context_menu("另存为...")
+        time.sleep(1)
+
+        # 等待系统文件保存对话框弹出（#32770）
+        win = self.chat._win
+        save_dlg = win.WindowControl(ClassName="#32770")
+        if not save_dlg.Exists(maxSearchSeconds=5):
+            # 尝试从桌面层级查找
+            save_dlg = auto.WindowControl(
+                ClassName="#32770",
+                ProcessId=self.chat.wx.pid if self.chat.wx else 0,
+            )
+            if not save_dlg.Exists(maxSearchSeconds=3):
+                raise RuntimeError("文件保存对话框未弹出")
+
+        # 定位文件名输入框
+        file_edit = save_dlg.EditControl(AutomationId="1001")
+        if not file_edit.Exists(maxSearchSeconds=3):
+            input_wx.send_keys(save_dlg, "{Esc}")
+            raise RuntimeError("未找到文件名输入框")
+
+        # 设置保存路径
+        vp = file_edit.GetValuePattern()
+        if vp:
+            vp.SetValue(file_path)
+        else:
+            input_wx.click(file_edit)
+            time.sleep(0.2)
+            input_wx.send_keys(file_edit, "{Ctrl}a{Del}")
+            time.sleep(0.1)
+            input_wx.send_keys(file_edit, file_path)
+        time.sleep(0.3)
+
+        # 如果目标文件已存在，先删除（避免覆盖确认弹窗）
+        if os.path.exists(file_path):
+            os.remove(file_path)
+
+        # 点击"保存(S)"按钮
+        save_btn = save_dlg.ButtonControl(AutomationId="1")
+        if not save_btn.Exists(maxSearchSeconds=2):
+            save_btn = save_dlg.ButtonControl(Name="保存(&S)")
+            if not save_btn.Exists(maxSearchSeconds=2):
+                input_wx.send_keys(save_dlg, "{Alt}S")
+                time.sleep(1)
+                return not save_dlg.Exists(maxSearchSeconds=1)
+
+        input_wx.click(save_btn)
+        time.sleep(1)
+
+        # 如果弹出覆盖确认，按 Y 确认
+        if save_dlg.Exists(maxSearchSeconds=0.5):
+            input_wx.send_keys(save_dlg, "{Alt}Y")
+            time.sleep(0.5)
+
+        # 验证对话框已关闭
+        return not save_dlg.Exists(maxSearchSeconds=1)
+
+    @PIM.guard
     def delete(self) -> None:
         """
         删除此条消息。
@@ -2106,13 +2254,236 @@ class VoiceMessage(Message):
 
     @staticmethod
     def parse(raw_name: str) -> tuple[str, int, bool]:
-        m = re.match(r"语音(\d+)\"秒(.*)", raw_name)
+        # 匹配 "语音N"秒" 格式（中文左双引号 \u201c）
+        m = re.match(r"语音(\d+)\u201c秒(.*)", raw_name, re.DOTALL)
         if m:
             dur = int(m.group(1))
-            state = m.group(2).strip()
-            played = "未播放" not in state
-            return f"{dur}秒语音{'(未播放)' if not played else ''}", dur, played
+            rest = m.group(2).strip()
+            played = "未播放" not in rest
+            # 如果 rest 中有识别文字（非状态标记），提取出来作为 content
+            transcribed = ""
+            if rest:
+                # 去掉 "未播放"/"已播放" 标记后的剩余部分就是识别文字
+                cleaned = re.sub(r'^(未播放|已播放)\s*', '', rest).strip()
+                if cleaned:
+                    transcribed = cleaned
+            if transcribed:
+                content = f"{dur}秒语音: {transcribed}"
+            else:
+                content = f"{dur}秒语音{'(未播放)' if not played else ''}"
+            return content, dur, played
+        # 兼容旧格式（ASCII 双引号）
+        m = re.match(r'语音(\d+)"秒(.*)', raw_name, re.DOTALL)
+        if m:
+            dur = int(m.group(1))
+            rest = m.group(2).strip()
+            played = "未播放" not in rest
+            transcribed = ""
+            if rest:
+                cleaned = re.sub(r'^(未播放|已播放)\s*', '', rest).strip()
+                if cleaned:
+                    transcribed = cleaned
+            if transcribed:
+                content = f"{dur}秒语音: {transcribed}"
+            else:
+                content = f"{dur}秒语音{'(未播放)' if not played else ''}"
+            return content, dur, played
         return raw_name, 0, True
+
+    @PIM.guard
+    def play(self) -> None:
+        """
+        播放语音消息。
+
+        点击语音消息气泡触发播放，微信会在客户端播放语音。
+        播放完成后 played 状态会变为 True。
+
+        Raises:
+            RuntimeError: 消息未关联 chat 或控件未找到时抛出
+        """
+        if not self.chat:
+            raise RuntimeError("消息未关联聊天窗口，无法播放语音")
+
+        self.chat._activate_window()
+
+        if not self.scroll_to_visible():
+            raise RuntimeError("无法将语音消息滚动到可见区域")
+
+        ctrl = self._find_ctrl()
+        if not ctrl:
+            raise RuntimeError("未找到语音消息控件")
+
+        input_wx.click(ctrl)
+        self.played = True
+
+    @PIM.guard
+    def to_text(self, timeout: float = 10) -> str:
+        """
+        语音转文字。
+
+        右键点击语音消息气泡，在菜单中点击"转文字"，
+        等待微信识别完成后，从消息控件的 Name 属性中提取转换后的文本。
+
+        微信语音转文字后，消息控件的 Name 会变化：
+        - 转换前: "语音{N}"秒" 或 "语音{N}"秒 未播放"
+        - 转换中: 可能出现 "语音转文字" 等中间状态
+        - 转换后: Name 中会追加识别出的文字内容，
+                  格式为 "语音{N}"秒\\n{识别文字}" 或直接包含文字
+
+        流程:
+        1. 右键点击语音消息气泡
+        2. 在菜单中点击"转文字"
+        3. 轮询消息控件的 Name 属性，等待文字出现
+        4. 从 Name 中提取并返回识别出的文字
+
+        Args:
+            timeout: 等待语音识别完成的超时时间（秒），默认 10 秒。
+                     较长的语音可能需要更长时间。
+
+        Returns:
+            识别出的文字内容。识别失败或超时返回空字符串。
+
+        Raises:
+            RuntimeError: 消息未关联 chat、hover 失败、菜单未弹出或
+                         "转文字"选项未找到时抛出。
+
+        用法::
+
+            @wx.on(Event.VOICE)
+            def on_voice(wx_client, message):
+                text = message.to_text(timeout=15)
+                if text:
+                    print(f"语音内容: {text}")
+                    message.chat.send_text(f"你说的是: {text}", reply_to=message)
+                else:
+                    print("语音识别失败")
+        """
+        if not self.chat:
+            raise RuntimeError("消息未关联聊天窗口，无法执行转文字操作")
+        if not self.runtime_id:
+            raise RuntimeError("消息无 runtime_id，无法追踪控件状态")
+
+        # 记录原始 Name
+        original_name = self.raw_name or ""
+
+        # 点击右键菜单"语音转文字"
+        self._click_context_menu("语音转文字")
+
+        # 轮询：通过 runtime_id 在消息列表中重新查找控件，读取最新 Name
+        # 转文字后微信会重建控件，旧引用的 .Name 不会更新，
+        # 必须每次遍历消息列表按 RuntimeId 匹配到新控件
+        lc = self.chat._message_list
+        if not lc.Exists(maxSearchSeconds=2):
+            return ""
+
+        deadline = time.monotonic() + timeout
+        while time.monotonic() < deadline:
+            time.sleep(0.5)
+
+            current_name = self._get_current_name_by_rid(lc)
+            if current_name is None:
+                continue
+
+            # Name 发生变化，尝试提取识别文字
+            if current_name != original_name:
+                text = self._extract_transcribed_text(current_name)
+                if text:
+                    return text
+
+        # 超时后最后尝试一次
+        current_name = self._get_current_name_by_rid(lc)
+        if current_name and current_name != original_name:
+            text = self._extract_transcribed_text(current_name)
+            if text:
+                return text
+
+        return ""
+
+    def _get_current_name_by_rid(self, lc) -> Optional[str]:
+        """
+        通过 runtime_id 在消息列表中重新查找控件，返回其当前 Name。
+
+        微信转文字后会重建控件（RuntimeId 不变但旧 Python 引用失效），
+        必须遍历消息列表按 RuntimeId 匹配到新控件才能读取最新 Name。
+
+        Args:
+            lc: 消息列表 ListControl
+
+        Returns:
+            当前 Name 字符串，未找到返回 None
+        """
+        target_rid = self.runtime_id
+        if not target_rid:
+            return None
+
+        try:
+            for ctrl, _ in auto.WalkControl(lc):
+                if ctrl.ControlType != auto.ControlType.ListItemControl:
+                    continue
+                try:
+                    rid = tuple(ctrl.GetRuntimeId())
+                except Exception:
+                    continue
+                if rid == target_rid:
+                    return ctrl.Name or ""
+        except Exception:
+            pass
+
+        return None
+
+    @staticmethod
+    def _extract_transcribed_text(name: str) -> str:
+        """
+        从语音转文字后的控件 Name 中提取识别出的文字。
+
+        实际观察到的转换后 Name 格式：
+        - "语音2\u201c秒你好，你好。"  → 识别文字直接跟在"秒"后面
+        - "语音5\u201c秒今天天气不错"  → 无分隔符
+        - "语音3\u201c秒 未播放你好"   → 可能带"未播放"标记
+
+        转换前 Name 格式：
+        - "语音2\u201c秒"             → 已播放，无文字
+        - "语音2\u201c秒 未播放"      → 未播放，无文字
+
+        注意: \u201c 是中文左双引号 "
+
+        Args:
+            name: 控件的 Name 属性值
+
+        Returns:
+            提取出的文字，未匹配到返回空字符串
+        """
+        if not name:
+            return ""
+
+        # 主格式: "语音N"秒{文字}" — 文字直接跟在"秒"后面
+        # 支持中文左双引号(\u201c)和 ASCII 双引号
+        m = re.match(
+            r'^语音\d+[\u201c"]秒\s*(?:未播放|已播放)?\s*(.+)',
+            name,
+            re.DOTALL,
+        )
+        if m:
+            text = m.group(1).strip()
+            # 排除仍是状态文本的情况
+            if text and text not in ("未播放", "已播放", "转文字中"):
+                return text
+
+        # 备选格式: 带换行 "语音N"秒\n识别文字"
+        m = re.match(r'^语音\d+[\u201c"]秒(?:\s*未播放)?\s*\n(.+)', name, re.DOTALL)
+        if m:
+            return m.group(1).strip()
+
+        # 备选格式: "识别文字\n语音N"秒"
+        m = re.match(r'^(.+?)\n语音\d+[\u201c"]秒', name, re.DOTALL)
+        if m:
+            return m.group(1).strip()
+
+        # Name 不再包含 "语音" 前缀，整体就是识别文字
+        if not name.startswith("语音"):
+            return name.strip()
+
+        return ""
 
 
 class ImageMessage(Message):
@@ -2132,19 +2503,121 @@ class VideoMessage(Message):
 class FileMessage(Message):
     """文件消息"""
 
-    def __init__(self, *, file_name="", **kw):
+    def __init__(self, *, file_name="", file_size="", file_status="", **kw):
         super().__init__(**kw)
         self.file_name: str = file_name
+        self.file_size: str = file_size
+        self.file_status: str = file_status
 
     @property
     def type_label(self) -> str:
         return "文件消息"
 
     @staticmethod
-    def parse(raw_name: str) -> tuple[str, str]:
-        parts = raw_name.split("\n", 1)
-        fname = parts[1].strip() if len(parts) > 1 else raw_name
-        return fname, fname
+    def parse(raw_name: str) -> tuple[str, str, str, str]:
+        """
+        解析文件消息的 raw_name。
+
+        已知格式（换行分隔）：
+        - "文件\\n{文件名}\\n{大小}"                → 已下载/已发送
+        - "文件\\n{文件名}\\n{大小}\\n未下载"       → 未下载
+        - "文件\\n{文件名}\\n{大小}\\n对方上传中"   → 对方上传中
+        - "文件\\n进度: {N}%\\n{文件名}\\n..."      → 自己发送中（由状态检测处理）
+
+        Returns:
+            (content, file_name, file_size, file_status)
+            content: 显示用的摘要文本
+            file_name: 文件名
+            file_size: 文件大小文本（如 "5.5K"、"1.2M"）
+            file_status: 状态文本（""=正常, "未下载", "对方上传中" 等）
+        """
+        if not raw_name:
+            return raw_name, "", "", ""
+
+        parts = [p.strip() for p in raw_name.split("\n") if p.strip()]
+
+        # 跳过第一个 "文件" 标记
+        if parts and parts[0] == "文件":
+            parts = parts[1:]
+
+        # 跳过 "进度: XX%" 行（发送中状态）
+        if parts and re.match(r'^进度[:：]\s*\d+%', parts[0]):
+            parts = parts[1:]
+
+        file_name = ""
+        file_size = ""
+        file_status = ""
+
+        # 文件大小的正则：数字+单位（B/K/KB/M/MB/G/GB/T/TB）
+        size_pattern = re.compile(r'^[\d.]+\s*[BKMGT][B]?$', re.IGNORECASE)
+        # 已知状态文本
+        status_texts = {"未下载", "对方上传中", "发送中断", "已过期", "已取消"}
+
+        # 逐个解析 parts：第一个非大小非状态的是文件名，
+        # 匹配大小正则的是文件大小，在状态集合中的是状态
+        for p in parts:
+            if p in status_texts:
+                file_status = p
+            elif size_pattern.match(p):
+                file_size = p
+            elif not file_name:
+                file_name = p
+
+        # 生成 content 摘要
+        if file_status:
+            content = f"{file_name} ({file_size}) [{file_status}]"
+        else:
+            file_status = "已下载"
+            content = f"{file_name} ({file_size})" if file_size else file_name
+
+        return content, file_name, file_size, file_status
+
+    def get_status(self) -> str:
+        """
+        获取文件消息的最新状态。
+
+        通过 runtime_id 在消息列表中重新查找控件，
+        读取最新的 Name 属性并解析出当前 file_status。
+
+        文件状态可能随时间变化：
+        - "对方上传中" → "未下载"（上传完成）
+        - "未下载" → "已下载"（用户手动下载后）
+
+        Returns:
+            最新的状态文本（"已下载"、"未下载"、"对方上传中"、"发送中断" 等）。
+            无法获取时返回当前缓存的 file_status。
+        """
+        if not self.chat or not self.runtime_id:
+            return self.file_status
+
+        lc = self.chat._message_list
+        if not lc.Exists(maxSearchSeconds=2):
+            return self.file_status
+
+        # 通过 runtime_id 查找控件获取最新 Name
+        target_rid = self.runtime_id
+        current_name = None
+        try:
+            for ctrl, _ in auto.WalkControl(lc):
+                if ctrl.ControlType != auto.ControlType.ListItemControl:
+                    continue
+                try:
+                    rid = tuple(ctrl.GetRuntimeId())
+                except Exception:
+                    continue
+                if rid == target_rid:
+                    current_name = ctrl.Name or ""
+                    break
+        except Exception:
+            return self.file_status
+
+        if current_name is None:
+            return self.file_status
+
+        # 解析最新 Name 获取状态
+        _, _, _, new_status = FileMessage.parse(current_name)
+        self.file_status = new_status
+        return new_status
 
 
 class LocationMessage(Message):
@@ -8702,8 +9175,9 @@ class Chat:
             return VoiceMessage(**base, content=content, duration=duration, played=played)
 
         if msg_cls is FileMessage:
-            content, file_name = FileMessage.parse(actual_name)
-            return FileMessage(**base, content=content, file_name=file_name)
+            content, file_name, file_size, file_status = FileMessage.parse(actual_name)
+            return FileMessage(**base, content=content, file_name=file_name,
+                               file_size=file_size, file_status=file_status)
 
         if msg_cls is LocationMessage:
             content, address = LocationMessage.parse(actual_name)
