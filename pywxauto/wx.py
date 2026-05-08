@@ -1662,24 +1662,29 @@ class Message:
         if ctrl:
             return self._ensure_visible(lc, ctrl)
 
-        for _ in range(50):
-            lc.WheelUp(wheelTimes=5)
-            time.sleep(0.15)
-            ctrl = self._find_ctrl()
-            if ctrl:
-                return self._ensure_visible(lc, ctrl)
+        # 需要滚动查找，暂停监听线程扫描
+        self.chat._scan_paused = True
+        try:
+            for _ in range(50):
+                lc.WheelUp(wheelTimes=5)
+                time.sleep(0.15)
+                ctrl = self._find_ctrl()
+                if ctrl:
+                    return self._ensure_visible(lc, ctrl)
 
-        for _ in range(50):
-            lc.WheelDown(wheelTimes=5)
-            time.sleep(0.15)
-        for _ in range(50):
-            lc.WheelDown(wheelTimes=5)
-            time.sleep(0.15)
-            ctrl = self._find_ctrl()
-            if ctrl:
-                return self._ensure_visible(lc, ctrl)
+            for _ in range(50):
+                lc.WheelDown(wheelTimes=5)
+                time.sleep(0.15)
+            for _ in range(50):
+                lc.WheelDown(wheelTimes=5)
+                time.sleep(0.15)
+                ctrl = self._find_ctrl()
+                if ctrl:
+                    return self._ensure_visible(lc, ctrl)
 
-        return False
+            return False
+        finally:
+            self.chat._scan_paused = False
 
     @staticmethod
     def _ensure_visible(lc, ctrl) -> bool:
@@ -1734,35 +1739,27 @@ class Message:
 
         return True
 
-    def refer(self) -> bool:
+    def _click_context_menu(self, menu_name: str) -> None:
         """
-        引用此条消息。
+        右键点击消息气泡并在弹出菜单中点击指定项。
 
-        流程:
-        1. hover() 将消息滚动到可见区域并将鼠标移到气泡位置
-        2. 在当前鼠标位置右键点击，弹出上下文菜单
-        3. 在菜单中点击"引用"
+        流程: hover 定位 → 右键 → 查找菜单 → 点击菜单项
 
-        右键菜单控件结构:
-        - 菜单窗口: WindowControl, ClassName="mmui::XMenu"
-        - 菜单项: MenuItemControl, ClassName="mmui::XMenuView",
-                  AutomationId="XMenuItem", Name="引用"
-
-        Returns:
-            True 引用成功（菜单已点击），False 操作失败
+        Args:
+            menu_name: 菜单项名称，如 "引用"、"删除"、"转发"、"收藏"、"多选"
 
         Raises:
-            RuntimeError: 消息未关联 chat、控件未找到或菜单未弹出时抛出
+            RuntimeError: 消息未关联 chat、hover 失败、菜单未弹出或菜单项未找到时抛出
         """
         if not self.chat:
-            raise RuntimeError("消息未关联聊天窗口，无法执行引用操作")
+            raise RuntimeError(f"消息未关联聊天窗口，无法执行'{menu_name}'操作")
 
         self.chat._activate_window()
 
         if not self.hover():
             raise RuntimeError("无法将消息滚动到可见区域或悬浮失败")
 
-        # hover 后鼠标已在气泡位置，原地右键即可
+        # hover 后鼠标已在气泡位置，原地右键
         if not background:
             x, y = auto.GetCursorPos()
             auto.RightClick(x, y)
@@ -1772,24 +1769,247 @@ class Message:
                 raise RuntimeError("未找到消息控件")
             input_wx.click(target, button="right")
 
+        time.sleep(0.5)
+
         # 查找右键菜单
         win = self.chat._win
         menu_win = win.WindowControl(ClassName="mmui::XMenu")
         if not menu_win.Exists(maxSearchSeconds=2):
             raise RuntimeError("右键菜单未弹出")
 
-        # 点击"引用"菜单项
-        refer_item = menu_win.MenuItemControl(
+        # 点击指定菜单项
+        menu_item = menu_win.MenuItemControl(
             ClassName="mmui::XMenuView",
             AutomationId="XMenuItem",
-            Name="引用",
+            Name=menu_name,
         )
-        if not refer_item.Exists(maxSearchSeconds=1):
+        if not menu_item.Exists(maxSearchSeconds=1):
             input_wx.send_keys(win, "{Esc}")
-            raise RuntimeError("右键菜单中未找到'引用'选项")
+            raise RuntimeError(f"右键菜单中未找到'{menu_name}'选项")
 
-        input_wx.click(refer_item)
-        return True
+        input_wx.click(menu_item)
+        time.sleep(0.3)
+
+    def refer(self) -> None:
+        """
+        引用此条消息。
+
+        右键点击消息气泡，在菜单中点击"引用"，
+        输入框进入引用模式，可继续输入回复内容。
+
+        Returns:
+            True 引用成功
+        """
+        self._click_context_menu("引用")
+
+    def copy(self) -> str:
+        """
+        复制此条消息内容到剪贴板并返回。
+
+        右键点击消息气泡，在菜单中点击"复制"，
+        然后从剪贴板读取复制的文本内容。
+
+        Returns:
+            复制到剪贴板的文本内容
+        """
+        self._click_context_menu("复制")
+        return get_clipboard()
+
+    def collect(self) -> None:
+        """
+        收藏此条消息。
+
+        右键点击消息气泡，在菜单中点击"收藏"。
+
+        Returns:
+            True 收藏成功
+        """
+        self._click_context_menu("收藏")
+
+    def translate(self) -> bool:
+        """
+        翻译此条消息。
+
+        右键点击消息气泡，在菜单中点击"翻译"。
+        翻译结果会显示在消息气泡下方。
+
+        Returns:
+            True 翻译成功
+        """
+        self._click_context_menu("翻译")
+
+    def forward(self, nicknames: "str | list[str]", remark: Optional[str] = None) -> bool:
+        """
+        转发此条消息给指定联系人。
+
+        流程:
+        1. 右键点击消息气泡，在菜单中点击"转发..."
+        2. 在"微信发送给"弹窗中逐个搜索并勾选接收者
+        3. 可选填写留言（remark）
+        4. 点击"发送"按钮
+
+        弹窗控件结构:
+        - 弹窗: WindowControl, ClassName="mmui::SessionPickerWindow", Name="微信发送给"
+        - 搜索框: EditControl, Name="搜索", ClassName="mmui::XValidatorTextEdit"
+          位于 mmui::XSearchField 内
+        - 搜索结果列表: ListControl, AutomationId="sp_search_result_list"
+        - 搜索结果项: CheckBoxControl, ClassName="mmui::SearchContactCellView"
+        - 留言输入框: EditControl, Name="输入", AutomationId="leave_message_view.chat_input_field"
+        - 发送按钮: ButtonControl, Name="发送", AutomationId="confirm_btn"
+
+        Args:
+            nicknames: 接收者昵称，支持单个字符串或列表（多人转发）
+            remark:    留言内容，空字符串不填写留言
+
+        Returns:
+            True 转发成功
+
+        Raises:
+            RuntimeError: 操作失败时抛出
+        """
+        if isinstance(nicknames, str):
+            nicknames = [nicknames]
+        if not nicknames:
+            raise ValueError("nicknames 不能为空")
+
+        self._click_context_menu("转发...")
+
+        # 等待"微信发送给"弹窗出现
+        win = self.chat._win
+        picker_win = win.WindowControl(
+            ClassName="mmui::SessionPickerWindow",
+            Name="微信发送给",
+        )
+        if not picker_win.Exists(maxSearchSeconds=3):
+            raise RuntimeError("'微信发送给'弹窗未打开")
+
+        # 逐个搜索并勾选接收者
+        for nickname in nicknames:
+            # 定位搜索框
+            search_field = picker_win.GroupControl(
+                ClassName="mmui::XSearchField",
+                searchDepth=3,
+            )
+            if not search_field.Exists(maxSearchSeconds=2):
+                raise RuntimeError("弹窗中未找到搜索区域")
+            search_edit = search_field.EditControl(
+                ClassName="mmui::XValidatorTextEdit",
+                Name="搜索",
+                searchDepth=1,
+            )
+            if not search_edit.Exists(maxSearchSeconds=2):
+                raise RuntimeError("弹窗中未找到搜索框")
+
+            input_wx.click(search_edit)
+            time.sleep(0.3)
+            input_wx.send_keys(search_edit, "{Ctrl}a{Del}")
+            time.sleep(0.2)
+            input_wx.send_keys(search_edit, nickname)
+            time.sleep(1.5)
+
+            # 在搜索结果中勾选第一个匹配项
+            result_list = picker_win.ListControl(
+                ClassName="mmui::XTableView",
+                AutomationId="sp_search_result_list",
+                searchDepth=5,
+            )
+            if not result_list.Exists(maxSearchSeconds=3):
+                raise RuntimeError(f"搜索 '{nickname}' 后未出现结果列表")
+
+            contact_row = result_list.CheckBoxControl(
+                ClassName="mmui::SearchContactCellView",
+                searchDepth=2,
+            )
+            if not contact_row.Exists(maxSearchSeconds=3):
+                raise RuntimeError(f"搜索结果中未找到联系人: {nickname}")
+
+            input_wx.click(contact_row)
+            time.sleep(0.5)
+
+        # 填写留言
+        if remark:
+            leave_msg_edit = picker_win.EditControl(
+                ClassName="mmui::ChatInputField",
+                AutomationId="leave_message_view.chat_input_field",
+                searchDepth=5,
+            )
+            if leave_msg_edit.Exists(maxSearchSeconds=2):
+                input_wx.click(leave_msg_edit)
+                time.sleep(0.2)
+                input_wx.send_keys(leave_msg_edit, remark)
+                time.sleep(0.3)
+
+        # 点击"发送"/"分别发送"按钮
+        send_btn = picker_win.ButtonControl(
+            AutomationId="confirm_btn",
+            searchDepth=5,
+        )
+        if not send_btn.Exists(maxSearchSeconds=2):
+            raise RuntimeError("未找到'发送'按钮")
+
+        # 等待按钮可用
+        for _ in range(10):
+            if send_btn.IsEnabled:
+                break
+            time.sleep(0.3)
+        else:
+            raise RuntimeError("'发送'按钮未启用，可能接收者未正确选中")
+
+        input_wx.click(send_btn)
+
+    def search(self) -> None:
+        """
+        搜一搜此条消息内容。
+
+        右键点击消息气泡，在菜单中点击"搜一搜"。
+        微信会打开搜一搜窗口并搜索消息中的文本内容。
+
+        Returns:
+            True 操作成功
+        """
+        self._click_context_menu("搜一搜")
+
+    def revoke(self) -> None:
+        """
+        撤回此条消息（仅限自己发送的消息，且在 2 分钟内）。
+
+        右键点击消息气泡，在菜单中点击"撤回"。
+
+        Returns:
+            True 撤回成功
+        """
+        self._click_context_menu("撤回")
+
+    def zoom_read(self) -> None:
+        """
+        放大阅读此条消息。
+
+        右键点击消息气泡，在菜单中点击"放大阅读"。
+        微信会弹出放大阅读窗口显示消息内容。
+        """
+        self._click_context_menu("放大阅读")
+
+    def delete(self) -> None:
+        """
+        删除此条消息。
+
+        右键点击消息气泡，在菜单中点击"删除"，
+        然后在确认弹窗中点击"删除"按钮。
+
+        Returns:
+            True 删除成功
+        """
+        self._click_context_menu("删除")
+
+        win = self.chat._win
+        confirm_btn = win.ButtonControl(
+            ClassName="mmui::XOutlineButton",
+            Name="删除",
+        )
+        if not confirm_btn.Exists(maxSearchSeconds=3):
+            raise RuntimeError("未找到删除确认弹窗的'删除'按钮")
+
+        input_wx.click(confirm_btn)
 
 
 class TextMessage(Message):
@@ -6186,6 +6406,7 @@ class Chat:
         """
         self.wx = wx
         self._win = wx._win
+        self._scan_paused: bool = False  # 监听线程暂停标志
 
     def _get_image_text(self, image: bytes) -> dict:
         """
@@ -11793,6 +12014,8 @@ class SeparateChat(Chat, WeixinWindow):
                     wx.CHAT_WINDOW_WIDTH, wx.CHAT_WINDOW_HEIGHT, True
                 )
 
+        self._scan_paused: bool = False  # 监听线程暂停标志
+
     def _activate_window(self) -> None:
         """激活独立聊天窗口（覆盖 Chat 的主窗口激活）"""
         if background:
@@ -13388,6 +13611,12 @@ class WeixinClient(WeixinWindow):
                 if not chat.exists:
                     break
 
+                # 消息操作（如 refer/delete）期间暂停扫描，避免滚动时误判
+                if chat._scan_paused:
+                    if stop_event.wait(interval):
+                        break
+                    continue
+
                 try:
                     visible = chat.get_visible_messages(sender_cache=sender_cache)
                 except Exception:
@@ -14085,6 +14314,12 @@ class Weixin:
             while not stop_event.is_set():
                 if not chat.exists:
                     break
+
+                # 消息操作期间暂停扫描
+                if chat._scan_paused:
+                    if stop_event.wait(interval):
+                        break
+                    continue
 
                 try:
                     visible = chat.get_visible_messages(sender_cache=sender_cache)
