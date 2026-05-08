@@ -4540,6 +4540,23 @@ class FriendCircle(WeixinWindow):
         "mmui::TimelineCell",         # 辅助行（如 "余下0条"）
     }
 
+    # ---- 发布相关常量 ----
+    PUBLISH_PANEL_CLASS = "mmui::SnsPublishPanel"
+    PUBLISH_PANEL_ID = "SnsPublishPanel"
+    PUBLISH_INPUT_CLASS = "mmui::XValidatorTextEdit"
+    PUBLISH_BTN_CLASS = "mmui::XOutlineButton"
+    PUBLISH_BTN_NAME = "发表"
+    CANCEL_BTN_NAME = "取消"
+    PUBLISH_TAB_NAME = "发表"
+    TOOLBAR_CLASS = "mmui::SNSWindowToolBar"
+    TOOLBAR_ID = "sns_window_tool_bar"
+
+    # ---- 隐私设置相关常量 ----
+    PRIVACY_BTN_CLASS = "mmui::PublishPrivacyView"
+    PRIVACY_SELECTION_CLASS = "mmui::PublishPrivacySelection"
+    PRIVACY_CONFIRM_NAME = "确定"
+    PRIVACY_OPTIONS = ("公开", "私密", "谁可以看", "不给谁看")
+
     def __init__(self, wx: "WeixinClient"):
         """
         初始化朋友圈操作实例。
@@ -4912,16 +4929,6 @@ class FriendCircle(WeixinWindow):
     # 取消按钮: ButtonControl, ClassName="mmui::XOutlineButton", Name="取消"
     # 工具栏发表: ButtonControl, ClassName="mmui::XTabBarItem", Name="发表"
 
-    PUBLISH_PANEL_CLASS = "mmui::SnsPublishPanel"
-    PUBLISH_PANEL_ID = "SnsPublishPanel"
-    PUBLISH_INPUT_CLASS = "mmui::XValidatorTextEdit"
-    PUBLISH_BTN_CLASS = "mmui::XOutlineButton"
-    PUBLISH_BTN_NAME = "发表"
-    CANCEL_BTN_NAME = "取消"
-    PUBLISH_TAB_NAME = "发表"
-    TOOLBAR_CLASS = "mmui::SNSWindowToolBar"
-    TOOLBAR_ID = "sns_window_tool_bar"
-
     def _open_publish_panel(self, text_only: bool = False) -> auto.Control:
         """
         打开发布面板并返回面板控件。
@@ -5092,16 +5099,6 @@ class FriendCircle(WeixinWindow):
 
         # 复用 SessionPickerWindow 选择逻辑
         self._select_in_session_picker("微信提醒谁看", contacts=contacts)
-
-    # ---- 隐私设置相关常量 ----
-    # 隐私按钮: ButtonControl, ClassName="mmui::PublishPrivacyView"
-    PRIVACY_BTN_CLASS = "mmui::PublishPrivacyView"
-    # 隐私选项: RadioButtonControl, ClassName="mmui::PublishPrivacySelection"
-    PRIVACY_SELECTION_CLASS = "mmui::PublishPrivacySelection"
-    # 隐私确定按钮: ButtonControl, ClassName="mmui::XOutlineButton", Name="确定"
-    PRIVACY_CONFIRM_NAME = "确定"
-    # 有效的隐私选项
-    PRIVACY_OPTIONS = ("公开", "私密", "谁可以看", "不给谁看")
 
     def _set_privacy(self, panel: auto.Control, permission: str,
                      permission_contacts: list[str] | None = None,
@@ -6115,6 +6112,69 @@ class Chat:
         "content_view.top_content_view.title_h_view.left_v_view.left_content_v_view.left_ui_.sub_title_",
     ]
 
+    # ---- ClassName -> 消息类型映射（供状态检测使用） ----
+    _TEXT_CLASS_NAMES = {"mmui::ChatTextItemView"}
+    _FILE_CLASS_NAMES = {"mmui::ChatFileItemView"}
+    _IMAGE_CLASS_NAMES = {"mmui::ChatImageItemView"}
+    _VIDEO_CLASS_NAMES = {"mmui::ChatVideoItemView"}
+    _EMOTION_CLASS_NAMES = {"mmui::ChatEmojiItemView", "mmui::ChatBubbleReferItemView"}
+    _FILE_BUBBLE_CLASS_NAMES = {"mmui::ChatFileItemView", "mmui::ChatBubbleItemView"}
+
+    # ---- 消息 Name 正则匹配 ----
+    # 文件消息
+    _FILE_SENDING_RE = re.compile(r"^文件\n进度[:：]\s*\d+%\n.+\n(?!.*发送中断)", re.DOTALL)
+    _FILE_FAILED_RE = re.compile(r"^文件\n进度[:：]\s*\d+%\n.+\n发送中断\n", re.DOTALL)
+    _FILE_SENT_RE = re.compile(r"^文件\n(?!进度[:：])")
+    # 图片消息
+    _IMAGE_NAME_RE = re.compile(r"^(?:发送失败\s+|发送中\s+)?图片$")
+    # 表情消息
+    _EMOTION_NAME_RE = re.compile(r"^(?:发送失败\s+|发送中\s+)?动画表情")
+    _ANIMATED_EMOJI_RE = re.compile(r"^动画表情(\s+\[.+\])?$")
+    # 视频消息
+    _VIDEO_NAME_RE = re.compile(r"^视频(?:\s|$)")
+    _VIDEO_SENDING_RE = re.compile(r"^视频\s+进度[:：]\s*\d+%")
+    _VIDEO_FAILED_RE = re.compile(r"^视频\s+上传\s*暂停")
+    _VIDEO_SENT_RE = re.compile(r"^视频(?:\s+\d+:\d+)?$")
+
+    # ---- 消息状态前缀映射 ----
+    _STATUS_PREFIXES = {
+        "发送失败 ": MessageStatus.FAILED,
+        "发送中 ": MessageStatus.SENDING,
+        "发送失败\n": MessageStatus.FAILED,
+        "发送中\n": MessageStatus.SENDING,
+    }
+
+    # ---- 发送收藏相关常量 ----
+    FAV_SEND_BTN_NAME = "发送收藏"
+    FAV_SEND_BTN_CLASS = "mmui::XButton"
+    FAV_DETAIL_LIST_ID = "fav_detail_list"
+    FAV_DETAIL_LIST_CLASS = "mmui::XRecyclerTableView"
+    FAV_ITEM_CLASS = "mmui::XTableCell"
+    FAV_SEARCH_CLASS = "mmui::XValidatorTextEdit"
+    FAV_SEARCH_NAME = "搜索"
+    FAV_SEND_CONFIRM_NAME = "发送"
+    FAV_SEND_CONFIRM_CLASS = "mmui::XOutlineButton"
+    FAV_CANCEL_NAME = "取消"
+    FAV_CANCEL_CLASS = "mmui::XOutlineButton"
+
+    # ---- 发送表情相关常量 ----
+    EMOJI_BTN_NAME = "发送表情(Alt+E)"
+    EMOJI_BTN_CLASS = "mmui::XButton"
+    EMOJI_POPOVER_CLASS = "mmui::XPopover"
+    EMOJI_POPOVER_ID = "EmoticonPopover"
+    EMOJI_PANEL_TOOLBAR_ID = "emoticon_panel_tool_bar"
+    EMOJI_SEARCH_TAB_NAME = "搜索表情"
+    EMOJI_SEARCH_TAB_CLASS = "mmui::EmoticonToolbarItem"
+    EMOJI_SEARCH_INPUT_NAME = "搜索"
+    EMOJI_SEARCH_INPUT_CLASS = "mmui::XValidatorTextEdit"
+    EMOJI_SEARCH_FIELD_CLASS = "mmui::XSearchField"
+    EMOJI_SEARCH_RESULT_CLASS = "Chrome_RenderWidgetHostHWND"
+    EMOJI_SEARCH_RESULT_NAME = "表情搜索"
+    EMOJI_CUSTOM_TAB_NAME = "自定义表情"
+    EMOJI_CUSTOM_TAB_CLASS = "mmui::EmoticonToolbarItem"
+    EMOJI_CUSTOM_GRID_CLASS = "mmui::EmoticonGridView"
+    EMOJI_CUSTOM_ITEM_CLASS = "mmui::FavEmoticonItemView"
+
     def __init__(self, wx: "WeixinClient"):
         """
         初始化聊天区域。
@@ -6235,16 +6295,6 @@ class Chat:
         field = self._input_field
         if field.Exists(maxSearchSeconds=2):
             input_wx.send_keys(field, "{Ctrl}a{Del}")
-
-    # ClassName -> 消息类型映射（供状态检测使用）
-    _TEXT_CLASS_NAMES = {"mmui::ChatTextItemView"}
-    _FILE_CLASS_NAMES = {"mmui::ChatFileItemView"}
-    _IMAGE_CLASS_NAMES = {"mmui::ChatImageItemView"}
-    _VIDEO_CLASS_NAMES = {"mmui::ChatVideoItemView"}
-    _EMOTION_CLASS_NAMES = {"mmui::ChatEmojiItemView", "mmui::ChatBubbleReferItemView"}
-    # 文件消息在传输中/失败时 ClassName 为 ChatBubbleItemView，
-    # 需要通过 Name 以 "文件\n" 开头来区分
-    _FILE_BUBBLE_CLASS_NAMES = {"mmui::ChatFileItemView", "mmui::ChatBubbleItemView"}
 
     def _find_last_self_message_ctrl(
         self, class_names: set[str],
@@ -6476,14 +6526,6 @@ class Chat:
                 return ctrl
         return None
 
-    # 文件消息 Name 正则匹配
-    # 发送中:   "文件\n进度: 25%\n{文件名}\n{来源}"
-    # 发送失败: "文件\n进度: 0%\n{文件名}\n发送中断\n{来源}"
-    # 发送成功: "文件\n{文件名}\n{来源}"
-    _FILE_SENDING_RE = re.compile(r"^文件\n进度[:：]\s*\d+%\n.+\n(?!.*发送中断)", re.DOTALL)
-    _FILE_FAILED_RE = re.compile(r"^文件\n进度[:：]\s*\d+%\n.+\n发送中断\n", re.DOTALL)
-    _FILE_SENT_RE = re.compile(r"^文件\n(?!进度[:：])")
-
     @staticmethod
     def _check_file_status_by_content(name: str) -> MessageStatus:
         """
@@ -6534,9 +6576,6 @@ class Chat:
             if time.monotonic() >= deadline:
                 return status
             time.sleep(interval)
-
-    # 图片消息 Name 匹配正则（用于从 ChatBubbleReferItemView 中过滤图片消息）
-    _IMAGE_NAME_RE = re.compile(r"^(?:发送失败\s+|发送中\s+)?图片$")
 
     def _find_last_self_image_ctrl(self) -> Optional[auto.Control]:
         """
@@ -6605,9 +6644,6 @@ class Chat:
             if time.monotonic() >= deadline:
                 return status
             time.sleep(interval)
-
-    # 表情消息 Name 匹配正则（用于从 ChatBubbleReferItemView 中过滤表情消息）
-    _EMOTION_NAME_RE = re.compile(r"^(?:发送失败\s+|发送中\s+)?动画表情")
 
     def _find_last_self_emotion_ctrl(self) -> Optional[auto.Control]:
         """
@@ -6712,15 +6748,6 @@ class Chat:
             if sender_type == SenderType.SELF:
                 return ctrl
         return None
-
-    # 视频消息 Name 正则匹配
-    # 发送中:   "视频 进度: 0%0:02"
-    # 发送失败: "视频 上传 暂停0:02"
-    # 发送成功: "视频 0:02" 或 "视频"
-    _VIDEO_NAME_RE = re.compile(r"^视频(?:\s|$)")
-    _VIDEO_SENDING_RE = re.compile(r"^视频\s+进度[:：]\s*\d+%")
-    _VIDEO_FAILED_RE = re.compile(r"^视频\s+上传\s*暂停")
-    _VIDEO_SENT_RE = re.compile(r"^视频(?:\s+\d+:\d+)?$")
 
     @staticmethod
     def _check_video_status_by_content(name: str) -> MessageStatus:
@@ -7044,18 +7071,6 @@ class Chat:
     #     选中收藏项后才可用（初始为 disabled）
     #   取消按钮: ButtonControl, ClassName="mmui::XOutlineButton", Name="取消"
 
-    FAV_SEND_BTN_NAME = "发送收藏"
-    FAV_SEND_BTN_CLASS = "mmui::XButton"
-    FAV_DETAIL_LIST_ID = "fav_detail_list"
-    FAV_DETAIL_LIST_CLASS = "mmui::XRecyclerTableView"
-    FAV_ITEM_CLASS = "mmui::XTableCell"
-    FAV_SEARCH_CLASS = "mmui::XValidatorTextEdit"
-    FAV_SEARCH_NAME = "搜索"
-    FAV_SEND_CONFIRM_NAME = "发送"
-    FAV_SEND_CONFIRM_CLASS = "mmui::XOutlineButton"
-    FAV_CANCEL_NAME = "取消"
-    FAV_CANCEL_CLASS = "mmui::XOutlineButton"
-
     def _open_collection_panel(self) -> auto.ListControl:
         """
         打开收藏选择面板。
@@ -7278,23 +7293,6 @@ class Chat:
     #               ClassName="Chrome_RenderWidgetHostHWND"
     #     搜索结果为 Chromium 内嵌网页渲染，表情项为 ListItemControl，
     #     Name 格式: "{关键词}表情，来自{来源}"，支持 InvokePattern 直接点击发送。
-
-    EMOJI_BTN_NAME = "发送表情(Alt+E)"
-    EMOJI_BTN_CLASS = "mmui::XButton"
-    EMOJI_POPOVER_CLASS = "mmui::XPopover"
-    EMOJI_POPOVER_ID = "EmoticonPopover"
-    EMOJI_PANEL_TOOLBAR_ID = "emoticon_panel_tool_bar"
-    EMOJI_SEARCH_TAB_NAME = "搜索表情"
-    EMOJI_SEARCH_TAB_CLASS = "mmui::EmoticonToolbarItem"
-    EMOJI_SEARCH_INPUT_NAME = "搜索"
-    EMOJI_SEARCH_INPUT_CLASS = "mmui::XValidatorTextEdit"
-    EMOJI_SEARCH_FIELD_CLASS = "mmui::XSearchField"
-    EMOJI_SEARCH_RESULT_CLASS = "Chrome_RenderWidgetHostHWND"
-    EMOJI_SEARCH_RESULT_NAME = "表情搜索"
-    EMOJI_CUSTOM_TAB_NAME = "自定义表情"
-    EMOJI_CUSTOM_TAB_CLASS = "mmui::EmoticonToolbarItem"
-    EMOJI_CUSTOM_GRID_CLASS = "mmui::EmoticonGridView"
-    EMOJI_CUSTOM_ITEM_CLASS = "mmui::FavEmoticonItemView"
 
     @PIM.guard
     def send_emotion(self, keyword: str = None, index: int = 1, timeout: float = 0) -> MessageStatus:
@@ -8080,9 +8078,6 @@ class Chat:
         # （公众号文章、小程序卡片等）
         return CardMessage
 
-    # 动画表情 Name 格式: "动画表情" 或 "动画表情 [xxx]"
-    _ANIMATED_EMOJI_RE = re.compile(r"^动画表情(\s+\[.+\])?$")
-
     @staticmethod
     def _classify_bubble_refer(name: str) -> type[Message]:
         """
@@ -8295,19 +8290,6 @@ class Chat:
         if found_left:
             return chat_name, SenderType.FRIEND, scan_y, left_x, right_x
         return "我", SenderType.SELF, scan_y, left_x, right_x
-
-    # -- 消息状态检测 --
-
-    # 不同消息类型的状态前缀映射
-    # 文本/引用/表情等气泡类消息：Name 以 "发送失败 " / "发送中 " 开头
-    # 文件消息：Name 以 "发送失败\n" / "发送中\n" 开头
-    # 图片/视频消息：Name 以 "发送失败 " / "发送中 " 开头
-    _STATUS_PREFIXES = {
-        "发送失败 ": MessageStatus.FAILED,
-        "发送中 ": MessageStatus.SENDING,
-        "发送失败\n": MessageStatus.FAILED,
-        "发送中\n": MessageStatus.SENDING,
-    }
 
     @staticmethod
     def _detect_message_status(
