@@ -7807,6 +7807,52 @@ class Chat:
         time.sleep(0.5)
 
     @PIM.guard
+    def send_voice(self, duration: float = 3) -> None:
+        """
+        在当前会话中发送语音消息。
+
+        通过按住右 Alt 键触发微信的语音输入功能，
+        按住指定秒数后松开完成录制并自动发送。
+
+        注意：需要电脑有可用的麦克风设备，且微信已授权麦克风权限。
+        微信 4.x 的语音输入快捷键为按住右 Alt（VK_RMENU）。
+
+        Args:
+            duration: 录制时长（秒），默认 3 秒。
+                      最小 1 秒（太短可能发送失败），
+                      最长 60 秒（微信语音上限）。
+
+        Raises:
+            ValueError: duration 不在有效范围内时抛出
+            RuntimeError: 未找到输入框时抛出
+        """
+        if duration < 1:
+            raise ValueError("语音时长不能小于 1 秒")
+        if duration > 60:
+            raise ValueError("语音时长不能超过 60 秒")
+
+        self._activate_window()
+
+        field = self._input_field
+        if not field.Exists(maxSearchSeconds=2):
+            raise RuntimeError("未找到聊天输入框")
+
+        # 点击输入框确保聊天窗口获得焦点
+        input_wx.click(field)
+        time.sleep(0.3)
+
+        # 按住右 Alt 键开始录音
+        VK_RMENU = 0xA5  # 右 Alt 虚拟键码
+        ctypes.windll.user32.keybd_event(VK_RMENU, 0, 0, 0)  # key down
+
+        # 保持按住指定时长
+        time.sleep(duration)
+
+        # 松开右 Alt 键，结束录音并发送
+        ctypes.windll.user32.keybd_event(VK_RMENU, 0, 0x0002, 0)  # key up
+        time.sleep(0.5)
+
+    @PIM.guard
     def send_at(self, content: str, at_members: list[str], reply_to: "Message | int | None" = None, timeout: float = 0) -> MessageStatus:
         """
         在当前群聊会话中 @指定成员并发送消息，返回发送状态。
@@ -12996,6 +13042,10 @@ class WeixinClient(WeixinWindow):
     def send_card(self, nickname: str, share: str) -> bool:
         """发送名片"""
         return self.chat_with(share).send_card(nickname)
+
+    def send_voice(self, nickname: str, duration: float = 3) -> None:
+        """发送语音消息"""
+        return self.chat_with(nickname).send_voice(duration)
 
     @PIM.guard
     def create_note(self, content: str) -> None:
