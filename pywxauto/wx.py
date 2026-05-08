@@ -5585,6 +5585,184 @@ class ChatFile:
                 f"发送人: {self.sender_name} | 来源: {self.source_name} | "
                 f"大小: {self.file_size} | 状态: {status}")
 
+    def _ensure_ready(self) -> None:
+        """确保 file_manager 和 _cell 可用，且文件管理器窗口已打开"""
+        if not self.file_manager:
+            raise RuntimeError("ChatFile 未关联 FileManager 实例")
+        if not self._cell:
+            raise RuntimeError("ChatFile 未关联 UI 控件（_cell 为空）")
+        if not self.file_manager.exists:
+            raise RuntimeError("聊天文件窗口未打开")
+
+    def _right_click_and_find_menu(self) -> auto.Control:
+        """右键点击文件项并返回弹出的菜单控件"""
+        self.file_manager.activate()
+        input_wx.click(self._cell, button="right")
+        time.sleep(0.5)
+        menu = self.file_manager._find_context_menu_by_point()
+        if not menu:
+            raise RuntimeError("未找到右键菜单")
+        return menu
+
+    def _click_menu_item(self, menu, item_name: str) -> auto.Control:
+        """在菜单中查找并点击指定名称的菜单项"""
+        target = None
+        for child in menu.GetChildren():
+            if child.Name == item_name:
+                target = child
+                break
+        if not target:
+            raise RuntimeError(f"未找到'{item_name}'菜单项")
+        input_wx.click(target)
+        return target
+
+    def _handle_save_dialog(self, file_path: str) -> bool:
+        """处理 Windows 文件保存对话框：填入路径并保存"""
+        save_dialog = self.file_manager._win.WindowControl(ClassName="#32770", searchDepth=3)
+        if not save_dialog.Exists(maxSearchSeconds=5):
+            raise RuntimeError("未找到 Windows 文件保存对话框")
+
+        file_name_edit = save_dialog.EditControl(AutomationId="1001", searchDepth=10)
+        if not file_name_edit.Exists(maxSearchSeconds=3):
+            raise RuntimeError("未找到文件名输入框")
+
+        input_wx.send_keys(file_name_edit, file_path)
+
+        # 如果目标文件已存在，先删除（避免覆盖确认弹窗）
+        if os.path.exists(file_path):
+            os.remove(file_path)
+
+        input_wx.send_keys(None, "{Alt}s")
+        if not save_dialog.Exists(maxSearchSeconds=2):
+            return True
+        else:
+            input_wx.send_keys(None, "{Esc}")
+            return False
+
+    @PIM.guard
+    def save_as(self, file_path: str) -> bool:
+        """
+        将文件另存为到指定路径。
+
+        流程:
+        1. 右键点击文件项 → 弹出微信右键菜单
+        2. 点击"另存为..."菜单项 → 弹出 Windows 文件保存对话框
+        3. 设置保存路径 → 按 Alt+S 保存
+
+        Args:
+            file_path: 完整的保存路径（含文件名），如 "C:\\download\\test.xlsx"
+
+        Returns:
+            True 保存成功，False 保存失败
+        """
+        self._ensure_ready()
+
+        dir_path = os.path.dirname(file_path)
+        if dir_path:
+            os.makedirs(dir_path, exist_ok=True)
+
+        menu = self._right_click_and_find_menu()
+        self._click_menu_item(menu, "另存为...")
+        time.sleep(1)
+
+        return self._handle_save_dialog(file_path)
+
+    @PIM.guard
+    def download_to(self, file_path: str) -> bool:
+        """
+        将文件下载到指定路径。
+
+        流程:
+        1. 右键点击文件项 → 弹出微信右键菜单
+        2. 点击"下载到..."菜单项 → 弹出 Windows 文件保存对话框
+        3. 设置保存路径 → 按 Alt+S 保存
+
+        Args:
+            file_path: 完整的保存路径（含文件名），如 "C:\\download\\test.xlsx"
+
+        Returns:
+            True 下载成功，False 下载失败
+        """
+        self._ensure_ready()
+
+        dir_path = os.path.dirname(file_path)
+        if dir_path:
+            os.makedirs(dir_path, exist_ok=True)
+
+        menu = self._right_click_and_find_menu()
+        self._click_menu_item(menu, "下载到...")
+        time.sleep(1)
+
+        return self._handle_save_dialog(file_path)
+
+    @PIM.guard
+    def download(self, timeout: int = 60) -> bool:
+        """
+        下载文件（下载到微信默认路径）。
+
+        流程:
+        1. 右键点击文件项 → 弹出微信右键菜单
+        2. 点击"下载"菜单项 → 开始下载
+        3. 轮询文件状态，等待 file_status 变为空（即已下载）
+
+        Args:
+            timeout: 等待下载完成的超时时间（秒），默认 60 秒
+
+        Returns:
+            True 下载成功（状态变为已下载），False 下载超时
+        """
+        self._ensure_ready()
+
+        menu = self._right_click_and_find_menu()
+        self._click_menu_item(menu, "下载")
+        time.sleep(0.5)
+
+        # 轮询文件状态，等待下载完成
+        deadline = time.monotonic() + timeout
+        while time.monotonic() < deadline:
+            cell_text = self._cell.Name
+            if not cell_text:
+                time.sleep(1)
+                continue
+
+            chat_file = self.file_manager.parse_file_cell_text(cell_text)
+            if chat_file and not chat_file.file_status:
+                self.file_status = ""
+                return True
+
+            time.sleep(1)
+
+        return False
+
+    @PIM.guard
+    def delete(self) -> bool:
+        """
+        删除此文件。
+
+        流程:
+        1. 右键点击文件项 → 弹出微信右键菜单
+        2. 点击"删除"菜单项 → 弹出确认对话框
+        3. 点击"删除"确认按钮完成删除
+
+        Returns:
+            True 删除成功，False 删除失败
+        """
+        self._ensure_ready()
+
+        menu = self._right_click_and_find_menu()
+        self._click_menu_item(menu, "删除")
+        time.sleep(0.5)
+
+        # 点击确认弹窗中的"删除"按钮
+        delete_btn = self.file_manager._win.ButtonControl(
+            ClassName="mmui::XOutlineButton", Name="删除",
+        )
+        if delete_btn.Exists(maxSearchSeconds=2):
+            input_wx.click(delete_btn)
+            time.sleep(0.5)
+            return True
+        return False
+
 
 class FileManager(WeixinWindow):
     """
@@ -5721,267 +5899,53 @@ class FileManager(WeixinWindow):
         return None
 
     @PIM.guard
-    def save_file_as(self, file_cell, file_path: str) -> bool:
+    def save_file_as(self, chat_file: "ChatFile", file_path: str) -> bool:
         """
-        对文件列表中的某个文件执行"另存为"操作。
-
-        流程:
-        1. 右键点击文件项 → 弹出微信右键菜单
-        2. 点击"另存为..."菜单项 → 弹出 Windows 文件保存对话框
-        3. 设置保存路径 → 按 Alt+S 保存
+        对文件执行"另存为"操作。
 
         Args:
-            file_cell: mmui::FileListCell 控件对象（从 get_all_files 返回的 ChatFile._cell）
+            chat_file: ChatFile 实例
             file_path: 完整的保存路径（含文件名），如 "C:\\download\\test.xlsx"
         """
-        if not self.exists:
-            raise RuntimeError("聊天文件窗口未打开")
-        self.activate()
-
-        # 确保目标目录存在
-        dir_path = os.path.dirname(file_path)
-        if dir_path:
-            os.makedirs(dir_path, exist_ok=True)
-
-        # 1. 右键点击文件项
-        input_wx.click(file_cell, button="right")
-        time.sleep(0.5)
-
-        # 2. 定位右键菜单
-        menu = self._find_context_menu_by_point()
-        if not menu:
-            raise RuntimeError("未找到右键菜单")
-
-        # 查找"另存为..."菜单项
-        save_as_item = None
-        for child in menu.GetChildren():
-            if child.Name == self.SAVE_AS_MENU_ITEM_NAME:
-                save_as_item = child
-                break
-
-        if not save_as_item:
-            raise RuntimeError("未找到'另存为'菜单项")
-
-        input_wx.click(save_as_item)
-        time.sleep(1)
-
-        # 3. 查找 Windows 文件保存对话框（聊天文件窗口的子窗口）
-        save_dialog = self._win.WindowControl(ClassName="#32770", searchDepth=3)
-        if not save_dialog.Exists(maxSearchSeconds=5):
-            raise RuntimeError("未找到 Windows 文件保存对话框")
-
-        # 定位文件名输入框
-        file_name_edit = save_dialog.EditControl(
-            AutomationId="1001", searchDepth=10
-        )
-        if not file_name_edit.Exists(maxSearchSeconds=3):
-            raise RuntimeError("未找到文件名输入框")
-
-        # file_name_edit.GetValuePattern().SetValue(file_path)
-        input_wx.send_keys(file_name_edit, file_path)
-
-        # 如果目标文件已存在，先删除（避免覆盖确认弹窗）
-        if os.path.exists(file_path):
-            os.remove(file_path)
-
-        # 快捷键保存
-        input_wx.send_keys(None, "{Alt}s")
-        if not save_dialog.Exists(maxSearchSeconds=2):
-            return True
-        else:
-            input_wx.send_keys(None, "{Esc}")
-            return False
+        return chat_file.save_as(file_path)
 
     @PIM.guard
-    def download_to(self, file_cell, file_path: str) -> bool:
+    def download_to(self, chat_file: "ChatFile", file_path: str) -> bool:
         """
-        对文件列表中的某个文件执行"下载到"操作。
-
-        流程与 save_file_as 一致，只是点击的菜单项为"下载到..."。
+        对文件执行"下载到"操作。
 
         Args:
-            file_cell: mmui::FileListCell 控件对象（从 get_all_files 返回的 ChatFile._cell）
+            chat_file: ChatFile 实例
             file_path: 完整的保存路径（含文件名），如 "C:\\download\\test.xlsx"
         """
-        if not self.exists:
-            raise RuntimeError("聊天文件窗口未打开")
-        self.activate()
-
-        # 确保目标目录存在
-        dir_path = os.path.dirname(file_path)
-        if dir_path:
-            os.makedirs(dir_path, exist_ok=True)
-
-        # 1. 右键点击文件项
-        input_wx.click(file_cell, button="right")
-        time.sleep(0.5)
-
-        # 2. 定位右键菜单
-        menu = self._find_context_menu_by_point()
-        if not menu:
-            raise RuntimeError("未找到右键菜单")
-
-        # 查找"下载到..."菜单项
-        download_to_item = None
-        for child in menu.GetChildren():
-            if child.Name == self.DOWNLOAD_TO_MENU_ITEM_NAME:
-                download_to_item = child
-                break
-
-        if not download_to_item:
-            raise RuntimeError("未找到'下载到'菜单项")
-
-        input_wx.click(download_to_item)
-        time.sleep(1)
-
-        # 3. 查找 Windows 文件保存对话框（聊天文件窗口的子窗口）
-        save_dialog = self._win.WindowControl(ClassName="#32770", searchDepth=3)
-        if not save_dialog.Exists(maxSearchSeconds=5):
-            raise RuntimeError("未找到 Windows 文件保存对话框")
-
-        # 定位文件名输入框
-        file_name_edit = save_dialog.EditControl(
-            AutomationId="1001", searchDepth=10
-        )
-        if not file_name_edit.Exists(maxSearchSeconds=3):
-            raise RuntimeError("未找到文件名输入框")
-
-        # file_name_edit.GetValuePattern().SetValue(file_path)
-        input_wx.send_keys(file_name_edit, file_path)
-
-        # 如果目标文件已存在，先删除（避免覆盖确认弹窗）
-        if os.path.exists(file_path):
-            os.remove(file_path)
-
-        # 快捷键保存
-        input_wx.send_keys(None, "{Alt}s")
-        if not save_dialog.Exists(maxSearchSeconds=2):
-            return True
-        else:
-            input_wx.send_keys(None, "{Esc}")
-            return False
+        return chat_file.download_to(file_path)
 
     @PIM.guard
-    def delete_file(self, file_cell) -> bool:
+    def delete_file(self, chat_file: "ChatFile") -> bool:
         """
-        删除文件列表中的某个文件。
-
-        流程:
-        1. 右键点击文件项 → 弹出微信右键菜单
-        2. 点击"删除"菜单项 → 弹出确认对话框
-        3. 点击确认按钮完成删除
+        删除文件。
 
         Args:
-            file_cell: mmui::FileListCell 控件对象（从 get_all_files 返回的 ChatFile._cell）
+            chat_file: ChatFile 实例
 
         Returns:
             True 删除成功，False 删除失败
         """
-        if not self.exists:
-            raise RuntimeError("聊天文件窗口未打开")
-        self.activate()
-
-        # 1. 右键点击文件项
-        input_wx.click(file_cell, button="right")
-        time.sleep(0.5)
-
-        # 2. 定位右键菜单
-        menu = self._find_context_menu_by_point()
-        if not menu:
-            raise RuntimeError("未找到右键菜单")
-
-        # 查找"删除"菜单项
-        delete_item = None
-        for child in menu.GetChildren():
-            if child.Name == self.DELETE_MENU_ITEM_NAME:
-                delete_item = child
-                break
-
-        if not delete_item:
-            raise RuntimeError("未找到'删除'菜单项")
-
-        input_wx.click(delete_item)
-        time.sleep(0.5)
-
-        # 在确认对话框中查找"删除"或"确定"按钮并点击
-        # 微信 v4 的删除确认弹窗使用 mmui::XOutlineButton，Name="删除"
-        confirm_btn = None
-
-        # 优先查找 mmui::XOutlineButton 的"删除"按钮
-        delete_btn = self._win.ButtonControl(
-            ClassName="mmui::XOutlineButton", Name="删除",
-        )
-        if delete_btn.Exists(maxSearchSeconds=2):
-            input_wx.click(delete_btn)
-            time.sleep(0.5)
-            return True
-        return False
+        return chat_file.delete()
 
     @PIM.guard
-    def download_file(self, file_cell, timeout: int = 60) -> bool:
+    def download_file(self, chat_file: "ChatFile", timeout: int = 60) -> bool:
         """
-        下载文件列表中的某个文件。
-
-        流程:
-        1. 右键点击文件项 → 弹出微信右键菜单
-        2. 点击"下载"菜单项 → 开始下载
-        3. 轮询文件状态，等待 file_status 变为空（即已下载）
+        下载文件。
 
         Args:
-            file_cell: mmui::FileListCell 控件对象（从 get_all_files 返回的 ChatFile._cell）
+            chat_file: ChatFile 实例
             timeout:   等待下载完成的超时时间（秒），默认 60 秒
 
         Returns:
             True 下载成功（状态变为已下载），False 下载超时
-
-        Raises:
-            RuntimeError: 聊天文件窗口未打开、右键菜单未弹出或未找到"下载"菜单项时抛出
         """
-        if not self.exists:
-            raise RuntimeError("聊天文件窗口未打开")
-        self.activate()
-
-        # 1. 右键点击文件项
-        input_wx.click(file_cell, button="right")
-        time.sleep(0.5)
-
-        # 2. 定位右键菜单
-        menu = self._find_context_menu_by_point()
-        if not menu:
-            raise RuntimeError("未找到右键菜单")
-
-        # 查找"下载"菜单项
-        download_item = None
-        for child in menu.GetChildren():
-            if child.Name == self.DOWNLOAD_MENU_ITEM_NAME:
-                download_item = child
-                break
-
-        if not download_item:
-            raise RuntimeError("未找到'下载'菜单项，文件可能已下载")
-
-        input_wx.click(download_item)
-        time.sleep(0.5)
-
-        # 3. 轮询文件状态，等待下载完成
-        # 下载完成后，文件的 Name 属性中不再包含"将在X天后无法下载"等状态文本，
-        # 即 parse_file_cell_text 解析出的 file_status 为空字符串。
-        deadline = time.monotonic() + timeout
-        while time.monotonic() < deadline:
-            # 重新读取文件项的 Name 属性（下载过程中会实时更新）
-            cell_text = file_cell.Name
-            if not cell_text:
-                time.sleep(1)
-                continue
-
-            chat_file = self.parse_file_cell_text(cell_text)
-            if chat_file and not chat_file.file_status:
-                # file_status 为空表示已下载
-                return True
-
-            time.sleep(1)
-
-        return False
+        return chat_file.download(timeout)
 
     def parse_file_cell_text(self, cell_text: str) -> Optional[ChatFile]:
         """
