@@ -1733,6 +1733,63 @@ class Message:
         time.sleep(0.3)
         return True
 
+    def refer(self) -> bool:
+        """
+        引用此条消息。
+
+        流程:
+        1. hover() 将消息滚动到可见区域并将鼠标移到气泡位置
+        2. 在当前鼠标位置右键点击，弹出上下文菜单
+        3. 在菜单中点击"引用"
+
+        右键菜单控件结构:
+        - 菜单窗口: WindowControl, ClassName="mmui::XMenu"
+        - 菜单项: MenuItemControl, ClassName="mmui::XMenuView",
+                  AutomationId="XMenuItem", Name="引用"
+
+        Returns:
+            True 引用成功（菜单已点击），False 操作失败
+
+        Raises:
+            RuntimeError: 消息未关联 chat、控件未找到或菜单未弹出时抛出
+        """
+        if not self.chat:
+            raise RuntimeError("消息未关联聊天窗口，无法执行引用操作")
+
+        self.chat._activate_window()
+
+        if not self.hover():
+            raise RuntimeError("无法将消息滚动到可见区域或悬浮失败")
+
+        # hover 后鼠标已在气泡位置，原地右键即可
+        if not background:
+            x, y = auto.GetCursorPos()
+            auto.RightClick(x, y)
+        else:
+            target = self._find_ctrl()
+            if not target:
+                raise RuntimeError("未找到消息控件")
+            input_wx.click(target, button="right")
+
+        # 查找右键菜单
+        win = self.chat._win
+        menu_win = win.WindowControl(ClassName="mmui::XMenu")
+        if not menu_win.Exists(maxSearchSeconds=2):
+            raise RuntimeError("右键菜单未弹出")
+
+        # 点击"引用"菜单项
+        refer_item = menu_win.MenuItemControl(
+            ClassName="mmui::XMenuView",
+            AutomationId="XMenuItem",
+            Name="引用",
+        )
+        if not refer_item.Exists(maxSearchSeconds=1):
+            input_wx.send_keys(win, "{Esc}")
+            raise RuntimeError("右键菜单中未找到'引用'选项")
+
+        input_wx.click(refer_item)
+        return True
+
 
 class TextMessage(Message):
     """文本消息"""
