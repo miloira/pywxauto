@@ -1583,6 +1583,7 @@ class Message:
         self.status: MessageStatus = status
         self.runtime_id: tuple = runtime_id
         self.bubble_rect: tuple = bubble_rect
+        self.msg_id: int = 0  # 消息唯一标识，由 get_visible_messages 计算
         self.chat: object = None
         self.pid: int = 0  # 来源微信客户端的进程 PID
 
@@ -1594,6 +1595,7 @@ class Message:
         result = {
             "type": self.__class__.__name__,
             "type_label": self.type_label,
+            "msg_id": self.msg_id,
             "sender": self.sender,
             "sender_type": self.sender_type.value,
             "content": self.content,
@@ -1601,7 +1603,7 @@ class Message:
             "status": self.status.value,
         }
         _base_keys = {"sender", "sender_type", "content", "raw_name",
-                      "status", "runtime_id", "chat"}
+                      "status", "runtime_id", "chat", "msg_id"}
         for key, value in self.__dict__.items():
             if key.startswith("_") or key in _base_keys:
                 continue
@@ -1702,12 +1704,12 @@ class Message:
             return False
 
         rect = target.BoundingRectangle
-        cy = (rect.top + rect.bottom) // 2
+        cy = (rect.top + rect.bottom) // 2 - 10 # 向上偏移10px保证引用消息悬浮位置正确
 
         if self.bubble_rect:
             bl, bt, br, bb = self.bubble_rect
+            # bubble_rect 的 x 坐标不变，y 坐标从控件实时位置重新计算
             cx = (bl + br) // 2
-            cy = (bt + bb) // 2
         elif self.sender_type == SenderType.SELF:
             cx = rect.right - rect.width() // 4
         elif self.sender_type == SenderType.FRIEND:
@@ -1730,7 +1732,6 @@ class Message:
                 client_x, client_y = win32gui.ScreenToClient(hwnd, (cx, cy))
                 input_wm.move_window(hwnd, client_x, client_y)
 
-        time.sleep(0.3)
         return True
 
     def refer(self) -> bool:
@@ -6331,6 +6332,33 @@ class Chat:
         if field.Exists(maxSearchSeconds=2):
             input_wx.send_keys(field, "{Ctrl}a{Del}")
 
+    def _resolve_reply_to(self, reply_to: "Message | int | None") -> None:
+        """
+        解析 reply_to 参数并执行引用操作。
+
+        Args:
+            reply_to: 支持三种类型：
+                - None: 不引用
+                - Message: 直接调用 refer()
+                - int (msg_id): 从当前可见消息中查找匹配的消息并 refer()
+
+        Raises:
+            ValueError: msg_id 未在当前可见消息中找到时抛出
+        """
+        if reply_to is None:
+            return
+        if isinstance(reply_to, Message):
+            reply_to.refer()
+            return
+        if isinstance(reply_to, int):
+            messages = self.get_visible_messages()
+            for msg in messages:
+                if msg.msg_id == reply_to:
+                    msg.refer()
+                    return
+            raise ValueError(f"当前可见消息中未找到 msg_id={reply_to} 的消息")
+        raise TypeError(f"reply_to 参数类型错误: {type(reply_to)}, 支持 Message | int | None")
+
     def _find_last_self_message_ctrl(
         self, class_names: set[str],
     ) -> Optional[auto.Control]:
@@ -6827,17 +6855,20 @@ class Chat:
         return len(text) if text else 0
 
     @PIM.guard
-    def send_text(self, content: str, timeout: float = 0) -> MessageStatus:
+    def send_text(self, content: str, reply_to: "Message | int | None" = None, timeout: float = 0) -> MessageStatus:
         """
         在当前会话中发送文本，返回发送状态。
 
         Args:
             content: 文本内容
+            reply_to: 要引用的消息，支持 Message 对象或 msg_id (int)，None 不引用
             timeout: 状态检测超时时间（秒），大于 0 时轮询等待发送完成，默认 0 不等待
 
         前台模式：ValuePattern 设置文本 + 点击发送按钮
         后台模式：ValuePattern 设置文本 + send_keys 回车发送
         """
+        self._resolve_reply_to(reply_to)
+
         self._activate_window()
 
         field = self._input_field
@@ -6859,45 +6890,51 @@ class Chat:
         return self.check_text_message_status(content, timeout=timeout)
 
     @PIM.guard
-    def send_file(self, file_path: "str | list[str]", timeout: float = 0) -> MessageStatus:
+    def send_file(self, file_path: "str | list[str]", reply_to: "Message | int | None" = None, timeout: float = 0) -> MessageStatus:
         """
         在当前会话中发送文件，返回最后一个文件的发送状态。
 
         Args:
             file_path: 文件路径或路径列表，支持本地路径和网络 URL
+            reply_to:  要引用的消息，支持 Message 对象或 msg_id (int)，None 不引用
             timeout:   状态检测超时时间（秒），大于 0 时轮询等待传输完成，默认 0 不等待
 
         Returns:
             最后一个文件的发送状态
         """
+        self._resolve_reply_to(reply_to)
         return self._send_media(file_path, "文件", self.check_file_message_status, timeout)
 
     @PIM.guard
-    def send_image(self, file_path: "str | list[str]", timeout: float = 0) -> MessageStatus:
+    def send_image(self, file_path: "str | list[str]", reply_to: "Message | int | None" = None, timeout: float = 0) -> MessageStatus:
         """
         在当前会话中发送图片，返回最后一张图片的发送状态。
 
         Args:
             file_path: 图片路径或路径列表，支持本地路径和网络 URL
+            reply_to:  要引用的消息，支持 Message 对象或 msg_id (int)，None 不引用
             timeout:   状态检测超时时间（秒），大于 0 时轮询等待发送完成，默认 0 不等待
 
         Returns:
             最后一张图片的发送状态
         """
+        self._resolve_reply_to(reply_to)
         return self._send_media(file_path, "图片", self.check_image_message_status, timeout)
 
     @PIM.guard
-    def send_video(self, file_path: "str | list[str]", timeout: float = 0) -> MessageStatus:
+    def send_video(self, file_path: "str | list[str]", reply_to: "Message | int | None" = None, timeout: float = 0) -> MessageStatus:
         """
         在当前会话中发送视频，返回最后一个视频的发送状态。
 
         Args:
             file_path: 视频路径或路径列表，支持本地路径和网络 URL
+            reply_to:  要引用的消息，支持 Message 对象或 msg_id (int)，None 不引用
             timeout:   状态检测超时时间（秒），大于 0 时轮询等待上传完成，默认 0 不等待
 
         Returns:
             最后一个视频的发送状态
         """
+        self._resolve_reply_to(reply_to)
         return self._send_media(file_path, "视频", self.check_video_message_status, timeout)
 
     def _send_media(self, file_path: "str | list[str]", label: str,
@@ -7052,15 +7089,18 @@ class Chat:
         time.sleep(0.5)
 
     @PIM.guard
-    def send_at(self, content: str, at_members: list[str], timeout: float = 0) -> MessageStatus:
+    def send_at(self, content: str, at_members: list[str], reply_to: "Message | int | None" = None, timeout: float = 0) -> MessageStatus:
         """
         在当前群聊会话中 @指定成员并发送消息，返回发送状态。
 
         Args:
             content:    消息正文（追加在 @成员 之后）
             at_members: 要 @ 的成员昵称列表，传 ["所有人"] 可 @所有人
+            reply_to:   要引用的消息，支持 Message 对象或 msg_id (int)，None 不引用
             timeout:    状态检测超时时间（秒），大于 0 时轮询等待发送完成，默认 0 不等待
         """
+        self._resolve_reply_to(reply_to)
+
         self._activate_window()
         self.clear_input()
         field = self._input_field
@@ -7228,7 +7268,7 @@ class Chat:
         return None
 
     @PIM.guard
-    def send_collection(self, keyword: str, timeout: float = 0) -> MessageStatus:
+    def send_collection(self, keyword: str, reply_to: "Message | int | None" = None, timeout: float = 0) -> MessageStatus:
         """
         在当前会话中发送收藏内容。
 
@@ -7241,6 +7281,7 @@ class Chat:
 
         Args:
             keyword: 搜索关键词，输入到收藏面板的搜索框中。
+            reply_to: 要引用的消息，支持 Message 对象或 msg_id (int)，None 不引用
             timeout: 状态检测超时时间（秒），大于 0 时轮询等待发送完成，默认 0 不等待
 
         Returns:
@@ -7252,6 +7293,8 @@ class Chat:
         """
         if not keyword:
             raise ValueError("keyword 不能为空")
+
+        self._resolve_reply_to(reply_to)
 
         self._activate_window()
 
@@ -7330,7 +7373,7 @@ class Chat:
     #     Name 格式: "{关键词}表情，来自{来源}"，支持 InvokePattern 直接点击发送。
 
     @PIM.guard
-    def send_emotion(self, keyword: str = None, index: int = 1, timeout: float = 0) -> MessageStatus:
+    def send_emotion(self, keyword: str = None, index: int = 1, reply_to: "Message | int | None" = None, timeout: float = 0) -> MessageStatus:
         """
         在当前会话中发送表情。
 
@@ -7341,6 +7384,7 @@ class Chat:
             keyword: 表情搜索关键词，如 "哈喽"、"开心" 等。
                 为 None 时发送自定义表情。
             index:   选择第几个表情，从 1 开始，默认为 1。
+            reply_to: 要引用的消息，支持 Message 对象或 msg_id (int)，None 不引用
             timeout: 状态检测超时时间（秒），大于 0 时轮询等待发送完成，默认 0 不等待
 
         Returns:
@@ -7352,6 +7396,8 @@ class Chat:
         """
         if index < 1:
             raise ValueError("index 必须 >= 1")
+
+        self._resolve_reply_to(reply_to)
 
         self._activate_window()
 
@@ -8079,6 +8125,7 @@ class Chat:
                                       runtime_id=rid)
             msg.bubble_rect = bubble_rect
             msg.chat = self
+            msg.msg_id = hash((rid, msg.__class__.__name__, raw_name, sender_type, msg.content))
             messages.append(msg)
         return messages
 
@@ -12179,33 +12226,33 @@ class WeixinClient(WeixinWindow):
     def close_session(self, nickname: str) -> None:
         return self.session.close(nickname)
 
-    def send_text(self, nickname: str, content: str, timeout: float = 0) -> MessageStatus:
+    def send_text(self, nickname: str, content: str, reply_to: "Message | int | None" = None, timeout: float = 0) -> MessageStatus:
         """发送文本"""
-        return self.chat_with(nickname).send_text(content, timeout)
+        return self.chat_with(nickname).send_text(content, reply_to=reply_to, timeout=timeout)
 
-    def send_file(self, nickname: str, file_path: "str | list[str]", timeout: float = 0) -> MessageStatus:
+    def send_file(self, nickname: str, file_path: "str | list[str]", reply_to: "Message | int | None" = None, timeout: float = 0) -> MessageStatus:
         """发送文件"""
-        return self.chat_with(nickname).send_file(file_path, timeout)
+        return self.chat_with(nickname).send_file(file_path, reply_to=reply_to, timeout=timeout)
 
-    def send_image(self, nickname: str, file_path: "str | list[str]", timeout: float = 0) -> MessageStatus:
+    def send_image(self, nickname: str, file_path: "str | list[str]", reply_to: "Message | int | None" = None, timeout: float = 0) -> MessageStatus:
         """发送图片"""
-        return self.chat_with(nickname).send_image(file_path, timeout)
+        return self.chat_with(nickname).send_image(file_path, reply_to=reply_to, timeout=timeout)
 
-    def send_video(self, nickname: str, file_path: "str | list[str]", timeout: float = 0) -> MessageStatus:
+    def send_video(self, nickname: str, file_path: "str | list[str]", reply_to: "Message | int | None" = None, timeout: float = 0) -> MessageStatus:
         """发送视频"""
-        return self.chat_with(nickname).send_video(file_path, timeout)
+        return self.chat_with(nickname).send_video(file_path, reply_to=reply_to, timeout=timeout)
 
-    def send_at(self, nickname: str, content: str, at_members: list[str], timeout: float = 0) -> MessageStatus:
+    def send_at(self, nickname: str, content: str, at_members: list[str], reply_to: "Message | int | None" = None, timeout: float = 0) -> MessageStatus:
         """发送群@消息"""
-        return self.chat_with(nickname).send_at(content, at_members, timeout)
+        return self.chat_with(nickname).send_at(content, at_members, reply_to=reply_to, timeout=timeout)
 
-    def send_collection(self, nickname: str, keyword: str, timeout: float = 0) -> MessageStatus:
+    def send_collection(self, nickname: str, keyword: str, reply_to: "Message | int | None" = None, timeout: float = 0) -> MessageStatus:
         """发送收藏内容"""
-        return self.chat_with(nickname).send_collection(keyword, timeout)
+        return self.chat_with(nickname).send_collection(keyword, reply_to=reply_to, timeout=timeout)
 
-    def send_emotion(self, nickname: str, keyword: str = None, index: int = 1, timeout: float = 0) -> MessageStatus:
+    def send_emotion(self, nickname: str, keyword: str = None, index: int = 1, reply_to: "Message | int | None" = None, timeout: float = 0) -> MessageStatus:
         """发送表情"""
-        return self.chat_with(nickname).send_emotion(keyword, index, timeout)
+        return self.chat_with(nickname).send_emotion(keyword, index, reply_to=reply_to, timeout=timeout)
 
     def send_card(self, nickname: str, share: str) -> bool:
         """发送名片"""
@@ -13757,33 +13804,33 @@ class Weixin:
 
     # ---- 消息发送 ----
 
-    def send_text(self, pid: int, nickname: str, content: str, timeout: float = 0) -> "MessageStatus":
+    def send_text(self, pid: int, nickname: str, content: str, reply_to: "Message | int | None" = None, timeout: float = 0) -> "MessageStatus":
         """发送文本"""
-        return self.get_client(pid).send_text(nickname, content, timeout)
+        return self.get_client(pid).send_text(nickname, content, reply_to=reply_to, timeout=timeout)
 
-    def send_file(self, pid: int, nickname: str, file_path: "str | list[str]", timeout: float = 0) -> "MessageStatus":
+    def send_file(self, pid: int, nickname: str, file_path: "str | list[str]", reply_to: "Message | int | None" = None, timeout: float = 0) -> "MessageStatus":
         """发送文件"""
-        return self.get_client(pid).send_file(nickname, file_path, timeout)
+        return self.get_client(pid).send_file(nickname, file_path, reply_to=reply_to, timeout=timeout)
 
-    def send_image(self, pid: int, nickname: str, file_path: "str | list[str]", timeout: float = 0) -> "MessageStatus":
+    def send_image(self, pid: int, nickname: str, file_path: "str | list[str]", reply_to: "Message | int | None" = None, timeout: float = 0) -> "MessageStatus":
         """发送图片"""
-        return self.get_client(pid).send_image(nickname, file_path, timeout)
+        return self.get_client(pid).send_image(nickname, file_path, reply_to=reply_to, timeout=timeout)
 
-    def send_video(self, pid: int, nickname: str, file_path: "str | list[str]", timeout: float = 0) -> "MessageStatus":
+    def send_video(self, pid: int, nickname: str, file_path: "str | list[str]", reply_to: "Message | int | None" = None, timeout: float = 0) -> "MessageStatus":
         """发送视频"""
-        return self.get_client(pid).send_video(nickname, file_path, timeout)
+        return self.get_client(pid).send_video(nickname, file_path, reply_to=reply_to, timeout=timeout)
 
-    def send_at(self, pid: int, nickname: str, content: str, at_members: list[str], timeout: float = 0) -> "MessageStatus":
+    def send_at(self, pid: int, nickname: str, content: str, at_members: list[str], reply_to: "Message | int | None" = None, timeout: float = 0) -> "MessageStatus":
         """发送群@消息"""
-        return self.get_client(pid).send_at(nickname, content, at_members, timeout)
+        return self.get_client(pid).send_at(nickname, content, at_members, reply_to=reply_to, timeout=timeout)
 
-    def send_emotion(self, pid: int, nickname: str, keyword: str = None, index: int = 1, timeout: float = 0) -> "MessageStatus":
+    def send_emotion(self, pid: int, nickname: str, keyword: str = None, index: int = 1, reply_to: "Message | int | None" = None, timeout: float = 0) -> "MessageStatus":
         """发送表情"""
-        return self.get_client(pid).send_emotion(nickname, keyword, index, timeout)
+        return self.get_client(pid).send_emotion(nickname, keyword, index, reply_to=reply_to, timeout=timeout)
 
-    def send_collection(self, pid: int, nickname: str, keyword: str, timeout: float = 0) -> "MessageStatus":
+    def send_collection(self, pid: int, nickname: str, keyword: str, reply_to: "Message | int | None" = None, timeout: float = 0) -> "MessageStatus":
         """发送收藏内容"""
-        return self.get_client(pid).send_collection(nickname, keyword, timeout)
+        return self.get_client(pid).send_collection(nickname, keyword, reply_to=reply_to, timeout=timeout)
 
     def send_card(self, pid: int, nickname: str, share: str) -> bool:
         """发送名片"""
