@@ -2423,7 +2423,7 @@ class Login(WeixinWindow):
             raise WindowNotFoundError("微信登录窗口未找到")
 
     @property
-    def nickname(self) -> str:
+    def nickname(self) -> Optional[str]:
         """
         获取当前登录用户昵称。
 
@@ -2438,8 +2438,8 @@ class Login(WeixinWindow):
             AutomationId=self.NICKNAME_ID,
         )
         if not txt.Exists(maxSearchSeconds=2):
-            return ""
-        name = txt.Name or ""
+            return None
+        name = txt.Name or None
         prefix = "当前登录用户"
         if name.startswith(prefix):
             return name[len(prefix):]
@@ -2496,7 +2496,6 @@ class Login(WeixinWindow):
         if not btn.Exists(maxSearchSeconds=2):
             raise RuntimeError("未找到'切换账号'按钮")
         input_wx.click(btn)
-        time.sleep(0.5)
 
     def get_qrcode(self) -> bytes:
         """
@@ -2547,7 +2546,6 @@ class Login(WeixinWindow):
         if not btn.Exists(maxSearchSeconds=2):
             raise RuntimeError("未找到'仅传输文件'按钮")
         input_wx.click(btn)
-        time.sleep(0.5)
 
     # ---- 网络代理设置相关控件信息 ----
     # 代理设置页面在 LoginWindow 内部通过 QStackedWidget 切换显示，
@@ -2633,7 +2631,6 @@ class Login(WeixinWindow):
         if not btn.Exists(maxSearchSeconds=2):
             raise RuntimeError("未找到'返回'按钮")
         input_wx.click(btn)
-        time.sleep(0.5)
 
     @property
     def is_proxy_enabled(self) -> bool:
@@ -2674,7 +2671,6 @@ class Login(WeixinWindow):
         if not sw.Exists(maxSearchSeconds=2):
             raise RuntimeError("未找到'使用代理'开关")
         input_wx.click(sw)
-        time.sleep(0.5)
 
     @PIM.guard
     def disable_proxy(self) -> None:
@@ -2694,7 +2690,6 @@ class Login(WeixinWindow):
         if not sw.Exists(maxSearchSeconds=2):
             raise RuntimeError("未找到'使用代理'开关")
         input_wx.click(sw)
-        time.sleep(0.5)
 
     def _find_proxy_edit(self, name: str) -> auto.EditControl:
         """
@@ -2733,7 +2728,6 @@ class Login(WeixinWindow):
             vp.SetValue(value)
         else:
             input_wx.send_keys(edit, value)
-        time.sleep(0.2)
 
     def _get_proxy_field(self, name: str) -> str:
         """获取代理表单字段的值"""
@@ -2744,8 +2738,13 @@ class Login(WeixinWindow):
         return ""
 
     @PIM.guard
-    def set_proxy(self, address: str = "", port: str = "",
-                  username: str = "", password: str = "") -> None:
+    def set_proxy(
+        self, 
+        address: Optional[str] = None, 
+        port: Optional[str] = None,
+        username: Optional[str] = None, 
+        password: Optional[str] = None
+    ) -> None:
         """
         设置代理参数。
 
@@ -2819,35 +2818,18 @@ class Login(WeixinWindow):
         if not btn.Exists(maxSearchSeconds=2):
             raise RuntimeError("未找到'保存'按钮")
         input_wx.click(btn)
-        time.sleep(0.5)
 
     @PIM.guard
-    def close(self, event: bool = True, simulate_move: bool = True) -> None:
-        """
-        关闭登录窗口。
-
-        Args:
-            event: True — 通过 WindowPattern 关闭（默认）
-                         False — 点击标题栏"关闭"按钮
-            simulate_move: 是否模拟鼠标移动（仅 event=False 时有效）
-        """
+    def close(self) -> None:
         self._ensure_exists()
-        if event:
-            wp = self._win.GetWindowPattern()
-            if wp:
-                wp.Close()
-            else:
-                raise RuntimeError("登录窗口不支持 WindowPattern.Close")
-        else:
-            self.activate()
-            btn = self._win.ButtonControl(
-                ClassName="mmui::XButton",
-                Name="关闭",
-            )
-            if not btn.Exists(maxSearchSeconds=1):
-                raise RuntimeError("未找到关闭按钮")
-            input_wx.click(btn)
-        time.sleep(0.3)
+        self.activate()
+        btn = self._win.ButtonControl(
+            ClassName="mmui::XButton",
+            Name="关闭",
+        )
+        if not btn.Exists(maxSearchSeconds=1):
+            raise RuntimeError("未找到关闭按钮")
+        input_wx.click(btn)
 
     def __str__(self) -> str:
         if not self._win.Exists(0, 0):
@@ -2916,22 +2898,22 @@ class VoipCall(WeixinWindow):
         raise RuntimeError(f"工具栏中未找到按钮: {names}")
 
     @property
-    def contact_name(self) -> str:
+    def contact_name(self) -> Optional[str]:
         """获取通话对方名称"""
         self._ensure_exists()
         txt = self._win.TextControl(
             AutomationId="voip_caller_view.voip_caller_name",
         )
-        return txt.Name if txt.Exists(0, 0) else ""
+        return txt.Name if txt.Exists(0, 0) else None
 
     @property
-    def status(self) -> str:
+    def status(self) -> Optional[str]:
         """获取通话状态文本（如 '等待对方接受邀请...'、'通话中 01:23'）"""
         self._ensure_exists()
         txt = self._win.TextControl(
             AutomationId="voip_caller_view.voip_caller_tips",
         )
-        return txt.Name if txt.Exists(0, 0) else ""
+        return txt.Name if txt.Exists(0, 0) else None
 
     @property
     def is_mic_on(self) -> bool:
@@ -2974,35 +2956,30 @@ class VoipCall(WeixinWindow):
         """切换麦克风开关"""
         btn = self._find_toolbar_button("麦克风已开", "麦克风已关")
         input_wx.click(btn)
-        time.sleep(0.3)
 
     @PIM.guard
     def toggle_speaker(self) -> None:
         """切换扬声器开关"""
         btn = self._find_toolbar_button("扬声器已开", "扬声器已关")
         input_wx.click(btn)
-        time.sleep(0.3)
 
     @PIM.guard
     def toggle_camera(self) -> None:
         """切换摄像头开关（仅视频通话）"""
         btn = self._find_toolbar_button("摄像头已开", "摄像头已关", "无摄像头")
         input_wx.click(btn)
-        time.sleep(0.3)
 
     @PIM.guard
     def cancel(self) -> None:
         """取消通话（呼叫中未接通时）"""
         btn = self._find_toolbar_button("取消")
         input_wx.click(btn)
-        time.sleep(0.3)
 
     @PIM.guard
     def hangup(self) -> None:
         """挂断通话（通话中）"""
         btn = self._find_toolbar_button("挂断")
         input_wx.click(btn)
-        time.sleep(0.3)
 
     @PIM.guard
     def end_call(self) -> None:
@@ -3012,14 +2989,12 @@ class VoipCall(WeixinWindow):
         except RuntimeError:
             raise RuntimeError("未找到取消或挂断按钮")
         input_wx.click(btn)
-        time.sleep(0.3)
 
     @PIM.guard
     def switch_to_video(self) -> None:
         """切换到视频通话（通话中可用）"""
         btn = self._find_toolbar_button("切换到视频通话")
         input_wx.click(btn)
-        time.sleep(0.3)
 
     def __str__(self) -> str:
         if not self._win.Exists(0, 0):
@@ -3070,17 +3045,17 @@ class NoteEditor(WeixinWindow):
             Name=self.WINDOW_NAME,
             ProcessId=wx.pid
         )
-        if not win.Exists(maxSearchSeconds=5):
+        if not win.Exists(0, 0):
             raise RuntimeError("笔记编辑窗口未找到")
-        self._handle = win.NativeWindowHandle
+        self._hwnd = win.NativeWindowHandle
         self._win = win
 
     @property
     def exists(self) -> bool:
         """窗口是否存在（通过句柄刷新后检测）"""
-        if self._handle:
+        if self._hwnd:
             try:
-                self._win = auto.ControlFromHandle(self._handle)
+                self._win = auto.ControlFromHandle(self._hwnd)
             except Exception:
                 return False
         return self._win.Exists(0, 0)
@@ -3121,7 +3096,6 @@ class NoteEditor(WeixinWindow):
             container = self._main_container
             if container.Exists(maxSearchSeconds=2):
                 input_wx.click(container)
-                time.sleep(0.3)
 
     def _editor_shortcut(self, keys: str, force_click: bool = False, delay: float = 0.1) -> None:
         """向编辑器发送快捷键的通用方法"""
@@ -3130,12 +3104,12 @@ class NoteEditor(WeixinWindow):
         time.sleep(delay)
 
     @property
-    def content(self) -> str:
+    def content(self) -> Optional[str]:
         """读取编辑器当前内容（优先 ValuePattern，备选 TextPattern）"""
         self._ensure_exists()
         editor = self._editor
         if not editor.Exists(maxSearchSeconds=2):
-            return ""
+            return None
         vp = editor.GetValuePattern()
         if vp and vp.Value:
             return vp.Value
@@ -3143,8 +3117,8 @@ class NoteEditor(WeixinWindow):
         if tp:
             doc_range = tp.DocumentRange
             if doc_range:
-                return doc_range.GetText(-1) or ""
-        return ""
+                return doc_range.GetText(-1) or None
+        return None
 
     @PIM.guard
     def set_content(self, text: str) -> None:
@@ -3157,7 +3131,6 @@ class NoteEditor(WeixinWindow):
         if not vp:
             raise RuntimeError("编辑器不支持 ValuePattern")
         vp.SetValue(text)
-        time.sleep(0.3)
 
     @PIM.guard
     def type_text(self, text: str) -> None:
@@ -3167,7 +3140,6 @@ class NoteEditor(WeixinWindow):
         if not editor.Exists(maxSearchSeconds=2):
             raise RuntimeError("未找到笔记编辑器输入控件")
         input_wx.send_keys(editor, text)
-        time.sleep(0.2)
 
     @PIM.guard
     def clear(self) -> None:
@@ -3189,14 +3161,12 @@ class NoteEditor(WeixinWindow):
         self.focus_editor(force_click=False)
         ctypes.windll.user32.keybd_event(0x11, 0, 0, 0)  # VK_CONTROL down
         ctypes.windll.user32.keybd_event(0x5B, 0, 0, 0)  # VK_LWIN down
-        time.sleep(0.1)
 
     @PIM.guard
     def end_voice_input(self) -> None:
         """结束语音输入：释放 Ctrl+Win 按键"""
         ctypes.windll.user32.keybd_event(0x5B, 0, 0x2, 0)  # VK_LWIN up
         ctypes.windll.user32.keybd_event(0x11, 0, 0x2, 0)  # VK_CONTROL up
-        time.sleep(0.1)
 
     @PIM.guard
     def add_file(self, file_path: str) -> None:
@@ -3217,7 +3187,6 @@ class NoteEditor(WeixinWindow):
         input_wx.send_keys(edit, file_path)
         time.sleep(0.3)
         input_wx.send_keys(dlg, "{Alt}O")
-        time.sleep(0.5)
 
     @PIM.guard
     def bold(self) -> None:
@@ -3278,7 +3247,6 @@ class NoteEditor(WeixinWindow):
             input_wx.send_keys(None, "{Enter}")
             time.sleep(0.3)
         input_wx.send_keys(None, "{Esc}")
-        time.sleep(0.2)
 
     @PIM.guard
     def paste(self) -> None:
@@ -3290,7 +3258,6 @@ class NoteEditor(WeixinWindow):
         """通过剪贴板粘贴文件到笔记中"""
         self.focus_editor()
         input_wx.paste([file_path])
-        time.sleep(0.5)
 
     def __str__(self) -> str:
         if not self.exists:
@@ -4278,7 +4245,7 @@ class Moment:
 
         如果已点赞则不重复操作，返回 True。
         """
-        self.friend_circle._open_sns_window()
+        self.friend_circle._open_window()
         ctrl = self._find_cell()
         if not ctrl:
             raise RuntimeError(f"未找到朋友圈动态: {self.sender}")
@@ -4313,7 +4280,7 @@ class Moment:
 
         如果未点赞则不操作，返回 True。
         """
-        self.friend_circle._open_sns_window()
+        self.friend_circle._open_window()
         ctrl = self._find_cell()
         if not ctrl:
             raise RuntimeError(f"未找到朋友圈动态: {self.sender}")
@@ -4346,7 +4313,7 @@ class Moment:
         if not content or not content.strip():
             raise ValueError("评论内容不能为空")
 
-        self.friend_circle._open_sns_window()
+        self.friend_circle._open_window()
         ctrl = self._find_cell()
         if not ctrl:
             raise RuntimeError(f"未找到朋友圈动态: {self.sender}")
@@ -4375,7 +4342,7 @@ class Moment:
 
     def scroll_to_visible(self) -> bool:
         """将此条动态滚动到可见区域"""
-        self.friend_circle._open_sns_window()
+        self.friend_circle._open_window()
         ctrl = self._find_cell()
         if not ctrl:
             raise RuntimeError(f"未找到朋友圈动态: {self.sender}")
@@ -4563,12 +4530,7 @@ class FriendCircle(WeixinWindow):
             searchDepth=1
         )
 
-    @property
-    def exists(self) -> bool:
-        """朋友圈窗口是否存在"""
-        return self._win.Exists(maxSearchSeconds=1)
-
-    def _open_sns_window(self) -> None:
+    def _open_window(self) -> None:
         """
         打开朋友圈独立窗口。
 
@@ -4757,7 +4719,7 @@ class FriendCircle(WeixinWindow):
         Returns:
             Moment 列表，长度 <= count
         """
-        self._open_sns_window()
+        self._open_window()
 
         if position == "top":
             refresh_btn = self._win.ButtonControl(
@@ -4843,7 +4805,7 @@ class FriendCircle(WeixinWindow):
         if PIM._running and PIM.idle_wait > 0:
             PIM.wait_for_idle(PIM.idle_wait)
 
-        self._open_sns_window()
+        self._open_window()
 
         if position == "top":
             refresh_btn = self._win.ButtonControl(
@@ -5077,7 +5039,6 @@ class FriendCircle(WeixinWindow):
 
         # Alt+O 打开
         input_wx.send_keys(file_dlg, "{Alt}O")
-        time.sleep(1)
 
     def _set_remind_contacts(self, panel: auto.Control,
                              contacts: list[str]) -> None:
@@ -5192,7 +5153,6 @@ class FriendCircle(WeixinWindow):
         if not confirm_btn.Exists(maxSearchSeconds=2):
             raise RuntimeError("未找到隐私设置'确定'按钮")
         input_wx.click(confirm_btn)
-        time.sleep(0.5)
 
     def _select_in_session_picker(
         self,
@@ -5330,7 +5290,6 @@ class FriendCircle(WeixinWindow):
         if not confirm_btn.Exists(maxSearchSeconds=2):
             raise RuntimeError("未找到'完成'按钮")
         input_wx.click(confirm_btn)
-        time.sleep(0.5)
 
     @PIM.guard
     def publish(self, text: Optional[str] = None, images: list[str] = None,
@@ -5365,7 +5324,7 @@ class FriendCircle(WeixinWindow):
         if not text and not has_media:
             raise ValueError("text 和 images/video 至少指定一个")
 
-        self._open_sns_window()
+        self._open_window()
 
         # 右键"发表"按钮弹出菜单
         publish_tab = self._find_toolbar_button(self.PUBLISH_TAB_NAME)
@@ -5497,10 +5456,9 @@ class FriendCircle(WeixinWindow):
 
         点击工具栏"刷新"按钮，回到列表顶部并加载最新动态。
         """
-        self._open_sns_window()
+        self._open_window()
         btn = self._find_toolbar_button("刷新")
         input_wx.click(btn)
-        time.sleep(2)
 
     def __str__(self) -> str:
         return "FriendCircle(朋友圈)"
@@ -6199,10 +6157,10 @@ class Chat:
         return None
 
     @property
-    def chat_name(self) -> str:
+    def chat_name(self) -> Optional[str]:
         """获取当前聊天对象名称（优先返回备注，无备注时返回原始名称）"""
         label = self._find_title_label()
-        return label.Name if label else ""
+        return label.Name if label else None
 
     @property
     def nickname(self) -> Optional[str]:
@@ -6259,7 +6217,6 @@ class Chat:
         field = self._input_field
         if field.Exists(maxSearchSeconds=2):
             input_wx.send_keys(field, "{Ctrl}a{Del}")
-            time.sleep(0.1)
 
     # -- 发送消息 --
 
@@ -11803,10 +11760,9 @@ class SeparateChat(Chat, WeixinWindow):
         # 最小化的窗口需要先还原才能激活
         if self.is_minimized:
             self.restore()
-            time.sleep(0.3)
+
         self._window.SetActive()
         self._window.SetFocus()
-        time.sleep(0.2)
 
     def move_offscreen(self) -> None:
         """将窗口移到屏幕外（不可见但仍处于正常状态）。"""
@@ -11835,8 +11791,7 @@ class SeparateChat(Chat, WeixinWindow):
     def __str__(self) -> str:
         if not self._win.Exists(0, 0):
             return "SeparateChat(closed)"
-        pid = self.wx.pid if self.wx else 0
-        return (f"SeparateChat(pid={pid}, chat_type={self.chat_type!r}, "
+        return (f"SeparateChat(pid={self.wx.pid}, chat_type={self.chat_type!r}, "
                 f"name={self.chat_name!r})")
 
     def __repr__(self) -> str:
