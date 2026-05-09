@@ -6277,8 +6277,8 @@ class FriendCircle(WeixinWindow):
         # 输入文字内容
         if text:
             edit = self._find_publish_input(panel)
-            # edit.GetValuePattern().SetValue(text)
-            input_wx.send_keys(edit, text)
+            edit.GetValuePattern().SetValue(text)
+            # input_wx.send_keys(edit, text)
 
         # 设置提醒谁看
         if remind_contacts:
