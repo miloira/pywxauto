@@ -13007,7 +13007,7 @@ class WeixinClient(WeixinWindow):
                 searchDepth=1
             )
             # 记录绑定的 PID
-            if self._win.Exists(0, 0):
+            if self._win.Exists(maxSearchSeconds=10):
                 self.pid = self._win.ProcessId
 
         self._ocr_engine = ocr_engine
