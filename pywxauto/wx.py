@@ -38,10 +38,12 @@ from rapidocr import RapidOCR
 import sys
 
 try:
-    # import wcocr
     from . import wcocr
-except ImportError:
-    wcocr = None
+except (ImportError, SystemError):
+    try:
+        import wcocr
+    except ImportError:
+        wcocr = None
 
 
 # ---- 日志配置 ----
@@ -7662,8 +7664,11 @@ class Chat:
         field = self._input_field
         if not field.Exists(maxSearchSeconds=2):
             raise RuntimeError("未找到聊天输入框")
-
-        input_wx.send_keys(field, content)
+        
+        if background:
+            input_wx.send_keys(field, content)
+        else:
+            input_wx.paste(content)
 
         send_btn = self._win.ButtonControl(RegexName="^发送(\\(S\\))?$")
         input_wx.click(send_btn)
@@ -7944,8 +7949,10 @@ class Chat:
         self._add_at_members(field, at_members)
 
         if content:
-            input_wx.send_keys(content)
-            time.sleep(0.2)
+            if background:
+                input_wx.send_keys(content)
+            else:
+                input_wx.paste(content)
 
         send_btn = self._win.ButtonControl(RegexName="^发送(\\(S\\))?$")
         input_wx.click(send_btn)
