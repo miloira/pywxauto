@@ -1512,6 +1512,36 @@ def paste(content) -> None:
     finally:
         restore_clipboard(saved)
 
+def paste_or_type(control, text: str) -> None:
+    """
+    输入纯文本内容（不含功能键）。
+
+    后台模式: 通过 WM_CHAR/WM_IME_CHAR 逐字符发送（非 ASCII 用 WM_IME_CHAR）
+    前台模式: 使用 paste 通过剪贴板粘贴
+
+    Args:
+        control: uiautomation 控件对象，后台模式下用于获取窗口句柄
+        text:    要输入的纯文本字符串
+    """
+    if not background:
+        paste(text)
+    else:
+        hwnd = 0
+        if control is not None:
+            hwnd = _get_hwnd(control)
+        if not hwnd:
+            hwnd = win32gui.GetForegroundWindow()
+        if not hwnd:
+            raise RuntimeError("无法获取目标窗口句柄")
+        input_wm.focus_window(hwnd)
+        for ch in text:
+            code = ord(ch)
+            if code > 127:
+                # 非 ASCII（中文等）使用 WM_IME_CHAR
+                win32gui.SendMessage(hwnd, 0x0286, code, 0)
+            else:
+                win32gui.SendMessage(hwnd, win32con.WM_CHAR, code, 0)
+
 # ---- input_wx 命名空间（供其他模块通过 input_wx.xxx 调用） ----
 class _InputWxNamespace:
     """模拟 input_wx 模块命名空间，使 input_wx.xxx() 调用方式继续工作"""
@@ -1525,6 +1555,7 @@ class _InputWxNamespace:
     select_all = staticmethod(select_all)
     copy = staticmethod(copy)
     paste = staticmethod(paste)
+    paste_or_type = staticmethod(paste_or_type)
 
 input_wx = _InputWxNamespace()
 
@@ -1992,7 +2023,7 @@ class Message:
             time.sleep(0.3)
             input_wx.send_keys(search_edit, "{Ctrl}a{Del}")
             time.sleep(0.2)
-            input_wx.send_keys(search_edit, nickname)
+            input_wx.paste_or_type(search_edit, nickname)
             time.sleep(1.5)
 
             # 在搜索结果中勾选第一个匹配项
@@ -2024,7 +2055,7 @@ class Message:
             if leave_msg_edit.Exists(maxSearchSeconds=2):
                 input_wx.click(leave_msg_edit)
                 time.sleep(0.2)
-                input_wx.send_keys(leave_msg_edit, remark)
+                input_wx.paste_or_type(leave_msg_edit, remark)
                 time.sleep(0.3)
 
         # 点击"发送"/"分别发送"按钮
@@ -2151,7 +2182,7 @@ class Message:
             time.sleep(0.2)
             input_wx.send_keys(file_edit, "{Ctrl}a{Del}")
             time.sleep(0.1)
-            input_wx.send_keys(file_edit, file_path)
+            input_wx.paste_or_type(file_edit, file_path)
         time.sleep(0.3)
 
         # 如果目标文件已存在，先删除（避免覆盖确认弹窗）
@@ -3545,7 +3576,7 @@ class Login(WeixinWindow):
         if vp:
             vp.SetValue(value)
         else:
-            input_wx.send_keys(edit, value)
+            input_wx.paste_or_type(edit, value)
 
     def _get_proxy_field(self, name: str) -> str:
         """获取代理表单字段的值"""
@@ -4027,7 +4058,7 @@ class NoteEditor(WeixinWindow):
         editor = self._editor
         if not editor.Exists(maxSearchSeconds=2):
             raise RuntimeError("未找到笔记编辑器输入控件")
-        input_wx.send_keys(editor, text)
+        input_wx.paste_or_type(editor, text)
 
     @PIM.guard
     def clear(self) -> None:
@@ -4072,7 +4103,7 @@ class NoteEditor(WeixinWindow):
         edit = dlg.ComboBoxControl(AutomationId="1148").EditControl()
         if not edit.Exists(0, 0):
             edit = dlg.EditControl(AutomationId="1148")
-        input_wx.send_keys(edit, file_path)
+        input_wx.paste_or_type(edit, file_path)
         time.sleep(0.3)
         input_wx.send_keys(dlg, "{Alt}O")
 
@@ -4129,7 +4160,7 @@ class NoteEditor(WeixinWindow):
                 continue
             input_wx.send_keys(self._editor, "{Ctrl}T")
             time.sleep(1)
-            input_wx.send_keys(None, tag)
+            input_wx.paste_or_type(None, tag)
             time.sleep(0.3)
             input_wx.send_keys(None, "{Down}")
             input_wx.send_keys(None, "{Enter}")
@@ -4731,7 +4762,7 @@ class Session:
         chat_type = chat_type or ["联系人", "群聊", "功能"]
         edit = self._get_search_edit()
         input_wx.click(edit)
-        input_wx.send_keys(edit, keyword)
+        input_wx.paste_or_type(edit, keyword)
         time.sleep(0.5)
 
         # 按分类优先级查找搜索结果
@@ -4875,7 +4906,7 @@ class Session:
             time.sleep(0.3)
             input_wx.send_keys(search_edit, "{Ctrl}a{Del}")
             time.sleep(0.3)
-            input_wx.send_keys(search_edit, nickname)
+            input_wx.paste_or_type(search_edit, nickname)
             time.sleep(1.5)
 
             # 从左侧 SearchContactNewChatView 容器中查找搜索结果列表
@@ -4982,7 +5013,7 @@ class Session:
         input_wx.click(search_edit)
         time.sleep(0.2)
         # search_edit.GetValuePattern().SetValue(keyword)
-        input_wx.send_keys(search_edit, keyword)
+        input_wx.paste_or_type(search_edit, keyword)
         time.sleep(0.3)
         search_btn = add_friend_win.ButtonControl(
             ClassName="mmui::XOutlineButton", Name="搜索",
@@ -5019,7 +5050,7 @@ class Session:
                 input_wx.send_keys(msg_edit, "{Ctrl}a{Del}")
                 time.sleep(0.1)
                 # msg_edit.GetValuePattern().SetValue(message)
-                input_wx.send_keys(msg_edit, message)
+                input_wx.paste_or_type(msg_edit, message)
                 time.sleep(0.2)
 
         # 填写备注
@@ -5033,7 +5064,7 @@ class Session:
                 input_wx.send_keys(remark_edit, "{Ctrl}a{Del}")
                 time.sleep(0.1)
                 # remark_edit.GetValuePattern().SetValue(remark)
-                input_wx.send_keys(remark_edit, remark)
+                input_wx.paste_or_type(remark_edit, remark)
                 time.sleep(0.2)
 
         # 设置朋友权限（单选：点击整行切换）
@@ -6431,7 +6462,7 @@ class ChatFile:
         if not file_name_edit.Exists(maxSearchSeconds=3):
             raise RuntimeError("未找到文件名输入框")
 
-        input_wx.send_keys(file_name_edit, file_path)
+        input_wx.paste_or_type(file_name_edit, file_path)
 
         # 如果目标文件已存在，先删除（避免覆盖确认弹窗）
         if os.path.exists(file_path):
@@ -7666,7 +7697,7 @@ class Chat:
             raise RuntimeError("未找到聊天输入框")
         
         if background:
-            input_wx.send_keys(field, content)
+            input_wx.paste_or_type(field, content)
         else:
             input_wx.paste(content)
 
@@ -7867,7 +7898,7 @@ class Chat:
             raise RuntimeError("未找到文件名输入框")
         # edit.GetValuePattern().SetValue(file_path)
         input_wx.focus(edit)
-        input_wx.send_keys(edit, file_path)
+        input_wx.paste_or_type(edit, file_path)
         time.sleep(0.2)
 
         # 点击"打开"按钮
@@ -7950,7 +7981,7 @@ class Chat:
 
         if content:
             if background:
-                input_wx.send_keys(content)
+                input_wx.paste_or_type(field, content)
             else:
                 input_wx.paste(content)
 
@@ -8145,7 +8176,7 @@ class Chat:
         # 2. 在搜索框中输入关键词
         search_edit = self._find_fav_search_edit()
         input_wx.click(search_edit)
-        input_wx.send_keys(search_edit, keyword)
+        input_wx.paste_or_type(search_edit, keyword)
 
         # 3. 获取搜索后的详情列表
         detail_list = self._win.ListControl(
@@ -8259,7 +8290,7 @@ class Chat:
 
                 # 清空已有内容后键盘输入，确保触发搜索
                 input_wx.send_keys(search_edit, "{Ctrl}a")
-                input_wx.send_keys(search_edit, keyword)
+                input_wx.paste_or_type(search_edit, keyword)
                 time.sleep(1.5)  # 等待搜索结果加载（Chromium 渲染）
 
                 # 4. 在搜索结果中点击第 index 个表情
@@ -8659,7 +8690,7 @@ class Chat:
         time.sleep(0.3)
         input_wx.send_keys(search_edit, "{Ctrl}a{Del}")
         time.sleep(0.2)
-        input_wx.send_keys(search_edit, receiver_nickname)
+        input_wx.paste_or_type(search_edit, receiver_nickname)
         time.sleep(1.5)
 
         # 重新获取 picker_win，避免控件缓存问题
@@ -8780,9 +8811,9 @@ class Chat:
                     input_wx.click(chat_input)
 
                 if member == "所有人":
-                    input_wx.send_keys(chat_input, "@")
+                    input_wx.paste_or_type(chat_input, "@")
                 else:
-                    input_wx.send_keys(chat_input, f"@{member}")
+                    input_wx.paste_or_type(chat_input, f"@{member}")
 
                 time.sleep(0.3)
 
@@ -8817,7 +8848,7 @@ class Chat:
                 if not chat_input.HasKeyboardFocus:
                     input_wx.click(chat_input)
 
-                input_wx.send_keys(chat_input, f"@{member_keyword}")
+                input_wx.paste_or_type(chat_input, f"@{member_keyword}")
                 time.sleep(0.3)
 
                 menu = self._win.ListControl(
@@ -9722,7 +9753,7 @@ class Chat:
                 time.sleep(0.3)
                 input_wx.send_keys(search_edit, "{Ctrl}a{Del}")
                 time.sleep(0.3)
-                input_wx.send_keys(search_edit, nickname)
+                input_wx.paste_or_type(search_edit, nickname)
                 time.sleep(1.5)
 
                 # 添加群成员窗口搜索后使用 SearchContactView
@@ -9888,7 +9919,7 @@ class Chat:
                 time.sleep(0.3)
                 input_wx.send_keys(search_edit, "{Ctrl}a{Del}")
                 time.sleep(0.3)
-                input_wx.send_keys(search_edit, nickname)
+                input_wx.paste_or_type(search_edit, nickname)
                 time.sleep(1.5)
 
                 # 移除群成员窗口使用 SearchGroupMemberView 而非 SearchContactNewChatView
@@ -11899,7 +11930,7 @@ class Chat:
 
                 abs_path = os.path.abspath(img_path)
                 # edit.GetValuePattern().SetValue(abs_path)
-                input_wx.send_keys(edit, abs_path)
+                input_wx.paste_or_type(edit, abs_path)
                 time.sleep(0.3)
 
                 input_wx.send_keys(dlg, "{Alt}O")
@@ -13890,7 +13921,7 @@ class WeixinClient(WeixinWindow):
                                         vp.SetValue(tmp_path)
                                     else:
                                         input_wx.send_keys(file_edit, "{Ctrl}a{Del}")
-                                        input_wx.send_keys(file_edit, tmp_path)
+                                        input_wx.paste_or_type(file_edit, tmp_path)
                                     time.sleep(0.3)
 
                                     dlg_save_btn = save_dlg.ButtonControl(AutomationId="1")
