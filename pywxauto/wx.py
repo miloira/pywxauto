@@ -7595,7 +7595,7 @@ class Chat:
 
         input_wx.send_keys(field, content)
 
-        send_btn = self._win.ButtonControl(Name="发送")
+        send_btn = self._win.ButtonControl(RegexName="^发送(\\(S\\))?$")
         input_wx.click(send_btn)
 
         # 发送后校验：输入框应已清空
@@ -7720,7 +7720,7 @@ class Chat:
                         f"输入框文档长度仍为 0，{label}可能未粘贴成功"
                     )
 
-                send_btn = self._win.ButtonControl(Name="发送")
+                send_btn = self._win.ButtonControl(RegexName="^发送(\\(S\\))?$")
                 input_wx.click(send_btn)
 
                 remaining_len = self._get_input_doc_length()
@@ -7737,7 +7737,7 @@ class Chat:
                         f"{label}粘贴校验失败: 输入框文档长度为 0，{label}可能未粘贴成功"
                     )
 
-                send_btn = self._win.ButtonControl(Name="发送")
+                send_btn = self._win.ButtonControl(RegexName="^发送(\\(S\\))?$")
                 input_wx.click(send_btn)
 
                 remaining_len = self._get_input_doc_length()
@@ -7877,7 +7877,7 @@ class Chat:
             input_wx.send_keys(content)
             time.sleep(0.2)
 
-        send_btn = self._win.ButtonControl(Name="发送")
+        send_btn = self._win.ButtonControl(RegexName="^发送(\\(S\\))?$")
         input_wx.click(send_btn)
 
         # 发送后校验：输入框应已清空
