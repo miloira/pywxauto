@@ -3654,6 +3654,76 @@ class Login(WeixinWindow):
         return f"Login(user={nick!r})"
 
 
+class WeixinUpdate(WeixinWindow):
+    """
+    微信更新提示窗口操作类。
+
+    微信检测到新版本时弹出的独立窗口，提供"立即更新"和"忽略本次更新"操作。
+
+    关键控件信息：
+    - 窗口: WindowControl, ClassName="mmui::UpdateWindow", AutomationId="UpdateWindow", Name="微信"
+    - 忽略本次更新: ButtonControl, Name="忽略本次更新"
+    - 立即更新: ButtonControl, Name="立即更新"
+    - 关闭按钮: ButtonControl, Name="关闭"
+    """
+
+    WINDOW_CLASS = "mmui::UpdateWindow"
+    WINDOW_ID = "UpdateWindow"
+
+    def __init__(self, wx: "WeixinClient"):
+        """
+        初始化更新窗口操作实例。
+
+        Args:
+            pid: 微信进程 PID
+        """
+        self.wx = wx
+        self._win = auto.WindowControl(
+            ClassName=self.WINDOW_CLASS,
+            AutomationId=self.WINDOW_ID,
+            ProcessId=self.wx.pid,
+            searchDepth=1,
+        )
+
+    @PIM.guard
+    def ignore(self) -> None:
+        """点击"忽略本次更新"按钮"""
+        if not self.exists:
+            raise RuntimeError("更新窗口未找到")
+        self.activate()
+        btn = self._win.ButtonControl(Name="忽略本次更新")
+        if not btn.Exists(maxSearchSeconds=2):
+            raise RuntimeError("未找到'忽略本次更新'按钮")
+        input_wx.click(btn)
+
+    @PIM.guard
+    def process_later(self) -> None:
+        """点击"稍后处理"按钮"""
+        if not self.exists:
+            raise RuntimeError("更新窗口未找到")
+        self.activate()
+        btn = self._win.ButtonControl(Name="稍后处理")
+        if not btn.Exists(maxSearchSeconds=2):
+            raise RuntimeError("未找到'稍后处理'按钮")
+        input_wx.click(btn)
+
+    @PIM.guard
+    def update(self) -> None:
+        """点击"立即更新"按钮"""
+        if not self.exists:
+            raise RuntimeError("更新窗口未找到")
+        self.activate()
+        btn = self._win.ButtonControl(Name="更新")
+        if not btn.Exists(maxSearchSeconds=2):
+            raise RuntimeError("未找到'更新'按钮")
+        input_wx.click(btn)
+
+    def __str__(self) -> str:
+        if not self._win.Exists(0, 0):
+            return "UpdateWindow(closed)"
+        return "UpdateWindow(open)"
+
+
 class VoipCall(WeixinWindow):
     """
     语音/视频通话窗口控制。
@@ -12929,6 +12999,7 @@ class WeixinClient(WeixinWindow):
         if background and hwnd:
             self.move_offscreen()
 
+        self.weixin_update = WeixinUpdate(self)
         self.navigator = Navigator(self)
         self.session = Session(self)
         self.file_manager = FileManager(self)
@@ -12937,7 +13008,22 @@ class WeixinClient(WeixinWindow):
 
     def __del__(self):
         self.move_back()
-        logger.info(f"微信客户端({self.version}) - 已断开")
+
+    def find_new_version_window(self) -> bool:
+        """检测是否弹出了新版本更新窗口"""
+        return self.weixin_update.exists
+
+    def ignore_version_update(self) -> None:
+        """忽略本次更新"""
+        return self.weixin_update.ignore()
+
+    def update_new_version(self) -> None:
+        """更新新版本"""
+        return self.weixin_update.update()
+
+    def process_later(self) -> None:
+        """稍后处理"""
+        return self.weixin_update.process_later()
 
     @staticmethod
     def find_wechat_window_by_pid(pid: int) -> bool:
