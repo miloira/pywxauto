@@ -14585,8 +14585,6 @@ class Weixin:
         }
         self._ee = EventEmitter()
         self._stop_event: Optional[threading.Event] = None
-
-        # 默认连接所有已运行的微信客户端
         self.connect_all()
 
     # ---- 客户端管理 ----
