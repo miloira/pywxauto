@@ -8658,6 +8658,21 @@ class Chat:
         except Exception:
             pass
 
+    @staticmethod
+    def _get_selected_mention_item(menu) -> "auto.ListItemControl | None":
+        """
+        获取 @候选菜单中当前被选中（高亮/激活）的 ListItem。
+
+        通过 SelectionItemPattern.IsSelected 判断选中状态。
+        """
+        for ctrl, _ in auto.WalkControl(menu):
+            if ctrl.ControlType != auto.ControlType.ListItemControl:
+                continue
+            sip = ctrl.GetSelectionItemPattern()
+            if sip and sip.IsSelected:
+                return ctrl
+        return None
+
     def _add_at_members(self, chat_input: auto.EditControl,
                         at_members: list[str]) -> None:
         """
@@ -8668,6 +8683,8 @@ class Chat:
         - 菜单项: ListItemControl, Name 为成员昵称
 
         支持完全匹配和模糊匹配，包含 "所有人" 时只 @所有人。
+        对于昵称含空格的成员，取最长关键字搜索，然后通过 Down 键逐项
+        匹配直到找到完全匹配的群成员昵称。
         """
         if not at_members:
             return
@@ -8677,36 +8694,101 @@ class Chat:
         for member in at_members:
             if not member:
                 continue
-            if not chat_input.HasKeyboardFocus:
-                input_wx.click(chat_input)
 
-            if member == "所有人":
-                input_wx.send_keys(chat_input, "@")
+            has_space = " " in member
+
+            if not has_space:
+                # 昵称不含空格：直接输入 @昵称
+                if not chat_input.HasKeyboardFocus:
+                    input_wx.click(chat_input)
+
+                if member == "所有人":
+                    input_wx.send_keys(chat_input, "@")
+                else:
+                    input_wx.send_keys(chat_input, f"@{member}")
+
+                time.sleep(0.3)
+
+                menu = self._win.ListControl(
+                    AutomationId="chat_mention_list", searchDepth=4,
+                )
+                if not menu.Exists(maxSearchSeconds=2):
+                    raise RuntimeError(f"@群成员失败，未弹出候选菜单: {member}")
+
+                controls = []
+                for ctrl, _ in auto.WalkControl(menu):
+                    if (ctrl.ControlType == auto.ControlType.ListItemControl
+                            and ctrl.Name):
+                        controls.append(ctrl)
+
+                full = [c for c in controls if c.Name == member]
+                fuzzy = [c for c in controls if member in c.Name]
+
+                if full or len(fuzzy) == 1 or len(controls) == 1:
+                    input_wx.send_keys(None, "{Enter}")
+                    time.sleep(0.5)
+                elif len(fuzzy) > 1:
+                    names = [c.Name for c in fuzzy]
+                    raise RuntimeError(f"@群成员模糊匹配到多个: {names}")
+                else:
+                    raise RuntimeError(f"@群成员失败，未找到: {member}")
             else:
-                input_wx.send_keys(chat_input, f"@{member}")
+                # 昵称含空格：取最长关键字搜索，然后逐项匹配
+                member_keywords = member.split(" ")
+                member_keyword = max(member_keywords, key=len)
 
-            menu = self._win.ListControl(
-                AutomationId="chat_mention_list", searchDepth=4,
-            )
-            if not menu.Exists(maxSearchSeconds=2):
-                raise RuntimeError(f"@群成员失败，未找到: {member}")
+                if not chat_input.HasKeyboardFocus:
+                    input_wx.click(chat_input)
 
-            controls = []
-            for ctrl, _ in auto.WalkControl(menu):
-                if (ctrl.ControlType == auto.ControlType.ListItemControl
-                        and ctrl.Name):
-                    controls.append(ctrl)
+                input_wx.send_keys(chat_input, f"@{member_keyword}")
+                time.sleep(0.3)
 
-            full = [c for c in controls if c.Name == member]
-            fuzzy = [c for c in controls if member in c.Name]
+                menu = self._win.ListControl(
+                    AutomationId="chat_mention_list", searchDepth=4,
+                )
+                if not menu.Exists(maxSearchSeconds=2):
+                    raise RuntimeError(f"@群成员失败，未弹出候选菜单: {member}")
 
-            if full or len(fuzzy) == 1:
-                input_wx.send_keys(None, "{Enter}")
-            elif len(fuzzy) > 1:
-                names = [c.Name for c in fuzzy]
-                raise RuntimeError(f"@群成员模糊匹配到多个: {names}")
-            else:
-                raise RuntimeError(f"@群成员失败，未找到: {member}")
+                controls = []
+                for ctrl, _ in auto.WalkControl(menu):
+                    if (ctrl.ControlType == auto.ControlType.ListItemControl
+                            and ctrl.Name):
+                        controls.append(ctrl)
+
+                fuzzy = [c for c in controls if member_keyword in c.Name]
+
+                if len(fuzzy) == 0:
+                    raise RuntimeError(f"@群成员失败，未找到: {member}")
+                elif len(fuzzy) == 1:
+                    # 唯一匹配，直接回车选中
+                    input_wx.send_keys(None, "{Enter}")
+                    time.sleep(0.5)
+                else:
+                    # 多个匹配结果：通过 Down 键逐项匹配，直到找到完全匹配的昵称
+                    # 搜索结果数 < 5 时没有更多结果，>= 5 时可能有更多
+                    max_match = len(fuzzy) if len(fuzzy) < 5 else 15
+                    matched = False
+                    count = 0
+
+                    while count < max_match:
+                        current_item = self._get_selected_mention_item(menu)
+                        if not current_item:
+                            break
+
+                        if current_item.Name == member:
+                            input_wx.send_keys(None, "{Enter}")
+                            time.sleep(0.5)
+                            matched = True
+                            break
+
+                        input_wx.send_keys(None, "{Down}")
+                        time.sleep(0.2)
+                        count += 1
+
+                    if not matched:
+                        input_wx.send_keys(None, "{Esc}")
+                        time.sleep(0.3)
+                        raise RuntimeError(f"@群成员失败，未找到完全匹配: {member}")
 
     def _click_voip_menu(self, menu_name: str) -> None:
         """
