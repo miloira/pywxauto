@@ -13248,6 +13248,32 @@ class WeixinClient(WeixinWindow):
             self.navigator.switch_to("微信")
         self.session.create_room(nickname_list)
 
+    @PIM.guard
+    def add_friend(self, keyword: str, message: Optional[str] = None, remark: Optional[str] = None,
+                   permission: Optional[str] = None, hide_my_posts: bool = False,
+                   hide_their_posts: bool = False) -> None:
+        """
+        添加朋友完整流程。
+
+        Args:
+            keyword: 微信号/手机号
+            message: 申请消息（None 则使用默认消息）
+            remark: 备注名（None 则使用对方昵称）
+            permission: 朋友权限，可选值:
+                - "chatonly" : 仅聊天
+                - None : 聊天、朋友圈、微信运动等（默认）
+            hide_my_posts: 不让他（她）看我的朋友圈和状态
+            hide_their_posts: 不看他（她）的朋友圈和状态
+        """
+        self.activate()
+        if not self.has_session:
+            self.navigator.switch_to("微信")
+        self.session.add_friend(
+            keyword, message=message, remark=remark,
+            permission=permission, hide_my_posts=hide_my_posts,
+            hide_their_posts=hide_their_posts,
+        )
+
     def get_separate_chat(self, contact_name: str) -> Optional[SeparateChat]:
         """
         获取独立窗口的聊天会话。
@@ -14824,6 +14850,16 @@ class Weixin:
     def create_room(self, pid: int, nickname_list: list[str]) -> None:
         """发起群聊"""
         return self.get_client(pid).create_room(nickname_list)
+
+    def add_friend(self, pid: int, keyword: str, message: Optional[str] = None,
+                   remark: Optional[str] = None, permission: Optional[str] = None,
+                   hide_my_posts: bool = False, hide_their_posts: bool = False) -> None:
+        """添加朋友"""
+        return self.get_client(pid).add_friend(
+            keyword, message=message, remark=remark,
+            permission=permission, hide_my_posts=hide_my_posts,
+            hide_their_posts=hide_their_posts,
+        )
 
     def create_note(self, pid: int, content: str) -> None:
         """创建笔记"""
