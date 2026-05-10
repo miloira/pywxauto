@@ -126,7 +126,7 @@ LANGUAGE = {
     "发起群聊": {"cn": "发起群聊", "cn_t": "", "en": "Start Group Chat"},
     "添加朋友": {"cn": "添加朋友", "cn_t": "", "en": "Add Contacts"},
     "新建笔记": {"cn": "新建笔记", "cn_t": "", "en": "New Note"},
-    "完成": {"cn": "完成", "cn_t": "", "en": ""},
+    "完成": {"cn": "完成", "cn_t": "", "en": "Finish"},
     "置顶": {"cn": "置顶", "cn_t": "", "en": "Sticky"},
     "取消置顶": {"cn": "取消置顶", "cn_t": "", "en": "Remove Sticky"},
     "标为未读": {"cn": "标为未读", "cn_t": "", "en": "Mark as Unread"},
@@ -252,8 +252,8 @@ LANGUAGE = {
     "全部": {"cn": "全部", "cn_t": "", "en": "All"},
     "文档": {"cn": "文档", "cn_t": "", "en": "Document"},
     "表格": {"cn": "表格", "cn_t": "", "en": "Spreadsheets"},
-    "图片": {"cn": "图片", "cn_t": "", "en": ""},
-    "视频": {"cn": "视频", "cn_t": "", "en": ""},
+    "图片": {"cn": "图片", "cn_t": "", "en": "Image"},
+    "视频": {"cn": "视频", "cn_t": "", "en": "Video"},
     "下载到...": {"cn": "下载到...", "cn_t": "", "en": "Download to..."},
     "下载": {"cn": "下载", "cn_t": "", "en": "Download"},
 
@@ -354,6 +354,11 @@ LANGUAGE = {
     # 保存对话框
     # ============================================================
     "保存(&S)": {"cn": "保存(&S)", "cn_t": "", "en": "Save(&S)"},
+
+    # ============================================================
+    # 打开对话框
+    # ============================================================
+    "打开(&O)": {"cn": "打开(&O)", "cn_t": "", "en": "Open(&O)"},
 }
 
 # 当前语言，由 WeixinClient.__init__ 根据实际检测设置
@@ -2667,7 +2672,7 @@ class Message:
         # 点击"保存(S)"按钮
         save_btn = save_dlg.ButtonControl(AutomationId="1")
         if not save_btn.Exists(maxSearchSeconds=2):
-            save_btn = save_dlg.ButtonControl(Name="保存(&S)")
+            save_btn = save_dlg.ButtonControl(Name=_("保存(&S)"))
             if not save_btn.Exists(maxSearchSeconds=2):
                 input_wx.send_keys(save_dlg, "{Alt}S")
                 time.sleep(1)
@@ -2718,11 +2723,6 @@ class TextMessage(Message):
 class QuoteMessage(Message):
     """引用消息"""
 
-    _QUOTE_RE = re.compile(
-        r'^(.+?)引用\s+(.+?)\s+的消息\s*:\s*(.+?)[\n\r]*$',
-        re.DOTALL,
-    )
-
     def __init__(self, *, reply_content="", quote_sender="", quote_content="", **kw):
         super().__init__(**kw)
         self.reply_content: str = reply_content
@@ -2734,12 +2734,18 @@ class QuoteMessage(Message):
         return "引用消息"
 
     @staticmethod
+    def _get_quote_re():
+        """动态构建引用消息正则（支持多语言）"""
+        pattern = _("引用正则")
+        return re.compile(pattern, re.DOTALL)
+
+    @staticmethod
     def match(raw_name: str) -> bool:
-        return bool(QuoteMessage._QUOTE_RE.match(raw_name))
+        return bool(QuoteMessage._get_quote_re().match(raw_name))
 
     @staticmethod
     def parse(raw_name: str) -> tuple[str, str, str, str]:
-        m = QuoteMessage._QUOTE_RE.match(raw_name)
+        m = QuoteMessage._get_quote_re().match(raw_name)
         if m:
             reply_content = m.group(1).strip()
             quote_sender = m.group(2).strip()
@@ -2762,39 +2768,42 @@ class VoiceMessage(Message):
 
     @staticmethod
     def parse(raw_name: str) -> tuple[str, int, bool]:
-        # 匹配 "语音N"秒" 格式（中文左双引号 \u201c）
-        m = re.match(r"语音(\d+)\u201c秒(.*)", raw_name, re.DOTALL)
+        voice_kw = _("语音")
+        unplayed_kw = _("未播放")
+        played_kw = _("已播放")
+        # 匹配 "{语音}N"秒" 格式（中文左双引号 \u201c）
+        m = re.match(rf"{re.escape(voice_kw)}(\d+)\u201c秒(.*)", raw_name, re.DOTALL)
         if m:
             dur = int(m.group(1))
             rest = m.group(2).strip()
-            played = "未播放" not in rest
+            played = unplayed_kw not in rest
             # 如果 rest 中有识别文字（非状态标记），提取出来作为 content
             transcribed = ""
             if rest:
                 # 去掉 "未播放"/"已播放" 标记后的剩余部分就是识别文字
-                cleaned = re.sub(r'^(未播放|已播放)\s*', '', rest).strip()
+                cleaned = re.sub(rf'^({re.escape(unplayed_kw)}|{re.escape(played_kw)})\s*', '', rest).strip()
                 if cleaned:
                     transcribed = cleaned
             if transcribed:
-                content = f"{dur}秒语音: {transcribed}"
+                content = f"{dur}s {voice_kw}: {transcribed}"
             else:
-                content = f"{dur}秒语音{'(未播放)' if not played else ''}"
+                content = f"{dur}s {voice_kw}{'(' + unplayed_kw + ')' if not played else ''}"
             return content, dur, played
         # 兼容旧格式（ASCII 双引号）
-        m = re.match(r'语音(\d+)"秒(.*)', raw_name, re.DOTALL)
+        m = re.match(rf'{re.escape(voice_kw)}(\d+)"秒(.*)', raw_name, re.DOTALL)
         if m:
             dur = int(m.group(1))
             rest = m.group(2).strip()
-            played = "未播放" not in rest
+            played = unplayed_kw not in rest
             transcribed = ""
             if rest:
-                cleaned = re.sub(r'^(未播放|已播放)\s*', '', rest).strip()
+                cleaned = re.sub(rf'^({re.escape(unplayed_kw)}|{re.escape(played_kw)})\s*', '', rest).strip()
                 if cleaned:
                     transcribed = cleaned
             if transcribed:
-                content = f"{dur}秒语音: {transcribed}"
+                content = f"{dur}s {voice_kw}: {transcribed}"
             else:
-                content = f"{dur}秒语音{'(未播放)' if not played else ''}"
+                content = f"{dur}s {voice_kw}{'(' + unplayed_kw + ')' if not played else ''}"
             return content, dur, played
         return raw_name, 0, True
 
@@ -2964,31 +2973,35 @@ class VoiceMessage(Message):
         if not name:
             return ""
 
-        # 主格式: "语音N"秒{文字}" — 文字直接跟在"秒"后面
+        voice_kw = _("语音")
+        unplayed_kw = _("未播放")
+        played_kw = _("已播放")
+
+        # 主格式: "{语音}N"秒{文字}" — 文字直接跟在"秒"后面
         # 支持中文左双引号(\u201c)和 ASCII 双引号
         m = re.match(
-            r'^语音\d+[\u201c"]秒\s*(?:未播放|已播放)?\s*(.+)',
+            rf'^{re.escape(voice_kw)}\d+[\u201c"]秒\s*(?:{re.escape(unplayed_kw)}|{re.escape(played_kw)})?\s*(.+)',
             name,
             re.DOTALL,
         )
         if m:
             text = m.group(1).strip()
             # 排除仍是状态文本的情况
-            if text and text not in ("未播放", "已播放", "转文字中"):
+            if text and text not in (unplayed_kw, played_kw, "转文字中"):
                 return text
 
-        # 备选格式: 带换行 "语音N"秒\n识别文字"
-        m = re.match(r'^语音\d+[\u201c"]秒(?:\s*未播放)?\s*\n(.+)', name, re.DOTALL)
+        # 备选格式: 带换行 "{语音}N"秒\n识别文字"
+        m = re.match(rf'^{re.escape(voice_kw)}\d+[\u201c"]秒(?:\s*{re.escape(unplayed_kw)})?\s*\n(.+)', name, re.DOTALL)
         if m:
             return m.group(1).strip()
 
-        # 备选格式: "识别文字\n语音N"秒"
-        m = re.match(r'^(.+?)\n语音\d+[\u201c"]秒', name, re.DOTALL)
+        # 备选格式: "识别文字\n{语音}N"秒"
+        m = re.match(rf'^(.+?)\n{re.escape(voice_kw)}\d+[\u201c"]秒', name, re.DOTALL)
         if m:
             return m.group(1).strip()
 
         # Name 不再包含 "语音" 前缀，整体就是识别文字
-        if not name.startswith("语音"):
+        if not name.startswith(voice_kw):
             return name.strip()
 
         return ""
@@ -3045,11 +3058,13 @@ class FileMessage(Message):
         parts = [p.strip() for p in raw_name.split("\n") if p.strip()]
 
         # 跳过第一个 "文件" 标记
-        if parts and parts[0] == "文件":
+        file_kw = _("文件")
+        progress_kw = _("进度")
+        if parts and parts[0] == file_kw:
             parts = parts[1:]
 
         # 跳过 "进度: XX%" 行（发送中状态）
-        if parts and re.match(r'^进度[:：]\s*\d+%', parts[0]):
+        if parts and re.match(rf'^{re.escape(progress_kw)}[:：]\s*\d+%', parts[0]):
             parts = parts[1:]
 
         file_name = ""
@@ -3059,7 +3074,7 @@ class FileMessage(Message):
         # 文件大小的正则：数字+单位（B/K/KB/M/MB/G/GB/T/TB）
         size_pattern = re.compile(r'^[\d.]+\s*[BKMGT][B]?$', re.IGNORECASE)
         # 已知状态文本
-        status_texts = {"未下载", "对方上传中", "发送中断", "已过期", "已取消"}
+        status_texts = {_("未下载"), _("对方上传中"), _("发送中断"), _("已过期"), _("已取消")}
 
         # 逐个解析 parts：第一个非大小非状态的是文件名，
         # 匹配大小正则的是文件大小，在状态集合中的是状态
@@ -3075,7 +3090,7 @@ class FileMessage(Message):
         if file_status:
             content = f"{file_name} ({file_size}) [{file_status}]"
         else:
-            file_status = "已下载"
+            file_status = _("已下载")
             content = f"{file_name} ({file_size})" if file_size else file_name
 
         return content, file_name, file_size, file_status
@@ -3141,7 +3156,8 @@ class LocationMessage(Message):
 
     @staticmethod
     def parse(raw_name: str) -> tuple[str, str]:
-        addr = raw_name[2:] if raw_name.startswith("位置") else raw_name
+        loc_kw = _("位置")
+        addr = raw_name[len(loc_kw):] if raw_name.startswith(loc_kw) else raw_name
         return addr, addr
 
 
@@ -3159,14 +3175,16 @@ class LinkMessage(Message):
 
     @staticmethod
     def parse(raw_name: str) -> tuple[str, str, str]:
-        if raw_name.startswith("[链接]"):
-            body = raw_name[len("[链接]"):]
+        link_kw = _("链接")
+        bracket_prefix = f"[{link_kw}]"
+        if raw_name.startswith(bracket_prefix):
+            body = raw_name[len(bracket_prefix):]
             parts = [p.strip() for p in body.split("\n") if p.strip()]
             title = parts[0] if parts else body
             source = parts[1] if len(parts) > 1 else ""
             return title, title, source
 
-        if raw_name.startswith("链接\n") or raw_name.startswith("链接\r"):
+        if raw_name.startswith(f"{link_kw}\n") or raw_name.startswith(f"{link_kw}\r"):
             parts = [p.strip() for p in raw_name.split("\n") if p.strip()]
             title = parts[1] if len(parts) > 1 else raw_name
             source = parts[2] if len(parts) > 2 else ""
@@ -3218,7 +3236,11 @@ class PersonalCardMessage(Message):
 
     @staticmethod
     def parse(raw_name: str) -> tuple[str, str]:
-        name = raw_name[:-5] if raw_name.endswith("_个人名片") else raw_name
+        card_suffix = _("个人名片")
+        if raw_name.endswith(card_suffix):
+            name = raw_name[:-len(card_suffix)]
+        else:
+            name = raw_name
         return name, name
 
 
@@ -3312,7 +3334,9 @@ class VoipMessage(Message):
 
     @staticmethod
     def parse(raw_name: str) -> tuple[str, str, str]:
-        for prefix in ("语音通话", "视频通话"):
+        voice_call_kw = _("语音通话")
+        video_call_kw = _("视频通话")
+        for prefix in (voice_call_kw, video_call_kw):
             if raw_name.startswith(prefix):
                 call_status = raw_name[len(prefix):]
                 return raw_name, prefix, call_status
@@ -3321,9 +3345,6 @@ class VoipMessage(Message):
 
 class TransferMessage(Message):
     """微信转账消息"""
-
-    _TRANSFER_RE = re.compile(r"^￥([\d.]+)\s+(.+?)\s+微信转账$")
-    _TRANSFER_NO_REMARK_RE = re.compile(r"^￥([\d.]+)\s+微信转账$")
 
     def __init__(self, *, amount="", remark="", **kw):
         super().__init__(**kw)
@@ -3335,10 +3356,10 @@ class TransferMessage(Message):
         return "转账消息"
 
     def accept(self) -> bool:
-        return self._click_transfer_button("收款")
+        return self._click_transfer_button(_("收款"))
 
     def reject(self) -> bool:
-        return self._click_transfer_button("退还")
+        return self._click_transfer_button(_("退还"))
 
     def _click_transfer_button(self, button_name: str) -> bool:
         if not self.hover():
@@ -3359,12 +3380,15 @@ class TransferMessage(Message):
 
     @staticmethod
     def parse(raw_name: str) -> tuple[str, str, str]:
-        m = TransferMessage._TRANSFER_RE.match(raw_name)
+        transfer_kw = _("微信转账")
+        transfer_re = re.compile(rf"^￥([\d.]+)\s+(.+?)\s+{re.escape(transfer_kw)}$")
+        transfer_no_remark_re = re.compile(rf"^￥([\d.]+)\s+{re.escape(transfer_kw)}$")
+        m = transfer_re.match(raw_name)
         if m:
             amount = m.group(1)
             remark = m.group(2).strip()
             return f"￥{amount}", amount, remark
-        m = TransferMessage._TRANSFER_NO_REMARK_RE.match(raw_name)
+        m = transfer_no_remark_re.match(raw_name)
         if m:
             amount = m.group(1)
             return f"￥{amount}", amount, ""
@@ -3373,8 +3397,6 @@ class TransferMessage(Message):
 
 class RedPacketMessage(Message):
     """微信红包消息"""
-
-    _RED_PACKET_RE = re.compile(r"^(.+?)\s{2,}微信红包$")
 
     def __init__(self, *, greeting="", **kw):
         super().__init__(**kw)
@@ -3398,7 +3420,7 @@ class RedPacketMessage(Message):
         弹窗控件结构（在聊天窗口内）:
         - 发送者: TextControl, Name="{昵称}发出的红包"
         - 祝福语: TextControl, Name="{祝福语}"
-        - 拆开按钮: ButtonControl, Name="拆开", ClassName="mmui::XButton"
+        - 拆开按钮: ButtonControl, Name=_("拆开"), ClassName="mmui::XButton"
         - 关闭按钮: ButtonControl, Name=_("关闭"), ClassName="mmui::XButton"
 
         Returns:
@@ -3426,7 +3448,7 @@ class RedPacketMessage(Message):
         # 查找"拆开"按钮
         open_btn = self.chat._win.ButtonControl(
             ClassName="mmui::XButton",
-            Name="拆开",
+            Name=_("拆开"),
             searchDepth=10,
         )
         if open_btn.Exists(maxSearchSeconds=3):
@@ -3471,7 +3493,9 @@ class RedPacketMessage(Message):
 
     @staticmethod
     def parse(raw_name: str) -> tuple[str, str]:
-        m = RedPacketMessage._RED_PACKET_RE.match(raw_name)
+        red_packet_kw = _("微信红包")
+        red_packet_re = re.compile(rf"^(.+?)\s{{2,}}{re.escape(red_packet_kw)}$")
+        m = red_packet_re.match(raw_name)
         if m:
             greeting = m.group(1).strip()
             return greeting, greeting
@@ -3881,7 +3905,7 @@ class Login(WeixinWindow):
     #   - 端口: EditControl, ClassName="mmui::XLineEdit", Name="端口"
     #   - 账户: EditControl, ClassName="mmui::XLineEdit", Name="账户"
     #   - 密码: EditControl, ClassName="mmui::XLineEdit", Name="密码"
-    # 保存按钮: ButtonControl, ClassName="mmui::XOutlineButton", Name="保存"
+    # 保存按钮: ButtonControl, ClassName="mmui::XOutlineButton", Name=_("保存")
 
     PROXY_SWITCH_CLASS = "mmui::XSwitchButton"
     PROXY_SAVE_BTN_CLASS = "mmui::XOutlineButton"
@@ -4187,7 +4211,7 @@ class WeixinUpdate(WeixinWindow):
         if not self.exists:
             raise WxWindowNotFoundError("更新窗口未找到")
         self.activate()
-        btn = self._win.ButtonControl(Name="忽略本次更新")
+        btn = self._win.ButtonControl(Name=_("忽略本次更新"))
         if not btn.Exists(maxSearchSeconds=2):
             raise WxControlNotFoundError("未找到'忽略本次更新'按钮")
         input_wx.click(btn)
@@ -4198,7 +4222,7 @@ class WeixinUpdate(WeixinWindow):
         if not self.exists:
             raise WxWindowNotFoundError("更新窗口未找到")
         self.activate()
-        btn = self._win.ButtonControl(Name="稍后处理")
+        btn = self._win.ButtonControl(Name=_("稍后处理"))
         if not btn.Exists(maxSearchSeconds=2):
             raise WxControlNotFoundError("未找到'稍后处理'按钮")
         input_wx.click(btn)
@@ -4209,7 +4233,7 @@ class WeixinUpdate(WeixinWindow):
         if not self.exists:
             raise WxWindowNotFoundError("更新窗口未找到")
         self.activate()
-        btn = self._win.ButtonControl(Name="更新")
+        btn = self._win.ButtonControl(Name=_("更新"))
         if not btn.Exists(maxSearchSeconds=2):
             raise WxControlNotFoundError("未找到'更新'按钮")
         input_wx.click(btn)
@@ -4301,7 +4325,7 @@ class VoipCall(WeixinWindow):
     def is_mic_on(self) -> bool:
         """麦克风是否开启"""
         try:
-            self._find_toolbar_button("麦克风已开")
+            self._find_toolbar_button(_("麦克风已开"))
             return True
         except RuntimeError:
             return False
@@ -4310,7 +4334,7 @@ class VoipCall(WeixinWindow):
     def is_speaker_on(self) -> bool:
         """扬声器是否开启"""
         try:
-            self._find_toolbar_button("扬声器已开")
+            self._find_toolbar_button(_("扬声器已开"))
             return True
         except RuntimeError:
             return False
@@ -4319,7 +4343,7 @@ class VoipCall(WeixinWindow):
     def is_camera_on(self) -> bool:
         """摄像头是否开启（仅视频通话）"""
         try:
-            self._find_toolbar_button("摄像头已开")
+            self._find_toolbar_button(_("摄像头已开"))
             return True
         except RuntimeError:
             return False
@@ -4328,7 +4352,7 @@ class VoipCall(WeixinWindow):
     def has_camera(self) -> bool:
         """是否有可用摄像头（仅视频通话）"""
         try:
-            self._find_toolbar_button("无摄像头")
+            self._find_toolbar_button(_("无摄像头"))
             return False
         except RuntimeError:
             return True
@@ -4336,38 +4360,38 @@ class VoipCall(WeixinWindow):
     @PIM.guard
     def toggle_mic(self) -> None:
         """切换麦克风开关"""
-        btn = self._find_toolbar_button("麦克风已开", "麦克风已关")
+        btn = self._find_toolbar_button(_("麦克风已开"), _("麦克风已关"))
         input_wx.click(btn)
 
     @PIM.guard
     def toggle_speaker(self) -> None:
         """切换扬声器开关"""
-        btn = self._find_toolbar_button("扬声器已开", "扬声器已关")
+        btn = self._find_toolbar_button(_("扬声器已开"), _("扬声器已关"))
         input_wx.click(btn)
 
     @PIM.guard
     def toggle_camera(self) -> None:
         """切换摄像头开关（仅视频通话）"""
-        btn = self._find_toolbar_button("摄像头已开", "摄像头已关", "无摄像头")
+        btn = self._find_toolbar_button(_("摄像头已开"), _("摄像头已关"), _("无摄像头"))
         input_wx.click(btn)
 
     @PIM.guard
     def cancel(self) -> None:
         """取消通话（呼叫中未接通时）"""
-        btn = self._find_toolbar_button("取消")
+        btn = self._find_toolbar_button(_("取消"))
         input_wx.click(btn)
 
     @PIM.guard
     def hangup(self) -> None:
         """挂断通话（通话中）"""
-        btn = self._find_toolbar_button("挂断")
+        btn = self._find_toolbar_button(_("挂断"))
         input_wx.click(btn)
 
     @PIM.guard
     def end_call(self) -> None:
         """结束通话（自动识别取消/挂断）"""
         try:
-            btn = self._find_toolbar_button("取消", "挂断")
+            btn = self._find_toolbar_button(_("取消"), _("挂断"))
         except WxControlNotFoundError:
             raise WxControlNotFoundError("未找到取消或挂断按钮")
         input_wx.click(btn)
@@ -4375,7 +4399,7 @@ class VoipCall(WeixinWindow):
     @PIM.guard
     def switch_to_video(self) -> None:
         """切换到视频通话（通话中可用）"""
-        btn = self._find_toolbar_button("切换到视频通话")
+        btn = self._find_toolbar_button(_("切换到视频通话"))
         input_wx.click(btn)
 
     def __str__(self) -> str:
@@ -4791,7 +4815,7 @@ class Navigator:
         if tab_name not in self.TABS:
             raise ValueError(f"未知标签页: {tab_name}，可选: {list(self.TABS.keys())}")
 
-        if tab_name not in ["手机", "更多"]:
+        if tab_name not in [_("手机"), _("更多")]:
             btn = self._tabbar.ButtonControl(ClassName="mmui::XTabBarItem", Name=self.TABS[tab_name], searchDepth=1)
         else:
             btn = self._tabbar.ButtonControl(ClassName="mmui::MainTabBarSettingView", Name=self.TABS[tab_name], searchDepth=1)
@@ -5209,7 +5233,7 @@ class Session:
         """删除会话（危险操作，会清除聊天记录）"""
         self._session_context_action(name, _("删除"))
         confirm_btn = self._win.ButtonControl(
-            Name=_(_("删除")), ClassName="mmui::XOutlineButton",
+            Name=_("删除"), ClassName="mmui::XOutlineButton",
         )
         if not confirm_btn.Exists(maxSearchSeconds=2):
             raise WxControlNotFoundError("未找到删除确认弹窗")
@@ -5332,7 +5356,7 @@ class Session:
             ClassName="mmui::SessionPickerWindow",
         )
         if not picker_win.Exists(maxSearchSeconds=3):
-            raise RuntimeError("发起群聊窗口未打开")
+            raise WxWindowNotFoundError("发起群聊窗口未打开")
 
         # --- 第2步：逐个搜索并勾选好友 ---
         for nickname in nickname_list:
@@ -5344,7 +5368,7 @@ class Session:
                 searchDepth=1,
             )
             if not fresh_picker.Exists(maxSearchSeconds=3):
-                raise RuntimeError("发起群聊窗口已关闭")
+                raise WxWindowNotFoundError("发起群聊窗口已关闭")
             if not background:
                 fresh_picker.SetActive()
             input_wx.focus(fresh_picker)
@@ -5378,7 +5402,7 @@ class Session:
                 searchDepth=3,
             )
             if not search_view.Exists(maxSearchSeconds=3):
-                raise RuntimeError(f"搜索联系人 '{nickname}' 后未出现搜索视图")
+                raise WxWindowNotFoundError(f"搜索联系人 '{nickname}' 后未出现搜索视图")
 
             result_list = search_view.ListControl(
                 ClassName="mmui::XTableView",
@@ -5386,7 +5410,7 @@ class Session:
                 searchDepth=1,
             )
             if not result_list.Exists(maxSearchSeconds=5):
-                raise RuntimeError(f"搜索联系人 '{nickname}' 后未出现结果列表")
+                raise WxWindowNotFoundError(f"搜索联系人 '{nickname}' 后未出现结果列表")
 
             contact_row = result_list.CheckBoxControl(
                 ClassName="mmui::SearchContactCellView",
@@ -5406,7 +5430,7 @@ class Session:
             searchDepth=1,
         )
         if not final_picker.Exists(maxSearchSeconds=3):
-            raise RuntimeError("发起群聊窗口已关闭")
+            raise WxWindowNotFoundError("发起群聊窗口已关闭")
         detail_view = final_picker.GroupControl(
             ClassName="mmui::SPDetailView",
             searchDepth=3,
@@ -5447,14 +5471,14 @@ class Session:
         - 添加朋友窗口: mmui::AddFriendWindow
         - 搜索结果"添加到通讯录": AutomationId 含 "add_friend_button"
         - 申请表单: mmui::VerifyFriendWindow
-          - 申请消息: EditControl, Name="发送添加朋友申请"
+          - 申请消息: EditControl, Name=_("发送添加朋友申请")
           - 备注: EditControl, Name="修改备注", ClassName="mmui::XLineEdit"
           - 朋友权限选项: GroupControl, ClassName="mmui::ProfileFormPermissionItemUi"
-            - Name="聊天、朋友圈、微信运动等" (默认选中)
-            - Name="仅聊天"
+            - Name=_("聊天、朋友圈、微信运动等") (默认选中)
+            - Name=_("仅聊天")
           - 朋友圈开关: CheckBoxControl, ClassName="mmui::XSwitchButton"
-            - Name="不让他（她）看"
-            - Name="不看他（她）"
+            - Name=_("不让他（她）看")
+            - Name=_("不看他（她）")
           - 确定/取消按钮
         """
         self._quick_action(_("添加朋友"))
@@ -5487,10 +5511,10 @@ class Session:
         time.sleep(1)
 
         # --- 第2步：点击"添加到通讯录" ---
-        add_btn = add_friend_win.ButtonControl(Name="添加到通讯录")
+        add_btn = add_friend_win.ButtonControl(Name=_("添加到通讯录"))
         if not add_btn.Exists(maxSearchSeconds=3):
             # 检查是否已经是好友（出现"发消息"按钮）
-            chat_btn = add_friend_win.ButtonControl(Name="发消息")
+            chat_btn = add_friend_win.ButtonControl(Name=_("发消息"))
             if chat_btn.Exists(0, 0):
                 raise RuntimeError("对方已经是好友，无需添加")
             raise WxControlNotFoundError("未找到'添加到通讯录'按钮，可能搜索无结果")
@@ -5505,7 +5529,7 @@ class Session:
         # 填写申请消息
         if message is not None:
             msg_edit = verify_win.EditControl(
-                ClassName="mmui::XValidatorTextEdit", Name="发送添加朋友申请",
+                ClassName="mmui::XValidatorTextEdit", Name=_("发送添加朋友申请"),
             )
             if msg_edit.Exists(maxSearchSeconds=1):
                 input_wx.click(msg_edit)
@@ -5519,7 +5543,7 @@ class Session:
         # 填写备注
         if remark is not None:
             remark_edit = verify_win.EditControl(
-                ClassName="mmui::XLineEdit", Name="修改备注",
+                ClassName="mmui::XLineEdit", Name=_("修改备注"),
             )
             if remark_edit.Exists(maxSearchSeconds=1):
                 input_wx.click(remark_edit)
@@ -5534,7 +5558,7 @@ class Session:
         if permission == "chatonly":
             perm_item = verify_win.GroupControl(
                 ClassName="mmui::ProfileFormPermissionItemUi",
-                Name="仅聊天",
+                Name=_("仅聊天"),
             )
             if perm_item.Exists(maxSearchSeconds=1):
                 input_wx.click(perm_item)
@@ -5543,7 +5567,7 @@ class Session:
         # 设置朋友圈和状态开关
         if hide_my_posts:
             sw = verify_win.CheckBoxControl(
-                ClassName="mmui::XSwitchButton", Name="不让他（她）看",
+                ClassName="mmui::XSwitchButton", Name=_("不让他（她）看"),
             )
             if sw.Exists(maxSearchSeconds=1):
                 toggle = sw.GetTogglePattern()
@@ -5553,7 +5577,7 @@ class Session:
 
         if hide_their_posts:
             sw = verify_win.CheckBoxControl(
-                ClassName="mmui::XSwitchButton", Name="不看他（她）",
+                ClassName="mmui::XSwitchButton", Name=_("不看他（她）"),
             )
             if sw.Exists(maxSearchSeconds=1):
                 toggle = sw.GetTogglePattern()
@@ -5649,7 +5673,7 @@ class Moment:
                 return True
 
         # 未点赞，点击"赞"
-        btn = win.TextControl(Name="赞", ClassName="mmui::XTextView")
+        btn = win.TextControl(Name=_("赞"), ClassName="mmui::XTextView")
         if btn.Exists(0, 0):
             input_wx.click(btn)
             time.sleep(0.3)
@@ -5765,7 +5789,7 @@ class Moment:
         # 回到顶部
         refresh_btn = self.friend_circle._win.ButtonControl(
             ClassName="mmui::XTabBarItem",
-            Name="刷新",
+            Name=_("刷新"),
         )
         if refresh_btn.Exists(maxSearchSeconds=2):
             input_wx.click(refresh_btn)
@@ -5818,8 +5842,8 @@ class Moment:
             time.sleep(0.3)
 
             # 检查操作栏是否出现
-            if (win.TextControl(Name="赞", ClassName="mmui::XTextView").Exists(0, 0)
-                    or win.TextControl(Name="评论", ClassName="mmui::XTextView").Exists(0, 0)
+            if (win.TextControl(Name=_("赞"), ClassName="mmui::XTextView").Exists(0, 0)
+                    or win.TextControl(Name=_("评论"), ClassName="mmui::XTextView").Exists(0, 0)
                     or win.Control(Name=_("取消"), ClassName="mmui::XTextView").Exists(0, 0)
                     or win.Control(Name=_("取消"), ClassName="mmui::XButton").Exists(0, 0)):
                 return True
@@ -6124,7 +6148,7 @@ class FriendCircle(WeixinWindow):
         if position == "top":
             refresh_btn = self._win.ButtonControl(
                 ClassName="mmui::XTabBarItem",
-                Name="刷新",
+                Name=_("刷新"),
             )
             if refresh_btn.Exists(maxSearchSeconds=2):
                 input_wx.click(refresh_btn)
@@ -6210,7 +6234,7 @@ class FriendCircle(WeixinWindow):
         if position == "top":
             refresh_btn = self._win.ButtonControl(
                 ClassName="mmui::XTabBarItem",
-                Name="刷新",
+                Name=_("刷新"),
             )
             if refresh_btn.Exists(maxSearchSeconds=2):
                 input_wx.click(refresh_btn)
@@ -6281,7 +6305,7 @@ class FriendCircle(WeixinWindow):
     # 文本输入: EditControl, ClassName="mmui::XValidatorTextEdit"
     #           位于 mmui::PublishInputView > mmui::ReplyTextView 内
     # 表情按钮: ButtonControl, ClassName="mmui::XButton", Name="发送表情"
-    # 提醒谁看: GroupControl, ClassName="mmui::PublishComponent", Name="提醒谁看"
+    # 提醒谁看: GroupControl, ClassName="mmui::PublishComponent", Name=_("提醒谁看")
     # 谁可以看: ButtonControl, ClassName="mmui::PublishPrivacyView", Name 以 "谁可以看" 开头
     # 发表按钮: ButtonControl, ClassName="mmui::XOutlineButton", Name="发表"
     # 取消按钮: ButtonControl, ClassName="mmui::XOutlineButton", Name="取消"
@@ -6448,7 +6472,7 @@ class FriendCircle(WeixinWindow):
         # 点击"提醒谁看"
         remind_btn = panel.GroupControl(
             ClassName="mmui::PublishComponent",
-            Name="提醒谁看",
+            Name=_("提醒谁看"),
         )
         if not remind_btn.Exists(maxSearchSeconds=2):
             raise WxControlNotFoundError("未找到'提醒谁看'按钮")
@@ -6547,8 +6571,8 @@ class FriendCircle(WeixinWindow):
         SessionPickerWindow 内部结构:
         - 搜索框: EditControl, Name=_("搜索"), ClassName="mmui::XValidatorTextEdit"
         - 搜索结果: CheckBoxControl, ClassName="mmui::SearchContactCellView"
-        - "标签" tab: ButtonControl, Name="标签", ClassName="mmui::XButton"
-        - "朋友" tab: ButtonControl, Name="朋友", ClassName="mmui::XButton"
+        - "标签" tab: ButtonControl, Name=_("标签"), ClassName="mmui::XButton"
+        - "朋友" tab: ButtonControl, Name=_("朋友"), ClassName="mmui::XButton"
         - 标签列表项: CheckBoxControl, ClassName="mmui::SPSelectionContactRow"
         - 完成按钮: ButtonControl, AutomationId="confirm_btn"
 
@@ -6571,7 +6595,7 @@ class FriendCircle(WeixinWindow):
             # 点击"标签" tab
             label_tab = picker.ButtonControl(
                 ClassName="mmui::XButton",
-                Name="标签",
+                Name=_("标签"),
                 searchDepth=5,
             )
             if label_tab.Exists(maxSearchSeconds=2):
@@ -6600,7 +6624,7 @@ class FriendCircle(WeixinWindow):
             # 点击"朋友" tab（如果有标签 tab 说明需要切换）
             friend_tab = picker.ButtonControl(
                 ClassName="mmui::XButton",
-                Name="朋友",
+                Name=_("朋友"),
                 searchDepth=5,
             )
             if friend_tab.Exists(maxSearchSeconds=2):
@@ -6715,7 +6739,7 @@ class FriendCircle(WeixinWindow):
             # 点击"选照片或视频"
             menu_item = self._win.MenuItemControl(
                 ClassName="mmui::XMenuView",
-                Name="选照片或视频",
+                Name=_("选照片或视频"),
             )
             if not menu_item.Exists(maxSearchSeconds=2):
                 raise WxControlNotFoundError("未找到'选照片或视频'菜单项")
@@ -6740,7 +6764,7 @@ class FriendCircle(WeixinWindow):
                     # "添加图片"是 ListItemControl，ClassName="mmui::PublishImageAddGridCell"
                     add_cell = panel.ListItemControl(
                         ClassName="mmui::PublishImageAddGridCell",
-                        Name="添加图片",
+                        Name=_("添加图片"),
                         searchDepth=10,
                     )
                     if not add_cell.Exists(maxSearchSeconds=3):
@@ -6754,7 +6778,7 @@ class FriendCircle(WeixinWindow):
             # 纯文字：点击"发表文字"
             menu_item = self._win.MenuItemControl(
                 ClassName="mmui::XMenuView",
-                Name="发表文字",
+                Name=_("发表文字"),
             )
             if not menu_item.Exists(maxSearchSeconds=2):
                 raise WxControlNotFoundError("未找到'发表文字'菜单项")
@@ -7115,7 +7139,7 @@ class FileManager(WeixinWindow):
         if not self.exists:
             self.wx.navigator.switch_to("更多")
             chat_file_btn = self.wx._win.ButtonControl(
-                Name="聊天文件", searchDepth=10
+                Name=_("聊天文件"), searchDepth=10
             )
             if not chat_file_btn.Exists(maxSearchSeconds=3):
                 raise WxControlNotFoundError("未找到'聊天文件'按钮")
@@ -7421,29 +7445,71 @@ class Chat:
     _EMOTION_CLASS_NAMES = {"mmui::ChatEmojiItemView", "mmui::ChatBubbleReferItemView"}
     _FILE_BUBBLE_CLASS_NAMES = {"mmui::ChatFileItemView", "mmui::ChatBubbleItemView"}
 
-    # ---- 消息 Name 正则匹配 ----
-    # 文件消息
-    _FILE_SENDING_RE = re.compile(r"^文件\n进度[:：]\s*\d+%\n.+\n(?!.*发送中断)", re.DOTALL)
-    _FILE_FAILED_RE = re.compile(r"^文件\n进度[:：]\s*\d+%\n.+\n发送中断\n", re.DOTALL)
-    _FILE_SENT_RE = re.compile(r"^文件\n(?!进度[:：])")
-    # 图片消息
-    _IMAGE_NAME_RE = re.compile(r"^(?:发送失败\s+|发送中\s+)?图片$")
-    # 表情消息
-    _EMOTION_NAME_RE = re.compile(r"^(?:发送失败\s+|发送中\s+)?动画表情")
-    _ANIMATED_EMOJI_RE = re.compile(r"^动画表情(\s+\[.+\])?$")
-    # 视频消息
-    _VIDEO_NAME_RE = re.compile(r"^视频(?:\s|$)")
-    _VIDEO_SENDING_RE = re.compile(r"^视频\s+进度[:：]\s*\d+%")
-    _VIDEO_FAILED_RE = re.compile(r"^视频\s+上传\s*暂停")
-    _VIDEO_SENT_RE = re.compile(r"^视频(?:\s+\d+:\d+)?$")
+    # ---- 消息 Name 正则匹配（动态构建，支持多语言） ----
+
+    @staticmethod
+    def _FILE_SENDING_RE():
+        file_kw = _("文件")
+        progress_kw = _("进度")
+        interrupted_kw = _("发送中断")
+        return re.compile(rf"^{re.escape(file_kw)}\n{re.escape(progress_kw)}[:：]\s*\d+%\n.+\n(?!.*{re.escape(interrupted_kw)})", re.DOTALL)
+
+    @staticmethod
+    def _FILE_FAILED_RE():
+        file_kw = _("文件")
+        progress_kw = _("进度")
+        interrupted_kw = _("发送中断")
+        return re.compile(rf"^{re.escape(file_kw)}\n{re.escape(progress_kw)}[:：]\s*\d+%\n.+\n{re.escape(interrupted_kw)}\n", re.DOTALL)
+
+    @staticmethod
+    def _FILE_SENT_RE():
+        file_kw = _("文件")
+        progress_kw = _("进度")
+        return re.compile(rf"^{re.escape(file_kw)}\n(?!{re.escape(progress_kw)}[:：])")
+
+    @staticmethod
+    def _IMAGE_NAME_RE():
+        failed_kw = _("发送失败")
+        sending_kw = _("发送中")
+        image_kw = _("图片")
+        return re.compile(rf"^(?:{re.escape(failed_kw)}\s+|{re.escape(sending_kw)}\s+)?{re.escape(image_kw)}$")
+
+    @staticmethod
+    def _EMOTION_NAME_RE():
+        failed_kw = _("发送失败")
+        sending_kw = _("发送中")
+        emoji_kw = _("动画表情")
+        return re.compile(rf"^(?:{re.escape(failed_kw)}\s+|{re.escape(sending_kw)}\s+)?{re.escape(emoji_kw)}")
+
+    @staticmethod
+    def _ANIMATED_EMOJI_RE():
+        emoji_kw = _("动画表情")
+        return re.compile(rf"^{re.escape(emoji_kw)}(\s+\[.+\])?$")
+
+    @staticmethod
+    def _VIDEO_NAME_RE():
+        video_kw = _("视频")
+        return re.compile(rf"^{re.escape(video_kw)}(?:\s|$)")
+
+    @staticmethod
+    def _VIDEO_SENDING_RE():
+        video_kw = _("视频")
+        progress_kw = _("进度")
+        return re.compile(rf"^{re.escape(video_kw)}\s+{re.escape(progress_kw)}[:：]\s*\d+%")
+
+    @staticmethod
+    def _VIDEO_FAILED_RE():
+        video_kw = _("视频")
+        upload_kw = _("上传中")
+        return re.compile(rf"^{re.escape(video_kw)}\s+{re.escape(upload_kw[:2])}\s*暂停")
+
+    @staticmethod
+    def _VIDEO_SENT_RE():
+        video_kw = _("视频")
+        return re.compile(rf"^{re.escape(video_kw)}(?:\s+\d+:\d+)?$")
 
     # ---- 消息状态前缀映射 ----
-    _STATUS_PREFIXES = {
-        "发送失败 ": MessageStatus.FAILED,
-        "发送中 ": MessageStatus.SENDING,
-        "发送失败\n": MessageStatus.FAILED,
-        "发送中\n": MessageStatus.SENDING,
-    }
+    # 注意：状态前缀通过 _check_status_by_prefix 动态匹配，不再使用静态字典
 
     # ---- 发送收藏相关常量 ----
     FAV_SEND_BTN_NAME = "发送收藏"
@@ -7689,9 +7755,11 @@ class Chat:
         space_sep=False: 前缀用换行分隔（文件消息）
         """
         sep = " " if space_sep else "\n"
-        if name.startswith(f"发送失败{sep}"):
+        failed_kw = _("发送失败")
+        sending_kw = _("发送中")
+        if name.startswith(f"{failed_kw}{sep}"):
             return MessageStatus.FAILED
-        if name.startswith(f"发送中{sep}"):
+        if name.startswith(f"{sending_kw}{sep}"):
             return MessageStatus.SENDING
         return MessageStatus.SENT
 
@@ -7750,18 +7818,18 @@ class Chat:
 
             # ChatBubbleItemView — 通用气泡
             if cls == "mmui::ChatBubbleItemView":
-                if name.startswith("文件\n"):
+                if name.startswith(_("文件") + "\n"):
                     return self.check_file_message_status(timeout=timeout)
                 # 其他气泡类型（链接、位置等）无传输状态，直接返回 SENT
                 return MessageStatus.SENT
 
             # ChatBubbleReferItemView — 图片/视频/表情
             if cls == "mmui::ChatBubbleReferItemView":
-                if self._IMAGE_NAME_RE.match(name):
+                if self._IMAGE_NAME_RE().match(name):
                     return self.check_image_message_status(timeout=timeout)
-                if self._VIDEO_NAME_RE.match(name):
+                if self._VIDEO_NAME_RE().match(name):
                     return self.check_video_message_status(timeout=timeout)
-                if self._EMOTION_NAME_RE.match(name):
+                if self._EMOTION_NAME_RE().match(name):
                     return self.check_emotion_message_status(timeout=timeout)
                 # 其他 refer 类型
                 return self._check_status_by_prefix(name, space_sep=True)
@@ -7793,7 +7861,9 @@ class Chat:
             else:
                 name = ctrl.Name
                 if content:
-                    expected = {content, f"发送失败 {content}", f"发送中 {content}"}
+                    failed_kw = _("发送失败")
+                    sending_kw = _("发送中")
+                    expected = {content, f"{failed_kw} {content}", f"{sending_kw} {content}"}
                     if name not in expected:
                         status = MessageStatus.UNKNOWN
                     else:
@@ -7861,7 +7931,7 @@ class Chat:
             if cls not in self._FILE_BUBBLE_CLASS_NAMES:
                 continue
             # ChatBubbleItemView 是通用气泡，需要通过 Name 过滤文件消息
-            if cls == "mmui::ChatBubbleItemView" and not ctrl.Name.startswith("文件\n"):
+            if cls == "mmui::ChatBubbleItemView" and not ctrl.Name.startswith(_("文件") + "\n"):
                 continue
             candidates.append(ctrl)
 
@@ -7885,11 +7955,11 @@ class Chat:
         """
         if not name:
             return MessageStatus.UNKNOWN
-        if Chat._FILE_FAILED_RE.match(name):
+        if Chat._FILE_FAILED_RE().match(name):
             return MessageStatus.FAILED
-        if Chat._FILE_SENDING_RE.match(name):
+        if Chat._FILE_SENDING_RE().match(name):
             return MessageStatus.SENDING
-        if Chat._FILE_SENT_RE.match(name):
+        if Chat._FILE_SENT_RE().match(name):
             return MessageStatus.SENT
         return MessageStatus.UNKNOWN
 
@@ -7949,7 +8019,7 @@ class Chat:
                 continue
             # ChatBubbleReferItemView 是通用类型，需要通过 Name 过滤图片消息
             if cls == "mmui::ChatBubbleReferItemView":
-                if not self._IMAGE_NAME_RE.match(ctrl.Name):
+                if not self._IMAGE_NAME_RE().match(ctrl.Name):
                     continue
             candidates.append(ctrl)
 
@@ -8016,7 +8086,7 @@ class Chat:
                 continue
             # ChatBubbleReferItemView 是通用类型，需要通过 Name 过滤表情消息
             if cls == "mmui::ChatBubbleReferItemView":
-                if not self._EMOTION_NAME_RE.match(ctrl.Name):
+                if not self._EMOTION_NAME_RE().match(ctrl.Name):
                     continue
             candidates.append(ctrl)
 
@@ -8084,7 +8154,7 @@ class Chat:
                 continue
             # ChatBubbleReferItemView 是通用类型，需要通过 Name 过滤视频消息
             if cls == "mmui::ChatBubbleReferItemView":
-                if not self._VIDEO_NAME_RE.match(ctrl.Name):
+                if not self._VIDEO_NAME_RE().match(ctrl.Name):
                     continue
             candidates.append(ctrl)
 
@@ -8108,11 +8178,11 @@ class Chat:
         """
         if not name:
             return MessageStatus.UNKNOWN
-        if Chat._VIDEO_FAILED_RE.match(name):
+        if Chat._VIDEO_FAILED_RE().match(name):
             return MessageStatus.FAILED
-        if Chat._VIDEO_SENDING_RE.match(name):
+        if Chat._VIDEO_SENDING_RE().match(name):
             return MessageStatus.SENDING
-        if Chat._VIDEO_SENT_RE.match(name):
+        if Chat._VIDEO_SENT_RE().match(name):
             return MessageStatus.SENT
         return MessageStatus.UNKNOWN
 
@@ -8365,7 +8435,7 @@ class Chat:
         time.sleep(0.2)
 
         # 点击"打开"按钮
-        open_btn = dlg.ButtonControl(Name="打开(&O)")
+        open_btn = dlg.ButtonControl(Name=_("打开(&O)"))
         if not open_btn.Exists(maxSearchSeconds=2):
             open_btn = dlg.ButtonControl(Name="Open(&O)")
         if not open_btn.Exists(0, 0):
@@ -9004,7 +9074,7 @@ class Chat:
     # 联系人头像: ButtonControl, ClassName="mmui::ChatMemberCell",
     #   AutomationId="single_chat_member_cell"
     # 资料面板更多: ButtonControl, Name=_("更多"), ClassName="mmui::XButton"
-    # 推荐菜单项: MenuItemControl, Name="把他推荐给朋友",
+    # 推荐菜单项: MenuItemControl, Name=_("把他推荐给朋友"),
     #   ClassName="mmui::XMenuView", AutomationId="XMenuItem"
     # 发送给弹窗: WindowControl, Name=_("微信发送给"),
     #   ClassName="mmui::SessionPickerWindow"
@@ -9108,7 +9178,7 @@ class Chat:
         for child, _ in auto.WalkControl(self._win, maxDepth=20):
             if (child.ControlType == auto.ControlType.ButtonControl
                     and child.ClassName == "mmui::XButton"
-                    and child.Name == "更多"):
+                    and child.Name == _("更多")):
                 child_rect = child.BoundingRectangle
                 if child_rect.left > win_center_x:
                     input_wx.click(child)
@@ -9120,7 +9190,7 @@ class Chat:
         """点击弹出菜单中的"把他推荐给朋友" """
         menu_item = self._win.MenuItemControl(
             ClassName="mmui::XMenuView",
-            Name="把他推荐给朋友",
+            Name=_("把他推荐给朋友"),
         )
         if not menu_item.Exists(maxSearchSeconds=2):
             raise WxControlNotFoundError("未找到'把他推荐给朋友'菜单项")
@@ -9569,25 +9639,36 @@ class Chat:
         """
         对 mmui::ChatBubbleItemView 通用气泡做二次分类。
         """
-        if name.startswith("位置"):
+        loc_kw = _("位置")
+        file_kw = _("文件")
+        link_kw = _("链接")
+        voice_call_kw = _("语音通话")
+        video_call_kw = _("视频通话")
+        chat_history_kw = _("聊天记录")
+        merge_kw = _("合并")
+        note_kw = _("笔记")
+        red_packet_kw = _("微信红包")
+        transfer_kw = _("微信转账")
+
+        if name.startswith(loc_kw):
             return LocationMessage
-        if name.startswith("文件\n") or name.startswith("文件\r"):
+        if name.startswith(f"{file_kw}\n") or name.startswith(f"{file_kw}\r"):
             return FileMessage
-        if name.startswith("链接\n") or name.startswith("链接\r"):
+        if name.startswith(f"{link_kw}\n") or name.startswith(f"{link_kw}\r"):
             return LinkMessage
-        if name.startswith("[链接]"):
+        if name.startswith(f"[{link_kw}]"):
             return LinkMessage
         if re.search(r"https?://", name):
             return LinkMessage
-        if name.startswith("语音通话") or name.startswith("视频通话"):
+        if name.startswith(voice_call_kw) or name.startswith(video_call_kw):
             return VoipMessage
-        if "聊天记录" in name or name.startswith("合并"):
+        if chat_history_kw in name or name.startswith(merge_kw):
             return MergeMessage
-        if "笔记" in name:
+        if note_kw in name:
             return NoteMessage
-        if name.endswith("微信红包") and "  " in name:
+        if name.endswith(red_packet_kw) and "  " in name:
             return RedPacketMessage
-        if name.endswith("微信转账") and name.startswith("￥"):
+        if name.endswith(transfer_kw) and name.startswith("￥"):
             return TransferMessage
         if MusicMessage.match(name):
             return MusicMessage
@@ -9606,11 +9687,13 @@ class Chat:
         - 动画表情: Name 匹配 "动画表情 [xxx]"，如 "动画表情 [嗅嗅]"
         - 引用消息: 其他情况
         """
-        if name == "图片":
+        image_kw = _("图片")
+        video_kw = _("视频")
+        if name == image_kw:
             return ImageMessage
-        if name.startswith("视频"):
+        if name.startswith(video_kw):
             return VideoMessage
-        if Chat._ANIMATED_EMOJI_RE.match(name):
+        if Chat._ANIMATED_EMOJI_RE().match(name):
             return EmotionMessage
         return QuoteMessage
 
@@ -9828,19 +9911,22 @@ class Chat:
         if msg_cls is SystemMessage:
             return MessageStatus.UNKNOWN, raw_name
 
+        failed_kw = _("发送失败")
+        sending_kw = _("发送中")
+
         # 文件消息优先检测换行分隔的前缀
         if msg_cls is FileMessage:
             for prefix, status in [
-                ("发送失败\n", MessageStatus.FAILED),
-                ("发送中\n", MessageStatus.SENDING),
+                (f"{failed_kw}\n", MessageStatus.FAILED),
+                (f"{sending_kw}\n", MessageStatus.SENDING),
             ]:
                 if raw_name.startswith(prefix):
                     return status, raw_name[len(prefix):]
 
         # 通用前缀检测（空格分隔）
         for prefix, status in [
-            ("发送失败 ", MessageStatus.FAILED),
-            ("发送中 ", MessageStatus.SENDING),
+            (f"{failed_kw} ", MessageStatus.FAILED),
+            (f"{sending_kw} ", MessageStatus.SENDING),
         ]:
             if raw_name.startswith(prefix):
                 return status, raw_name[len(prefix):]
@@ -9946,7 +10032,7 @@ class Chat:
         try:
             # 2. 点击"清空聊天记录"按钮
             clear_btn = self._win.ButtonControl(
-                Name="清空聊天记录",
+                Name=_("清空聊天记录"),
             )
             if not clear_btn.Exists(maxSearchSeconds=3):
                 raise WxControlNotFoundError("未找到'清空聊天记录'按钮")
@@ -9955,7 +10041,7 @@ class Chat:
 
             # 3. 确认弹窗中点击"清空"
             confirm_btn = self._win.ButtonControl(
-                Name="清空",
+                Name=_("清空"),
                 ClassName="mmui::XOutlineButton",
             )
             if not confirm_btn.Exists(maxSearchSeconds=3):
@@ -10039,7 +10125,7 @@ class Chat:
 
             # 5. 确认弹窗中点击"清空"
             confirm_btn = self._win.ButtonControl(
-                Name="清空",
+                Name=_("清空"),
                 ClassName="mmui::XOutlineButton",
             )
             if not confirm_btn.Exists(maxSearchSeconds=3):
@@ -10261,7 +10347,7 @@ class Chat:
             confirm_btn = detail_view.ButtonControl(
                 ClassName="mmui::XOutlineButton",
                 AutomationId="confirm_btn",
-                Name="添加",
+                Name=_("添加"),
                 searchDepth=2,
             )
             if not confirm_btn.Exists(maxSearchSeconds=3):
@@ -10271,8 +10357,8 @@ class Chat:
             time.sleep(0.5)
 
             # 非好友会邀请失败
-            if self._win.TextControl(Name="未能邀请").Exists(0, 0):
-                input_wx.click(self._win.ButtonControl(Name="我知道了"))
+            if self._win.TextControl(Name=_("未能邀请")).Exists(0, 0):
+                input_wx.click(self._win.ButtonControl(Name=_("我知道了")))
 
             # 等待操作窗口消失后再收起聊天信息面板
             for _ in range(30):
@@ -10300,7 +10386,7 @@ class Chat:
         - 搜索结果视图: mmui::SearchGroupMemberView（非 SearchContactNewChatView）
         - 搜索结果列表: mmui::XTableView, AutomationId="sp_search_list"
         - 搜索结果项: mmui::XTableCell (ListItemControl)
-        - 确认按钮: Name="移出"（非"完成"）
+        - 确认按钮: Name=_("移出")（非"完成"）
 
         流程：
         1. 点击"聊天信息"按钮，展开聊天信息面板
@@ -10429,7 +10515,7 @@ class Chat:
             confirm_btn = detail_view.ButtonControl(
                 ClassName="mmui::XOutlineButton",
                 AutomationId="confirm_btn",
-                Name="移出",
+                Name=_("移出"),
                 searchDepth=2,
             )
             if not confirm_btn.Exists(maxSearchSeconds=3):
@@ -10905,7 +10991,7 @@ class Chat:
                            int(pane_top + fi["center"][1]))
                 time.sleep(0.5)
 
-                publish_btn = announcement_pane.ButtonControl(Name="发布")
+                publish_btn = announcement_pane.ButtonControl(Name=_("发布"))
                 if publish_btn.Exists(maxSearchSeconds=3):
                     # publish_btn.GetInvokePattern().Invoke()
                     input_wx.click(publish_btn)
@@ -11167,7 +11253,7 @@ class Chat:
             # 折叠该聊天只在消息免打扰开启时存在
             fold_sw = self._win.CheckBoxControl(
                 ClassName="mmui::XSwitchButton",
-                Name="折叠该聊天",
+                Name=_("折叠该聊天"),
             )
             if fold_sw.Exists(maxSearchSeconds=2):
                 toggle = fold_sw.GetTogglePattern()
@@ -11254,15 +11340,15 @@ class Chat:
             # 使用图片识别定位"群聊名称"
             hwnd = self._win.NativeWindowHandle
             if not hwnd:
-                raise RuntimeError("无法获取微信窗口句柄")
+                raise WxAutoError("无法获取微信窗口句柄")
 
             png_bytes = capture_window(hwnd, mode="print_window")
             ocr_data = self._get_image_text(png_bytes)
 
-            if "群聊名称" not in ocr_data:
+            if _("群聊名称") not in ocr_data:
                 raise OCRError("OCR 未识别到'群聊名称'文本，请确认聊天信息面板已展开")
 
-            info = ocr_data["群聊名称"]
+            info = ocr_data[_("群聊名称")]
             # 窗口左上角屏幕坐标
             win_left, win_top, _, _ = win32gui.GetWindowRect(hwnd)
             # 点击"群聊名称"文本中心 X，Y 偏移一个文本高度（即名称值所在行）
@@ -11325,9 +11411,9 @@ class Chat:
             ocr_data = self._get_image_text(png_bytes)
 
             # 点击"群公告"文本下方区域
-            if "群公告" not in ocr_data:
-                raise OCRError("OCR 未识别到'群公告'文本，请确认聊天信息面板已展开")
-            info = ocr_data["群公告"]
+            if _("群公告") not in ocr_data:
+                raise OCRError("OCR 未识别到'%s'文本，请确认聊天信息面板已展开" % _("群公告"))
+            info = ocr_data[_("群公告")]
             win_left, win_top, _, _ = win32gui.GetWindowRect(hwnd)
             click_x = int(win_left + info["center"][0])
             click_y = int(win_top + info["center"][1] + info["height"])
@@ -11349,8 +11435,8 @@ class Chat:
                 raise OCRError("群公告窗口 OCR 未识别到任何文本")
 
             # 如果之前发布过群公告，需要先点击"编辑群公告"
-            if "编辑群公告" in ocr_data:
-                info = ocr_data["编辑群公告"]
+            if _("编辑群公告") in ocr_data:
+                info = ocr_data[_("编辑群公告")]
                 pane_left, pane_top, _, _ = win32gui.GetWindowRect(pane_hwnd)
                 click_x = int(pane_left + info["center"][0])
                 click_y = int(pane_top + info["center"][1])
@@ -11369,9 +11455,9 @@ class Chat:
             time.sleep(0.5)
 
             # 点击"完成"按钮（OCR 定位）
-            if "完成" not in ocr_data:
+            if _("完成") not in ocr_data:
                 raise OCRError(f"OCR 未识别到'完成'按钮，识别到的文本: {list(ocr_data.keys())}")
-            info = ocr_data["完成"]
+            info = ocr_data[_("完成")]
             pane_left, pane_top, _, _ = win32gui.GetWindowRect(pane_hwnd)
             click_x = int(pane_left + info["center"][0])
             click_y = int(pane_top + info["center"][1])
@@ -11379,10 +11465,10 @@ class Chat:
             time.sleep(0.5)
 
             # 点击"发布"按钮（WebView 内的按钮，支持 InvokePattern）
-            publish_btn = announcement_pane.ButtonControl(Name="发布")
+            publish_btn = announcement_pane.ButtonControl(Name=_("发布"))
             if not publish_btn.Exists(maxSearchSeconds=3):
-                raise WxControlNotFoundError("未找到'发布'按钮")
-            # publish_btn.GetInvokePattern().Invoke()
+                raise WxControlNotFoundError("未找到'%s'按钮" % _("发布"))
+
             input_wx.click(publish_btn)
 
             time.sleep(1)
@@ -11789,16 +11875,16 @@ class Chat:
 
             remark_pop = self._win.WindowControl(
                 ClassName="mmui::ProfileUniquePop",
-                Name="设置备注和标签",
+                Name=_("设置备注和标签"),
             )
             if not remark_pop.Exists(maxSearchSeconds=3):
-                raise WxControlNotFoundError("未找到'设置备注和标签'弹窗")
+                raise WxControlNotFoundError("未找到'%s'弹窗" % _("设置备注和标签"))
 
             # ---- 1. 备注 ----
             if remark is not None:
                 remark_edit = remark_pop.EditControl(
                     ClassName="mmui::XLineEdit",
-                    Name="修改备注名",
+                    Name=_("修改备注名"),
                 )
                 if remark_edit.Exists(maxSearchSeconds=2):
                     input_wx.click(remark_edit)
@@ -11821,14 +11907,14 @@ class Chat:
             # ---- 2. 标签（覆盖式） ----
             if labels is not None:
                 tag_btn = remark_pop.ButtonControl(
-                    Name="修改标签", AutomationId="button",
+                    Name=_("修改标签"), AutomationId="button",
                 )
                 if tag_btn.Exists(maxSearchSeconds=2):
                     existing_labels = set()
                     tag_text = tag_btn.TextControl(ClassName="mmui::XTextView")
                     if tag_text.Exists(0, 0):
                         name = tag_text.Name
-                        if name and name != "搜索或创建标签...":
+                        if name and name != _("搜索或创建标签..."):
                             existing_labels = {t.strip() for t in name.split(",") if t.strip()}
 
                     target_set = set(labels)
@@ -11862,7 +11948,7 @@ class Chat:
 
                         title_text = remark_pop.TextControl(
                             ClassName="mmui::XTextView",
-                            Name="设置备注和标签",
+                            Name=_("设置备注和标签"),
                         )
                         if title_text.Exists(0, 0):
                             input_wx.click(title_text)
@@ -11886,7 +11972,7 @@ class Chat:
                         if separator_view:
                             num_view = separator_view.GetParentControl()
                             if num_view:
-                                del_btn = num_view.ButtonControl(Name="删除电话")
+                                del_btn = num_view.ButtonControl(Name=_("删除电话"))
                                 if del_btn.Exists(0, 0):
                                     input_wx.click(del_btn)
                                     continue
@@ -11894,17 +11980,17 @@ class Chat:
 
                     for phone in phones:
                         empty_field = phone_area.TextControl(
-                            ClassName="mmui::XLineField", Name="填写电话",
+                            ClassName="mmui::XLineField", Name=_("填写电话"),
                         )
                         if not empty_field.Exists(0, 0):
                             add_btn = phone_area.ButtonControl(
-                                Name="添加电话", AutomationId="button",
+                                Name=_("添加电话"), AutomationId="button",
                             )
                             if add_btn.Exists(maxSearchSeconds=1):
                                 input_wx.click(add_btn)
 
                         empty_field = phone_area.TextControl(
-                            ClassName="mmui::XLineField", Name="填写电话",
+                            ClassName="mmui::XLineField", Name=_("填写电话"),
                         )
                         if empty_field.Exists(maxSearchSeconds=2):
                             phone_edit = empty_field.EditControl(
@@ -11922,7 +12008,7 @@ class Chat:
             # ---- 4. 描述 ----
             if description is not None:
                 desc_edit = remark_pop.EditControl(
-                    ClassName="mmui::XValidatorTextEdit", Name="修改描述",
+                    ClassName="mmui::XValidatorTextEdit", Name=_("修改描述"),
                 )
                 if desc_edit.Exists(maxSearchSeconds=2):
                     _scroll_to_bottom()
@@ -11940,7 +12026,7 @@ class Chat:
                 if img_list.Exists(0, 0):
                     for _ in range(20):
                         img_item = img_list.GroupControl(
-                            Name="描述图片",
+                            Name=_("描述图片"),
                             AutomationId="desc_img_list_view_.desc_img_button_view",
                         )
                         if not img_item.Exists(0, 0):
@@ -11964,7 +12050,7 @@ class Chat:
 
                 for img_path in images:
                     add_img_btn = remark_pop.GroupControl(
-                        Name="添加图片",
+                        Name=_("添加图片"),
                         AutomationId="desc_img_list_view_.add_button_view",
                     )
                     if not add_img_btn.Exists(maxSearchSeconds=2):
@@ -12021,14 +12107,14 @@ class Chat:
 
             remark_pop = self._win.WindowControl(
                 ClassName="mmui::ProfileUniquePop",
-                Name="设置备注和标签",
+                Name=_("设置备注和标签"),
             )
             if not remark_pop.Exists(maxSearchSeconds=3):
                 raise WxControlNotFoundError("未找到'设置备注和标签'弹窗")
 
             remark_edit = remark_pop.EditControl(
                 ClassName="mmui::XLineEdit",
-                Name="修改备注名",
+                Name=_("修改备注名"),
             )
             if not remark_edit.Exists(maxSearchSeconds=3):
                 raise WxControlNotFoundError("未找到'修改备注名'编辑框")
@@ -12077,14 +12163,14 @@ class Chat:
 
             remark_pop = self._win.WindowControl(
                 ClassName="mmui::ProfileUniquePop",
-                Name="设置备注和标签",
+                Name=_("设置备注和标签"),
             )
             if not remark_pop.Exists(maxSearchSeconds=3):
                 raise WxControlNotFoundError("未找到'设置备注和标签'弹窗")
 
             existing_labels = set()
             tag_btn = remark_pop.ButtonControl(
-                Name="修改标签",
+                Name=_("修改标签"),
                 AutomationId="button",
             )
             if not tag_btn.Exists(maxSearchSeconds=3):
@@ -12101,7 +12187,7 @@ class Chat:
             new_labels = [l for l in labels if l not in existing_labels]
             if not new_labels:
                 logger.debug(f"所有标签已存在，跳过: {self.chat_name} -> {labels}")
-                cancel_btn = remark_pop.ButtonControl(Name="取消")
+                cancel_btn = remark_pop.ButtonControl(Name=_("取消"))
                 if cancel_btn.Exists(maxSearchSeconds=1):
                     input_wx.click(cancel_btn)
                 return
@@ -12171,14 +12257,14 @@ class Chat:
 
             remark_pop = self._win.WindowControl(
                 ClassName="mmui::ProfileUniquePop",
-                Name="设置备注和标签",
+                Name=_("设置备注和标签"),
             )
             if not remark_pop.Exists(maxSearchSeconds=3):
                 raise WxControlNotFoundError("未找到'设置备注和标签'弹窗")
 
             existing_labels = set()
             tag_btn = remark_pop.ButtonControl(
-                Name="修改标签",
+                Name=_("修改标签"),
                 AutomationId="button",
             )
             if not tag_btn.Exists(maxSearchSeconds=3):
@@ -12195,7 +12281,7 @@ class Chat:
             to_remove = [l for l in labels if l in existing_labels]
             if not to_remove:
                 logger.debug(f"标签均不存在，跳过: {self.chat_name} -> {labels}")
-                cancel_btn = remark_pop.ButtonControl(Name="取消")
+                cancel_btn = remark_pop.ButtonControl(Name=_("取消"))
                 if cancel_btn.Exists(maxSearchSeconds=1):
                     input_wx.click(cancel_btn)
                 return
@@ -12247,7 +12333,7 @@ class Chat:
 
             remark_pop = self._win.WindowControl(
                 ClassName="mmui::ProfileUniquePop",
-                Name="设置备注和标签",
+                Name=_("设置备注和标签"),
             )
             if not remark_pop.Exists(maxSearchSeconds=3):
                 raise WxControlNotFoundError("未找到'设置备注和标签'弹窗")
@@ -12275,7 +12361,7 @@ class Chat:
             new_phones = [p for p in phones if p not in existing_phones]
             if not new_phones:
                 logger.debug(f"所有电话号码已存在，跳过: {self.chat_name} -> {phones}")
-                cancel_btn = remark_pop.ButtonControl(Name="取消")
+                cancel_btn = remark_pop.ButtonControl(Name=_("取消"))
                 if cancel_btn.Exists(maxSearchSeconds=1):
                     input_wx.click(cancel_btn)
                 return
@@ -12283,11 +12369,11 @@ class Chat:
             for phone in new_phones:
                 empty_field = phone_area.TextControl(
                     ClassName="mmui::XLineField",
-                    Name="填写电话",
+                    Name=_("填写电话"),
                 )
                 if not empty_field.Exists(0, 0):
                     add_btn = phone_area.ButtonControl(
-                        Name="添加电话",
+                        Name=_("添加电话"),
                         AutomationId="button",
                     )
                     if not add_btn.Exists(maxSearchSeconds=2):
@@ -12297,7 +12383,7 @@ class Chat:
 
                 empty_field = phone_area.TextControl(
                     ClassName="mmui::XLineField",
-                    Name="填写电话",
+                    Name=_("填写电话"),
                 )
                 if not empty_field.Exists(maxSearchSeconds=2):
                     raise WxControlNotFoundError("未找到空的电话号码输入框")
@@ -12353,7 +12439,7 @@ class Chat:
 
             remark_pop = self._win.WindowControl(
                 ClassName="mmui::ProfileUniquePop",
-                Name="设置备注和标签",
+                Name=_("设置备注和标签"),
             )
             if not remark_pop.Exists(maxSearchSeconds=3):
                 raise WxControlNotFoundError("未找到'设置备注和标签'弹窗")
@@ -12370,7 +12456,7 @@ class Chat:
 
             for img_path in images:
                 add_img_btn = remark_pop.GroupControl(
-                    Name="添加图片",
+                    Name=_("添加图片"),
                     AutomationId="desc_img_list_view_.add_button_view",
                 )
                 if not add_img_btn.Exists(maxSearchSeconds=2):
@@ -12435,7 +12521,7 @@ class Chat:
 
             remark_pop = self._win.WindowControl(
                 ClassName="mmui::ProfileUniquePop",
-                Name="设置备注和标签",
+                Name=_("设置备注和标签"),
             )
             if not remark_pop.Exists(maxSearchSeconds=3):
                 raise WxControlNotFoundError("未找到'设置备注和标签'弹窗")
@@ -12464,7 +12550,7 @@ class Chat:
             to_remove = [p for p in phones if p in existing_phones]
             if not to_remove:
                 logger.debug(f"电话号码均不存在，跳过: {self.chat_name} -> {phones}")
-                cancel_btn = remark_pop.ButtonControl(Name="取消")
+                cancel_btn = remark_pop.ButtonControl(Name=_("取消"))
                 if cancel_btn.Exists(maxSearchSeconds=1):
                     input_wx.click(cancel_btn)
                 return
@@ -12479,7 +12565,7 @@ class Chat:
                     if separator_view:
                         num_view = separator_view.GetParentControl()
                         if num_view:
-                            del_btn = num_view.ButtonControl(Name="删除电话")
+                            del_btn = num_view.ButtonControl(Name=_("删除电话"))
                             if del_btn.Exists(maxSearchSeconds=1):
                                 input_wx.click(del_btn)
                                 time.sleep(0.3)
@@ -12522,7 +12608,7 @@ class Chat:
 
             remark_pop = self._win.WindowControl(
                 ClassName="mmui::ProfileUniquePop",
-                Name="设置备注和标签",
+                Name=_("设置备注和标签"),
             )
             if not remark_pop.Exists(maxSearchSeconds=3):
                 raise WxControlNotFoundError("未找到'设置备注和标签'弹窗")
@@ -12541,7 +12627,7 @@ class Chat:
                 AutomationId="desc_img_list_view_",
             )
             if not img_list.Exists(maxSearchSeconds=2):
-                cancel_btn = remark_pop.ButtonControl(Name="取消")
+                cancel_btn = remark_pop.ButtonControl(Name=_("取消"))
                 if cancel_btn.Exists(maxSearchSeconds=1):
                     input_wx.click(cancel_btn)
                 return
@@ -12553,7 +12639,7 @@ class Chat:
                     img_items.append(child)
 
             if not img_items:
-                cancel_btn = remark_pop.ButtonControl(Name="取消")
+                cancel_btn = remark_pop.ButtonControl(Name=_("取消"))
                 if cancel_btn.Exists(maxSearchSeconds=1):
                     input_wx.click(cancel_btn)
                 return
@@ -12601,7 +12687,7 @@ class Chat:
                     time.sleep(0.3)
                 logger.debug(f"删除备注图片成功: {self.chat_name} -> 删除{deleted}张")
             else:
-                cancel_btn = remark_pop.ButtonControl(Name="取消")
+                cancel_btn = remark_pop.ButtonControl(Name=_("取消"))
                 if cancel_btn.Exists(maxSearchSeconds=1):
                     input_wx.click(cancel_btn)
 
@@ -12622,7 +12708,7 @@ class Chat:
 
             # 发现"不再设为星标朋友"说明已是星标
             unstar_item = self._win.MenuItemControl(
-                ClassName="mmui::XMenuView", Name="不再设为星标朋友",
+                ClassName="mmui::XMenuView", Name=_("不再设为星标朋友"),
             )
             if unstar_item.Exists(0, 0):
                 input_wx.send_keys(self._win, "{Esc}")
@@ -12630,7 +12716,7 @@ class Chat:
                 return
 
             menu_item = self._win.MenuItemControl(
-                ClassName="mmui::XMenuView", Name="设为星标朋友",
+                ClassName="mmui::XMenuView", Name=_("设为星标朋友"),
             )
             if not menu_item.Exists(maxSearchSeconds=2):
                 input_wx.send_keys(self._win, "{Esc}")
@@ -12655,7 +12741,7 @@ class Chat:
 
             # 发现"设为星标朋友"说明当前不是星标
             star_item = self._win.MenuItemControl(
-                ClassName="mmui::XMenuView", Name="设为星标朋友",
+                ClassName="mmui::XMenuView", Name=_("设为星标朋友"),
             )
             if star_item.Exists(0, 0):
                 input_wx.send_keys(self._win, "{Esc}")
@@ -12663,7 +12749,7 @@ class Chat:
                 return
 
             menu_item = self._win.MenuItemControl(
-                ClassName="mmui::XMenuView", Name="不再设为星标朋友",
+                ClassName="mmui::XMenuView", Name=_("不再设为星标朋友"),
             )
             if not menu_item.Exists(maxSearchSeconds=2):
                 input_wx.send_keys(self._win, "{Esc}")
@@ -12688,7 +12774,7 @@ class Chat:
 
             # 检查菜单中是否有"移出黑名单"（说明已在黑名单中）
             unblack_item = self._win.MenuItemControl(
-                ClassName="mmui::XMenuView", Name="移出黑名单",
+                ClassName="mmui::XMenuView", Name=_("移出黑名单"),
             )
             if unblack_item.Exists(0, 0):
                 input_wx.send_keys(self._win, "{Esc}")
@@ -12696,7 +12782,7 @@ class Chat:
                 return
 
             menu_item = self._win.MenuItemControl(
-                ClassName="mmui::XMenuView", Name="加入黑名单",
+                ClassName="mmui::XMenuView", Name=_("加入黑名单"),
             )
             if not menu_item.Exists(maxSearchSeconds=2):
                 input_wx.send_keys(self._win, "{Esc}")
@@ -12704,7 +12790,7 @@ class Chat:
             input_wx.click(menu_item)
             time.sleep(0.5)
 
-            confirm_btn = self._win.ButtonControl(Name="确定")
+            confirm_btn = self._win.ButtonControl(Name=_("确定"))
             if confirm_btn.Exists(maxSearchSeconds=3):
                 input_wx.click(confirm_btn)
                 time.sleep(0.3)
@@ -12729,7 +12815,7 @@ class Chat:
 
             # 检查菜单中是否有"加入黑名单"（说明不在黑名单中）
             black_item = self._win.MenuItemControl(
-                ClassName="mmui::XMenuView", Name="加入黑名单",
+                ClassName="mmui::XMenuView", Name=_("加入黑名单"),
             )
             if black_item.Exists(0, 0):
                 input_wx.send_keys(self._win, "{Esc}")
@@ -12737,7 +12823,7 @@ class Chat:
                 return
 
             menu_item = self._win.MenuItemControl(
-                ClassName="mmui::XMenuView", Name="移出黑名单",
+                ClassName="mmui::XMenuView", Name=_("移出黑名单"),
             )
             if not menu_item.Exists(maxSearchSeconds=2):
                 input_wx.send_keys(self._win, "{Esc}")
@@ -12794,7 +12880,7 @@ class Chat:
 
             perm_pop = self._win.WindowControl(
                 ClassName="mmui::ProfileUniquePop",
-                Name="朋友权限",
+                Name=_("朋友权限"),
             )
             if not perm_pop.Exists(maxSearchSeconds=3):
                 raise WxControlNotFoundError("未找到'朋友权限'弹窗")
@@ -12807,7 +12893,7 @@ class Chat:
 
             chatonly_item = perm_pop.GroupControl(
                 ClassName="mmui::ProfileFormPermissionItemUi",
-                Name="仅聊天",
+                Name=_("仅聊天"),
             )
             if chatonly_item.Exists(maxSearchSeconds=1):
                 text_icon = chatonly_item.GroupControl(
@@ -12821,7 +12907,7 @@ class Chat:
             if result["permission"] == "all":
                 hide_my = perm_pop.CheckBoxControl(
                     ClassName="mmui::XSwitchButton",
-                    Name="不让他（她）看",
+                    Name=_("不让他（她）看"),
                 )
                 if hide_my.Exists(maxSearchSeconds=1):
                     toggle = hide_my.GetTogglePattern()
@@ -12830,14 +12916,14 @@ class Chat:
 
                 hide_their = perm_pop.CheckBoxControl(
                     ClassName="mmui::XSwitchButton",
-                    Name="不看他（她）",
+                    Name=_("不看他（她）"),
                 )
                 if hide_their.Exists(maxSearchSeconds=1):
                     toggle = hide_their.GetTogglePattern()
                     if toggle:
                         result["hide_their_posts"] = toggle.ToggleState == 1
 
-            cancel_btn = perm_pop.ButtonControl(Name="取消")
+            cancel_btn = perm_pop.ButtonControl(Name=_("取消"))
             if cancel_btn.Exists(maxSearchSeconds=1):
                 input_wx.click(cancel_btn)
             time.sleep(0.3)
@@ -12874,7 +12960,7 @@ class Chat:
 
             perm_pop = self._win.WindowControl(
                 ClassName="mmui::ProfileUniquePop",
-                Name="朋友权限",
+                Name=_("朋友权限"),
             )
             if not perm_pop.Exists(maxSearchSeconds=3):
                 raise WxControlNotFoundError("未找到'朋友权限'弹窗")
@@ -12906,7 +12992,7 @@ class Chat:
             if permission == "all":
                 hide_my_sw = perm_pop.CheckBoxControl(
                     ClassName="mmui::XSwitchButton",
-                    Name="不让他（她）看",
+                    Name=_("不让他（她）看"),
                 )
                 if hide_my_sw.Exists(maxSearchSeconds=1):
                     toggle = hide_my_sw.GetTogglePattern()
@@ -12919,7 +13005,7 @@ class Chat:
 
                 hide_their_sw = perm_pop.CheckBoxControl(
                     ClassName="mmui::XSwitchButton",
-                    Name="不看他（她）",
+                    Name=_("不看他（她）"),
                 )
                 if hide_their_sw.Exists(maxSearchSeconds=1):
                     toggle = hide_their_sw.GetTogglePattern()
@@ -12939,7 +13025,7 @@ class Chat:
                     input_wx.click(ok_btn)
                     time.sleep(0.3)
             else:
-                cancel_btn = perm_pop.ButtonControl(Name="取消")
+                cancel_btn = perm_pop.ButtonControl(Name=_("取消"))
                 if cancel_btn.Exists(maxSearchSeconds=1):
                     input_wx.click(cancel_btn)
                     time.sleep(0.2)
@@ -12977,7 +13063,7 @@ class Chat:
 
             remark_pop = self._win.WindowControl(
                 ClassName="mmui::ProfileUniquePop",
-                Name="设置备注和标签",
+                Name=_("设置备注和标签"),
             )
             if not remark_pop.Exists(maxSearchSeconds=3):
                 raise WxControlNotFoundError("未找到'设置备注和标签'弹窗")
@@ -12996,7 +13082,7 @@ class Chat:
                 AutomationId="desc_img_list_view_",
             )
             if not img_list.Exists(maxSearchSeconds=2):
-                cancel_btn = remark_pop.ButtonControl(Name="取消")
+                cancel_btn = remark_pop.ButtonControl(Name=_("取消"))
                 if cancel_btn.Exists(maxSearchSeconds=1):
                     input_wx.click(cancel_btn)
                 return 0
@@ -13008,7 +13094,7 @@ class Chat:
                     img_items.append(child)
 
             if not img_items:
-                cancel_btn = remark_pop.ButtonControl(Name="取消")
+                cancel_btn = remark_pop.ButtonControl(Name=_("取消"))
                 if cancel_btn.Exists(maxSearchSeconds=1):
                     input_wx.click(cancel_btn)
                 return 0
@@ -13035,7 +13121,7 @@ class Chat:
 
                 collect_item = menu_win.MenuItemControl(
                     ClassName="mmui::XMenuView",
-                    Name="收藏",
+                    Name=_("收藏"),
                 )
                 if not collect_item.Exists(maxSearchSeconds=1):
                     input_wx.send_keys(self._win, "{Esc}")
@@ -13047,7 +13133,7 @@ class Chat:
                 collected += 1
 
             # 收藏不修改数据，点"取消"关闭弹窗
-            cancel_btn = remark_pop.ButtonControl(Name="取消")
+            cancel_btn = remark_pop.ButtonControl(Name=_("取消"))
             if cancel_btn.Exists(maxSearchSeconds=1):
                 input_wx.click(cancel_btn)
 
@@ -13089,7 +13175,7 @@ class Chat:
 
             remark_pop = self._win.WindowControl(
                 ClassName="mmui::ProfileUniquePop",
-                Name="设置备注和标签",
+                Name=_("设置备注和标签"),
             )
             if not remark_pop.Exists(maxSearchSeconds=3):
                 raise WxControlNotFoundError("未找到'设置备注和标签'弹窗")
@@ -13108,7 +13194,7 @@ class Chat:
                 AutomationId="desc_img_list_view_",
             )
             if not img_list.Exists(maxSearchSeconds=2):
-                cancel_btn = remark_pop.ButtonControl(Name="取消")
+                cancel_btn = remark_pop.ButtonControl(Name=_("取消"))
                 if cancel_btn.Exists(maxSearchSeconds=1):
                     input_wx.click(cancel_btn)
                 return 0
@@ -13116,11 +13202,11 @@ class Chat:
             # 收集所有图片项
             img_items = []
             for child in img_list.GetChildren():
-                if child.Name == "描述图片":
+                if child.Name == _("描述图片"):
                     img_items.append(child)
 
             if not img_items:
-                cancel_btn = remark_pop.ButtonControl(Name="取消")
+                cancel_btn = remark_pop.ButtonControl(Name=_("取消"))
                 if cancel_btn.Exists(maxSearchSeconds=1):
                     input_wx.click(cancel_btn)
                 return 0
@@ -13148,7 +13234,7 @@ class Chat:
 
                 save_item = menu_win.MenuItemControl(
                     ClassName="mmui::XMenuView",
-                    Name="另存为...",
+                    Name=_("另存为..."),
                 )
                 if not save_item.Exists(maxSearchSeconds=1):
                     input_wx.send_keys(self._win, "{Esc}")
@@ -13189,7 +13275,7 @@ class Chat:
                 saved += 1
 
             # 点击"取消"关闭弹窗（保存图片不需要点完成）
-            cancel_btn = remark_pop.ButtonControl(Name="取消")
+            cancel_btn = remark_pop.ButtonControl(Name=_("取消"))
             if cancel_btn.Exists(maxSearchSeconds=1):
                 input_wx.click(cancel_btn)
 
@@ -13707,7 +13793,7 @@ class WeixinClient(WeixinWindow):
 
     @property
     def is_locked(self) -> bool:
-        txt = self._win.TextControl(ClassName="mmui::XTextView", Name="Windows 微信已被锁定")
+        txt = self._win.TextControl(ClassName="mmui::XTextView", Name=_("Windows 微信已被锁定"))
         return txt.Exists(0, 0)
 
     @property
@@ -14244,7 +14330,7 @@ class WeixinClient(WeixinWindow):
         tabbar = self.navigator._tabbar
         wx_btn = tabbar.ButtonControl(
             ClassName="mmui::XTabBarItem",
-            Name="微信",
+            Name=_("微信"),
             searchDepth=5,
         )
         if not wx_btn.Exists(0, 0):
@@ -14292,7 +14378,7 @@ class WeixinClient(WeixinWindow):
         time.sleep(0.3)
 
         # 点击"设置"按钮
-        setting_btn = self._win.ButtonControl(Name="设置", searchDepth=10)
+        setting_btn = self._win.ButtonControl(Name=_("设置"), searchDepth=10)
         if not setting_btn.Exists(maxSearchSeconds=3):
             raise WxControlNotFoundError("未找到'设置'按钮")
         input_wx.click(setting_btn)
@@ -14316,7 +14402,7 @@ class WeixinClient(WeixinWindow):
                 # 可能需要先点击"账号与存储"
                 account_btn = setting_win.ButtonControl(
                     ClassName="mmui::XButton",
-                    Name="账号与存储",
+                    Name=_("账号与存储"),
                 )
                 if account_btn.Exists(maxSearchSeconds=2):
                     input_wx.click(account_btn)
@@ -14389,7 +14475,7 @@ class WeixinClient(WeixinWindow):
         tabbar = self.navigator._tabbar
         wx_btn = tabbar.ButtonControl(
             ClassName="mmui::XTabBarItem",
-            Name="微信",
+            Name=_("微信"),
             searchDepth=5,
         )
         if not wx_btn.Exists(maxSearchSeconds=2):
@@ -14464,7 +14550,7 @@ class WeixinClient(WeixinWindow):
                     if img_viewer.Exists(maxSearchSeconds=3):
                         save_btn = img_viewer.ButtonControl(
                             ClassName="mmui::XButton",
-                            Name="保存",
+                            Name=_("保存"),
                         )
                         if save_btn.Exists(maxSearchSeconds=2):
                             tmp_dir = os.path.join(tempfile.gettempdir(), "pywxauto_avatar")
@@ -14522,7 +14608,7 @@ class WeixinClient(WeixinWindow):
                             searchDepth=1,
                         )
                         if iv.Exists(maxSearchSeconds=0.5):
-                            cb = iv.ButtonControl(ClassName="mmui::XButton", Name="关闭")
+                            cb = iv.ButtonControl(ClassName="mmui::XButton", Name=_("关闭"))
                             if cb.Exists(0, 0):
                                 input_wx.click(cb)
                     except Exception:
