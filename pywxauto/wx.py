@@ -13494,6 +13494,7 @@ class WeixinClient(WeixinWindow):
         globals()["background"] = background # 设置全局后台模式标志
         self.idle_wait = idle_wait
         self.lock_input = lock_input
+        self._ee = EventEmitter()
         if self.idle_wait > 0:
             PIM(idle_wait=self.idle_wait, lock_input=self.lock_input)
             PIM.start()
@@ -13503,7 +13504,6 @@ class WeixinClient(WeixinWindow):
 
         self.version = get_wechat_version(4)
         self.install_path = install_path or get_weixin_install_path()
-        self._ee = EventEmitter()
         self.on_login = on_login
         self.default_login_timeout = default_login_timeout
         self.language = None
