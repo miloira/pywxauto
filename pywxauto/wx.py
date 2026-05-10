@@ -349,6 +349,123 @@ LANGUAGE = {
     "保存(&S)": {"cn": "保存(&S)", "cn_t": "", "en": "Save(&S)"},
 }
 
+# 当前语言，由 WeixinClient.__init__ 根据实际检测设置
+_current_lang: str = "cn"
+
+
+def _(text: str, *args, **kwargs) -> str:
+    """
+    翻译控件文本。
+
+    根据 _current_lang 从 LANGUAGE 字典中查找对应语言的翻译文本。
+    支持占位符 {} 和 {key} 格式化。
+
+    查找逻辑：
+    1. 在 LANGUAGE 中查找 key=text 的条目
+    2. 取当前语言对应的值，如果为空字符串则回退到 "cn"
+    3. 如果 LANGUAGE 中没有该 key，直接返回原文
+    4. 最后用 args/kwargs 格式化占位符
+
+    Args:
+        text: 简体中文原文（作为 LANGUAGE 字典的 key）
+        *args: 位置参数，用于填充 {} 占位符
+        **kwargs: 关键字参数，用于填充 {key} 占位符
+
+    Returns:
+        翻译后的文本（已格式化占位符）
+
+    用法::
+
+        _(\"进入微信\")           # -> \"Enter Weixin\" (en) / \"进入微信\" (cn)
+        _(\"当前登录用户\")       # -> \"Current User\" (en)
+        _(\"微信{}\", \"谁可以看\")  # -> \"微信谁可以看\" (cn) / 格式化后的英文
+    """
+    entry = LANGUAGE.get(text)
+    if entry is None:
+        # LANGUAGE 中没有该 key，直接用原文格式化
+        if args or kwargs:
+            return text.format(*args, **kwargs)
+        return text
+
+    # 取当前语言的翻译
+    translated = entry.get(_current_lang, "")
+    if not translated:
+        # 当前语言翻译为空，回退到简体中文
+        translated = entry.get("cn", text)
+    if not translated:
+        translated = text
+
+    # 格式化占位符
+    if args or kwargs:
+        try:
+            return translated.format(*args, **kwargs)
+        except (IndexError, KeyError):
+            # 格式化失败（翻译文本的占位符数量不匹配），返回原文格式化
+            return text.format(*args, **kwargs)
+
+    return translated
+
+
+def _set_language(lang: str) -> None:
+    """
+    设置当前语言。
+
+    Args:
+        lang: 语言代码，"cn" / "cn_t" / "en"
+    """
+    global _current_lang
+    if lang not in ("cn", "cn_t", "en"):
+        raise ValueError(f"不支持的语言: {lang!r}，可选: cn, cn_t, en")
+    _current_lang = lang
+
+
+def _detect_language(pid: int = None) -> str:
+    kwargs = {"RegexName": "微信|Weixin", "searchDepth": 1}
+    if pid:
+        kwargs["ProcessId"] = pid
+    win = auto.WindowControl(**kwargs)
+    if win.Exists(0, 0):
+        # 检测微信主窗口语言
+        lang = _detect_language_by_main_window(win)
+        if lang:
+            return lang
+        # 检测微信登录窗口语言
+        lang = _detect_language_by_login_window(win)
+        if lang:
+            return lang
+    return "cn"
+
+
+def _detect_language_by_main_window(win) -> Optional[str]:
+    try:
+        tabbar = win.ToolBarControl(ClassName="mmui::MainTabBar", searchDepth=5)
+        if not tabbar.Exists(0, 0):
+            return None
+        name = tabbar.Name or ""
+        if name == "导航":
+            return "cn"
+        elif name == "導航":
+            return "cn_t"
+        elif name == "Navigation":
+            return "en"
+    except Exception:
+        pass
+    return None
+
+
+def _detect_language_by_login_window(win) -> Optional[str]:
+    try:
+        # 检测"网络代理设置"按钮（标题栏始终存在）
+        if win.ButtonControl(ClassName="mmui::XButton", Name="网络代理设置").Exists(0, 0):
+            return "cn"
+        if win.ButtonControl(ClassName="mmui::XButton", Name="網路Proxy設定").Exists(0, 0):
+            return "cn_t"
+        if win.ButtonControl(ClassName="mmui::XButton", Name="Network proxy settings").Exists(0, 0):
+            return "en"
+    except Exception:
+        pass
+    return None
+
 
 class WxAutoError(Exception):
     """异常基类"""
