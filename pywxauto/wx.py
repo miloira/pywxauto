@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import base64
 import ctypes
 import ctypes.wintypes
 import fnmatch
@@ -1192,6 +1193,57 @@ def get_hwnd(title=None, mode="exact", pid=None):
 
     win32gui.EnumWindows(enum_callback, None)
     return results[0] if results else None
+
+def get_hwnds_by_pid(pid: int, visible_only: bool = True) -> list[int]:
+    """
+    获取指定进程 PID 的所有顶层窗口句柄。
+
+    Args:
+        pid: 进程 PID
+        visible_only: True 只返回可见窗口，False 返回所有窗口
+
+    Returns:
+        窗口句柄列表
+    """
+    results = []
+
+    def enum_callback(hwnd, _):
+        if visible_only and not win32gui.IsWindowVisible(hwnd):
+            return
+        _, win_pid = win32process.GetWindowThreadProcessId(hwnd)
+        if win_pid == pid:
+            results.append(hwnd)
+
+    win32gui.EnumWindows(enum_callback, None)
+    return results
+
+def wx_pid_to_hwnd(pid: int) -> Optional[int]:
+    """
+    将进程 PID 转换为主窗口句柄。
+
+    优先返回可见窗口中标题不为空的第一个，
+    找不到则返回任意可见窗口，仍找不到返回 None。
+
+    Args:
+        pid: 进程 PID
+
+    Returns:
+        窗口句柄，未找到返回 None
+    """
+    hwnds = get_hwnds_by_pid(pid, visible_only=True)
+    if not hwnds:
+        # 尝试包含不可见窗口
+        hwnds = get_hwnds_by_pid(pid, visible_only=False)
+
+    if not hwnds:
+        return None
+
+    # 优先返回有标题的窗口
+    for hwnd in hwnds:
+        title = win32gui.GetWindowText(hwnd)
+        if title.lower() in ["微信", "weixin"]:
+            return hwnd
+    return hwnds[0]
 
 def ensure_narrator_registry() -> bool:
     """
@@ -13389,8 +13441,23 @@ class WeixinClient(WeixinWindow):
         self._ee = EventEmitter()
         self.on_login = on_login
         self.default_login_timeout = default_login_timeout
+        self.language = None
+        self.language_name = None
 
         ensure_narrator_registry()
+
+        # 存在微信进程但是没有找到微信窗口
+        self.weixin_window = auto.WindowControl(RegexName=self.WINDOW_REGEX, searchDepth=1)
+        if not self.weixin_window.Exists(0, 0):
+            weixin_processes = find_process("Weixin.exe")
+            if weixin_processes:
+                weixin_process = weixin_processes[0]
+                # 1.可能是主窗口在托盘 -> 唤醒
+                self.wakeup() # 注意：快捷键显示微信窗口 仅第一个微信有效
+                # 2.可能是当前桌面没有微信窗口 -> 把微信窗口调到前台(自动切换到存在微信窗口的桌面)
+                wx_pid = self.pid if self.pid else weixin_process["pid"]
+                weixin_hwnd = wx_pid_to_hwnd(wx_pid)
+                win32gui.SetForegroundWindow(weixin_hwnd)
 
         self._win: auto.WindowControl = auto.WindowControl(
             ClassName=self.WINDOW_CLASS,
@@ -13405,7 +13472,7 @@ class WeixinClient(WeixinWindow):
                 searchDepth=1
             )
             if login_win.Exists(maxSearchSeconds=3):
-                # 是登录窗口，走登录逻辑
+                self.pid = login_win.ProcessId
                 login = Login(pid=self.pid)
                 self._handle_login(login)
                 # 登录完成后重新绑定主窗口
@@ -13417,16 +13484,29 @@ class WeixinClient(WeixinWindow):
                 if not self._win.Exists(maxSearchSeconds=5):
                     raise LoginError(f"登录后未找到 PID={self.pid} 的微信主窗口")
             else:
-                raise WindowNotFoundError(f"未找到 PID={self.pid} 的微信主窗口或登录窗口")
+                if not self.pid:
+                    self.pid = self.open()
+                    if login_win.Exists(maxSearchSeconds=3):
+                        login = Login(pid=self.pid)
+                        self._handle_login(login)
+                        # 登录完成后重新绑定主窗口
+                        self._win = auto.WindowControl(
+                            ClassName=self.WINDOW_CLASS,
+                            ProcessId=self.pid,
+                            searchDepth=1
+                        )
+                        if not self._win.Exists(maxSearchSeconds=5):
+                            raise LoginError(f"登录后未找到 PID={self.pid} 的微信主窗口")
+                    else:
+                        raise WindowNotFoundError(f"未找到 PID={self.pid} 的登录窗口")
+                else:
+                    raise WindowNotFoundError(f"未找到 PID={self.pid} 的微信主窗口或登录窗口")
 
         self.pid = self._win.ProcessId
 
-        # 自动检测微信界面语言并设置全局语言
-        detected_lang = _detect_language(self.pid)
-        _set_language(detected_lang)
-        self.language = detected_lang
-        self.language_name = LANGUAGE_DESCRIPTION[self.language]
-        logger.info(f"当前微信语言：{self.language_name}")
+        if not self.language and not self.language_name:
+            # 微信语言未检测 开始自动检测
+            self.auto_detect_lang(self.pid)
 
         self._ocr_engine = ocr_engine
         if self._ocr_engine == "wcocr":
@@ -13464,6 +13544,71 @@ class WeixinClient(WeixinWindow):
 
     def __del__(self):
         self.move_back()
+
+    def auto_detect_lang(self, pid):
+        # 自动检测微信界面语言并设置全局语言
+        detected_lang = _detect_language(pid)
+        _set_language(detected_lang)
+        self.language = detected_lang
+        self.language_name = LANGUAGE_DESCRIPTION[self.language]
+        logger.info(f"当前微信语言：{self.language_name}")
+
+    @classmethod
+    def open(
+        cls, 
+        install_path: Optional[str] = None, 
+        timeout: float = 30,
+        **kwargs
+    ) -> int:
+        """
+        启动一个新的微信客户端并连接，返回 PID。
+
+        每次调用都会启动一个新进程（支持多开）。
+
+        Args:
+            install_path: 微信安装路径，None 时自动从注册表检测
+            timeout:      等待微信进程启动的超时时间（秒），默认 30 秒
+            **kwargs:     覆盖默认的 WeixinClient 参数
+
+        Returns:
+            新启动的微信进程 PID
+
+        Raises:
+            LoginError: 微信未安装或启动超时时抛出
+        """
+        # 获取安装路径
+        if not install_path:
+            install_path = get_weixin_install_path()
+
+        exe_path = os.path.join(install_path, "Weixin.exe")
+        if not os.path.exists(exe_path):
+            raise LoginError(f"微信可执行文件不存在: {exe_path}")
+
+        # 记录启动前已有的微信进程 PID
+        existing_pids = {p["pid"] for p in find_process("Weixin.exe")}
+
+        # 启动微信进程
+        proc = subprocess.Popen([exe_path])
+
+        # 等待新进程出现
+        pid = None
+        deadline = time.monotonic() + timeout
+        while time.monotonic() < deadline:
+            current_procs = find_process("Weixin.exe")
+            new_procs = [p for p in current_procs if p["pid"] not in existing_pids]
+            if new_procs:
+                pid = new_procs[0]["pid"]
+                break
+            time.sleep(0.5)
+
+        if not pid:
+            if proc.pid and psutil.pid_exists(proc.pid):
+                pid = proc.pid
+            else:
+                raise LoginError("微信启动超时，未检测到新微信进程")
+
+        logger.info(f"微信已启动，PID: {pid}")
+        return pid
 
     def find_new_version_window(self) -> bool:
         """检测是否弹出了新版本更新窗口"""
@@ -13528,8 +13673,9 @@ class WeixinClient(WeixinWindow):
         处理登录窗口。
 
         如果传入了 on_login 回调，调用回调让用户处理登录；
-        否则等待用户手动操作（60秒超时）。
+        否则等待用户手动操作（超时由 default_login_timeout 控制）。
         """
+        self.auto_detect_lang(self.pid)
         nickname = login.nickname
         logger.info(f"检测到登录窗口: {nickname}")
 
@@ -13542,12 +13688,20 @@ class WeixinClient(WeixinWindow):
         if self.on_login:
             self.on_login(login)
         else:
-            # 等待用户手动登录（60秒超时）
-            logger.info("等待手动登录...(请在60秒内完成登录)")
-            for _ in range(600):
+            # 等待用户手动登录
+            timeout = self.default_login_timeout
+            logger.info(f"等待手动登录...(请在{timeout}秒内完成登录)")
+            deadline = time.monotonic() + timeout
+            while time.monotonic() < deadline:
+                # 检测方式1: 主窗口已出现（同 PID）
                 if self.find_wechat_window_by_pid(self.pid):
                     break
-                time.sleep(0.1)
+                # 检测方式2: 登录窗口已消失（说明登录流程完成）
+                if not login.exists:
+                    # 登录窗口关闭后等一下主窗口加载
+                    time.sleep(2)
+                    break
+                time.sleep(0.5)
 
         # 验证登录结果
         if not self.find_wechat_window_by_pid(self.pid):
@@ -14236,8 +14390,6 @@ class WeixinClient(WeixinWindow):
             dict: {"nickname": str, "account": str, "avatar": str}
             avatar 为头像图片的 base64 编码字符串（PNG 格式）
         """
-        import base64
-
         self.activate()
 
         # 获取导航栏"微信"按钮的位置
