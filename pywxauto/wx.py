@@ -228,6 +228,7 @@ LANGUAGE = {
     # ============================================================
     # 朋友圈 (FriendCircle 类)
     # ============================================================
+    "朋友圈": {"cn": "朋友圈", "cn_t": "", "en": "Moments"},
     "刷新": {"cn": "刷新", "cn_t": "", "en": "Refresh"},
     "发表": {"cn": "发表", "cn_t": "", "en": "Post"},
     "公开": {"cn": "公开", "cn_t": "", "en": "All"},
@@ -4431,7 +4432,6 @@ class NoteEditor(WeixinWindow):
     """
 
     WINDOW_CLASS = "Chrome_WidgetWin_0"
-    WINDOW_NAME = "笔记"
     EDITOR_INPUT_ID = "xeditorInputId"
     MAIN_CONTAINER_ID = "mainContainer"
 
@@ -4448,7 +4448,7 @@ class NoteEditor(WeixinWindow):
         self.wx = wx
         win = auto.PaneControl(
             ClassName=self.WINDOW_CLASS,
-            Name=self.WINDOW_NAME,
+            Name=_("笔记"),
             ProcessId=wx.pid
         )
         if not win.Exists(0, 0):
@@ -5969,7 +5969,7 @@ class FriendCircle(WeixinWindow):
 
         # 窗口不存在，通过导航栏打开
         self.wx.activate()
-        self.wx.navigator.switch_to(self.MOMENT_TAB_NAME)
+        self.wx.navigator.switch_to(_("朋友圈"))
 
         # 等待独立窗口出现
         if not self._win.Exists(maxSearchSeconds=5):
@@ -7100,17 +7100,12 @@ class FileManager(WeixinWindow):
     - 右键菜单: mmui::XMenu（浮动于桌面层级）
     """
 
-    WINDOW_NAME = "聊天文件"
     FILE_LIST_CELL_CLASS = "mmui::FileListCell"
     MORE_BTN_AUTOMATION_ID = "main_tabbar.tabbar_setting"
     FILE_TYPE_FILTER_CLASS = "mmui::XTableCell"
     CONTEXT_MENU_WIN_CLASS = "mmui::XMenu"
     # 确认对话框的类名（微信 v4 使用 mmui::XDialog，浮动于桌面层级）
     CONFIRM_DIALOG_WIN_CLASS = "mmui::XDialog"
-    SAVE_AS_MENU_ITEM_NAME = "另存为..."
-    DOWNLOAD_TO_MENU_ITEM_NAME = "下载到..."
-    DOWNLOAD_MENU_ITEM_NAME = "下载"
-    DELETE_MENU_ITEM_NAME = "删除"
 
     def __init__(self, wx: "WeixinClient"):
         """
@@ -7121,7 +7116,7 @@ class FileManager(WeixinWindow):
         """
         self.wx = wx
         self._win = auto.WindowControl(
-            Name=self.WINDOW_NAME,
+            Name=_("聊天文件"),
             ProcessId=self.wx.pid,
             searchDepth=1,
         )
@@ -7137,7 +7132,7 @@ class FileManager(WeixinWindow):
                 - "": 不筛选（默认）
         """
         if not self.exists:
-            self.wx.navigator.switch_to("更多")
+            self.wx.navigator.switch_to(_("更多"))
             chat_file_btn = self.wx._win.ButtonControl(
                 Name=_("聊天文件"), searchDepth=10
             )
@@ -10110,13 +10105,13 @@ class Chat:
             png_bytes = capture_window(hwnd, mode="print_window")
             ocr_data = self._get_image_text(png_bytes)
 
-            if "清空聊天记录" not in ocr_data:
+            if _("清空聊天记录") not in ocr_data:
                 raise RuntimeError(
                     "OCR 未识别到'清空聊天记录'文本，"
                     "请确认聊天信息面板已展开且已滚动到底部"
                 )
 
-            info = ocr_data["清空聊天记录"]
+            info = ocr_data[_("清空聊天记录")]
             win_left, win_top, _, _ = win32gui.GetWindowRect(hwnd)
             click_x = int(win_left + info["center"][0])
             click_y = int(win_top + info["center"][1])
@@ -13841,7 +13836,7 @@ class WeixinClient(WeixinWindow):
         """通过在会话列表中查找并点击来打开指定会话，返回 Chat 对象"""
         self.activate()
         if not self.has_session:
-            self.navigator.switch_to("微信")
+            self.navigator.switch_to(_("微信"))
         self.session.open(nickname)
         for _ in range(10):
             chat = self.chat
@@ -13855,7 +13850,7 @@ class WeixinClient(WeixinWindow):
         """通过搜索打开指定会话，返回 Chat 对象"""
         self.activate()
         if not self.has_session:
-            self.navigator.switch_to("微信")
+            self.navigator.switch_to(_("微信"))
         self.session.open_by_search(nickname, chat_type, force_search)
         # 等待聊天界面加载完成（搜索点击后界面切换需要时间）
         for _ in range(10):
@@ -13912,7 +13907,7 @@ class WeixinClient(WeixinWindow):
         content: 笔记内容
         """
         self.activate()
-        self.navigator.switch_to("微信")
+        self.navigator.switch_to(_("微信"))
         note = self.session.new_note()
         note.set_content(content)
         note.save()
@@ -13927,7 +13922,7 @@ class WeixinClient(WeixinWindow):
         """
         self.activate()
         if not self.has_session:
-            self.navigator.switch_to("微信")
+            self.navigator.switch_to(_("微信"))
         self.session.create_room(nickname_list)
 
     @PIM.guard
@@ -13949,7 +13944,7 @@ class WeixinClient(WeixinWindow):
         """
         self.activate()
         if not self.has_session:
-            self.navigator.switch_to("微信")
+            self.navigator.switch_to(_("微信"))
         self.session.add_friend(
             keyword, message=message, remark=remark,
             permission=permission, hide_my_posts=hide_my_posts,
@@ -14374,7 +14369,7 @@ class WeixinClient(WeixinWindow):
             dict: {"nickname": str, "account": str}
         """
         self.activate()
-        self.navigator.switch_to("更多")
+        self.navigator.switch_to(_("更多"))
         time.sleep(0.3)
 
         # 点击"设置"按钮
