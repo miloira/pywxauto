@@ -5927,17 +5927,12 @@ class FriendCircle(WeixinWindow):
     PUBLISH_PANEL_ID = "SnsPublishPanel"
     PUBLISH_INPUT_CLASS = "mmui::XValidatorTextEdit"
     PUBLISH_BTN_CLASS = "mmui::XOutlineButton"
-    PUBLISH_BTN_NAME = "发表"
-    CANCEL_BTN_NAME = "取消"
-    PUBLISH_TAB_NAME = "发表"
     TOOLBAR_CLASS = "mmui::SNSWindowToolBar"
     TOOLBAR_ID = "sns_window_tool_bar"
 
     # ---- 隐私设置相关常量 ----
     PRIVACY_BTN_CLASS = "mmui::PublishPrivacyView"
     PRIVACY_SELECTION_CLASS = "mmui::PublishPrivacySelection"
-    PRIVACY_CONFIRM_NAME = "确定"
-    PRIVACY_OPTIONS = ("公开", "私密", "谁可以看", "不给谁看")
 
     def __init__(self, wx: "WeixinClient"):
         """
@@ -6343,7 +6338,7 @@ class FriendCircle(WeixinWindow):
         # 查找工具栏中的"发表"按钮
         publish_tab = toolbar.ButtonControl(
             ClassName="mmui::XTabBarItem",
-            Name=self.PUBLISH_TAB_NAME,
+            Name=_("发表"),
         )
         if not publish_tab.Exists(maxSearchSeconds=2):
             raise WxControlNotFoundError("未找到工具栏'发表'按钮")
@@ -6401,7 +6396,7 @@ class FriendCircle(WeixinWindow):
         """
         btn = panel.ButtonControl(
             ClassName=self.PUBLISH_BTN_CLASS,
-            Name=self.PUBLISH_BTN_NAME,
+            Name=_("发表"),
             searchDepth=3,
         )
         if not btn.Exists(maxSearchSeconds=3):
@@ -6416,7 +6411,7 @@ class FriendCircle(WeixinWindow):
         """
         btn = panel.ButtonControl(
             ClassName=self.PUBLISH_BTN_CLASS,
-            Name=self.CANCEL_BTN_NAME,
+            Name=_("取消"),
             searchDepth=10,
         )
         if not btn.Exists(maxSearchSeconds=3):
@@ -6480,7 +6475,7 @@ class FriendCircle(WeixinWindow):
         time.sleep(0.5)
 
         # 复用 SessionPickerWindow 选择逻辑
-        self._select_in_session_picker("微信提醒谁看", contacts=contacts)
+        self._select_in_session_picker(_("微信提醒谁看"), contacts=contacts)
 
     def _set_privacy(self, panel: auto.Control, permission: str,
                      permission_contacts: list[str] | None = None,
@@ -6512,10 +6507,10 @@ class FriendCircle(WeixinWindow):
             permission_contacts: 联系人昵称列表（"谁可以看"/"不给谁看"时使用）
             permission_labels:   标签名称列表（"谁可以看"/"不给谁看"时使用）
         """
-        if permission not in self.PRIVACY_OPTIONS:
+        if permission not in (_("公开"), _("私密"), _("谁可以看"), _("不给谁看")):
             raise ValueError(
                 f"无效的隐私选项 '{permission}'，"
-                f"有效值: {self.PRIVACY_OPTIONS}"
+                f"有效值: {(_("公开"), _("私密"), _("谁可以看"), _("不给谁看"))}"
             )
 
         # 点击隐私按钮打开隐私选择面板
@@ -6542,8 +6537,12 @@ class FriendCircle(WeixinWindow):
         time.sleep(0.5)
 
         # "谁可以看"和"不给谁看"需要选择联系人/标签
-        if permission in ("谁可以看", "不给谁看"):
-            picker_name = f"微信{permission}"
+        if permission in (_("谁可以看"), _("不给谁看")):
+            # 根据 permission 查找对应的 picker 窗口名称
+            if permission == _("谁可以看"):
+                picker_name = _("微信谁可以看")
+            else:
+                picker_name = _("微信不给谁看")
             self._select_in_session_picker(
                 picker_name, permission_contacts, permission_labels,
             )
@@ -6551,7 +6550,7 @@ class FriendCircle(WeixinWindow):
         # 点击"确定"关闭隐私选择面板（同样在 SNSWindow 上搜索）
         confirm_btn = self._win.ButtonControl(
             ClassName=self.PUBLISH_BTN_CLASS,
-            Name=self.PRIVACY_CONFIRM_NAME,
+            Name=_("确定"),
             searchDepth=10,
         )
         if not confirm_btn.Exists(maxSearchSeconds=2):
@@ -6731,7 +6730,7 @@ class FriendCircle(WeixinWindow):
         self._open_window()
 
         # 右键"发表"按钮弹出菜单
-        publish_tab = self._find_toolbar_button(self.PUBLISH_TAB_NAME)
+        publish_tab = self._find_toolbar_button(_("发表"))
         input_wx.click(publish_tab, button="right")
         time.sleep(0.5)
 
@@ -6861,7 +6860,7 @@ class FriendCircle(WeixinWindow):
         点击工具栏"刷新"按钮，回到列表顶部并加载最新动态。
         """
         self._open_window()
-        btn = self._find_toolbar_button("刷新")
+        btn = self._find_toolbar_button(_("刷新"))
         input_wx.click(btn)
 
     def __str__(self) -> str:
@@ -7301,10 +7300,10 @@ class FileManager(WeixinWindow):
         time_pattern = r'^\d{1,2}:\d{2}$'
         for i, token in enumerate(right_tokens):
             if re.match(time_pattern, token):
-                date_str = "今天"
+                date_str = _("今天")
                 date_idx = i
                 break
-            if token in ("今天", "昨天") or "星期" in token:
+            if token in (_("今天"), _("昨天")) or "星期" in token:
                 date_str = token
                 date_idx = i
                 break
@@ -7326,9 +7325,10 @@ class FileManager(WeixinWindow):
         # 被错误地解析为 source_name 的一部分。
         # 例如: "泡泡马特发货群 未下载 18:20 ..." 中 source_name 会被解析为
         # "泡泡马特发货群 未下载"，需要将 "未下载" 拆分到 file_status 中。
-        if source_name.endswith(" 未下载"):
-            source_name = source_name.rstrip(" 未下载")
-            file_status = "未下载"
+        not_downloaded = _("未下载")
+        if source_name.endswith(f" {not_downloaded}"):
+            source_name = source_name[:-len(f" {not_downloaded}")]
+            file_status = not_downloaded
 
         left_tokens = left_part.rsplit(" ", 1)
         if len(left_tokens) == 2:
@@ -7383,7 +7383,7 @@ class FileManager(WeixinWindow):
     def get_today_files(self) -> list[ChatFile]:
         """获取今天的文件列表"""
         all_files = self.get_all_files()
-        today_str = "今天"
+        today_str = _("今天")
         today_date = date.today()
         today_formatted = f"{today_date.year}年{today_date.month}月{today_date.day}日"
         return [f for f in all_files
@@ -7507,32 +7507,23 @@ class Chat:
     # 注意：状态前缀通过 _check_status_by_prefix 动态匹配，不再使用静态字典
 
     # ---- 发送收藏相关常量 ----
-    FAV_SEND_BTN_NAME = "发送收藏"
     FAV_SEND_BTN_CLASS = "mmui::XButton"
     FAV_DETAIL_LIST_ID = "fav_detail_list"
     FAV_DETAIL_LIST_CLASS = "mmui::XRecyclerTableView"
     FAV_ITEM_CLASS = "mmui::XTableCell"
     FAV_SEARCH_CLASS = "mmui::XValidatorTextEdit"
-    FAV_SEARCH_NAME = "搜索"
-    FAV_SEND_CONFIRM_NAME = "发送"
     FAV_SEND_CONFIRM_CLASS = "mmui::XOutlineButton"
-    FAV_CANCEL_NAME = "取消"
     FAV_CANCEL_CLASS = "mmui::XOutlineButton"
 
     # ---- 发送表情相关常量 ----
-    EMOJI_BTN_NAME = "发送表情(Alt+E)"
     EMOJI_BTN_CLASS = "mmui::XButton"
     EMOJI_POPOVER_CLASS = "mmui::XPopover"
     EMOJI_POPOVER_ID = "EmoticonPopover"
     EMOJI_PANEL_TOOLBAR_ID = "emoticon_panel_tool_bar"
-    EMOJI_SEARCH_TAB_NAME = "搜索表情"
     EMOJI_SEARCH_TAB_CLASS = "mmui::EmoticonToolbarItem"
-    EMOJI_SEARCH_INPUT_NAME = "搜索"
     EMOJI_SEARCH_INPUT_CLASS = "mmui::XValidatorTextEdit"
     EMOJI_SEARCH_FIELD_CLASS = "mmui::XSearchField"
     EMOJI_SEARCH_RESULT_CLASS = "Chrome_RenderWidgetHostHWND"
-    EMOJI_SEARCH_RESULT_NAME = "表情搜索"
-    EMOJI_CUSTOM_TAB_NAME = "自定义表情"
     EMOJI_CUSTOM_TAB_CLASS = "mmui::EmoticonToolbarItem"
     EMOJI_CUSTOM_GRID_CLASS = "mmui::EmoticonGridView"
     EMOJI_CUSTOM_ITEM_CLASS = "mmui::FavEmoticonItemView"
@@ -8578,7 +8569,7 @@ class Chat:
         # 查找"发送收藏"按钮（嵌套在 GroupControl 内）
         fav_btn = toolbar.ButtonControl(
             ClassName=self.FAV_SEND_BTN_CLASS,
-            Name=self.FAV_SEND_BTN_NAME,
+            Name=_("发送收藏"),
             searchDepth=5,
         )
         if not fav_btn.Exists(maxSearchSeconds=2):
@@ -8600,7 +8591,7 @@ class Chat:
         """
         cancel_btn = self._win.ButtonControl(
             ClassName=self.FAV_CANCEL_CLASS,
-            Name=self.FAV_CANCEL_NAME,
+            Name=_("取消"),
         )
         if cancel_btn.Exists(maxSearchSeconds=1):
             input_wx.click(cancel_btn)
@@ -8630,7 +8621,7 @@ class Chat:
         # 查找所有搜索框
         edit = self._win.EditControl(
             ClassName=self.FAV_SEARCH_CLASS,
-            Name=self.FAV_SEARCH_NAME,
+            Name=_("搜索"),
         )
         # 第一个搜索框通常就是收藏面板内的
         # 通过检查其位置是否在收藏面板区域附近来确认
@@ -8725,7 +8716,7 @@ class Chat:
         # 5. 点击"发送"按钮
         send_btn = self._win.ButtonControl(
             ClassName=self.FAV_SEND_CONFIRM_CLASS,
-            Name=self.FAV_SEND_CONFIRM_NAME,
+            Name=_("发送"),
         )
         if not send_btn.Exists(maxSearchSeconds=2):
             self._close_collection_panel()
@@ -8894,7 +8885,7 @@ class Chat:
         # 查找"发送表情"按钮
         emoji_btn = toolbar.ButtonControl(
             ClassName=self.EMOJI_BTN_CLASS,
-            Name=self.EMOJI_BTN_NAME,
+            Name=_("发送表情(Alt+E)"),
             searchDepth=5,
         )
         if not emoji_btn.Exists(maxSearchSeconds=2):
@@ -8938,7 +8929,7 @@ class Chat:
 
         search_tab = panel_toolbar.TabItemControl(
             ClassName=self.EMOJI_SEARCH_TAB_CLASS,
-            Name=self.EMOJI_SEARCH_TAB_NAME,
+            Name=_("搜索表情"),
         )
         if not search_tab.Exists(maxSearchSeconds=2):
             raise WxControlNotFoundError("未找到'搜索表情'标签")
@@ -8959,7 +8950,7 @@ class Chat:
         if search_field.Exists(maxSearchSeconds=3):
             edit = search_field.EditControl(
                 ClassName=self.EMOJI_SEARCH_INPUT_CLASS,
-                Name=self.EMOJI_SEARCH_INPUT_NAME,
+                Name=_("搜索"),
             )
             if edit.Exists(maxSearchSeconds=2):
                 return edit
@@ -8978,7 +8969,7 @@ class Chat:
         """
         result_doc = popover.DocumentControl(
             ClassName=self.EMOJI_SEARCH_RESULT_CLASS,
-            Name=self.EMOJI_SEARCH_RESULT_NAME,
+            Name=_("表情搜索"),
         )
         if not result_doc.Exists(maxSearchSeconds=3):
             raise WxControlNotFoundError("未找到表情搜索结果区域")
@@ -9025,7 +9016,7 @@ class Chat:
 
         custom_tab = panel_toolbar.TabItemControl(
             ClassName=self.EMOJI_CUSTOM_TAB_CLASS,
-            Name=self.EMOJI_CUSTOM_TAB_NAME,
+            Name=_("自定义表情"),
         )
         if not custom_tab.Exists(maxSearchSeconds=2):
             raise WxControlNotFoundError("未找到'自定义表情'标签")
@@ -9324,7 +9315,7 @@ class Chat:
         """
         if not at_members:
             return
-        if "所有人" in at_members:
+        if _("所有人") in at_members:
             at_members = ["所有人"]
 
         for member in at_members:
@@ -9338,7 +9329,7 @@ class Chat:
                 if not chat_input.HasKeyboardFocus:
                     input_wx.click(chat_input)
 
-                if member == "所有人":
+                if member == _("所有人"):
                     input_wx.paste_or_type(chat_input, "@")
                 else:
                     input_wx.paste_or_type(chat_input, f"@{member}")
@@ -10185,13 +10176,13 @@ class Chat:
             png_bytes = capture_window(hwnd, mode="print_window")
             ocr_data = self._get_image_text(png_bytes)
 
-            if "退出群聊" not in ocr_data:
+            if _("退出群聊") not in ocr_data:
                 raise RuntimeError(
                     "OCR 未识别到'退出群聊'文本，"
                     "请确认聊天信息面板已展开且已滚动到底部"
                 )
 
-            info = ocr_data["退出群聊"]
+            info = ocr_data[_("退出群聊")]
             win_left, win_top, _, _ = win32gui.GetWindowRect(hwnd)
             click_x = int(win_left + info["center"][0])
             click_y = int(win_top + info["center"][1])
@@ -10248,10 +10239,10 @@ class Chat:
             png_bytes = capture_window(hwnd, mode="print_window")
             ocr_data = self._get_image_text(png_bytes)
 
-            if "添加" not in ocr_data:
+            if _("添加") not in ocr_data:
                 raise OCRError("OCR 未识别到'添加'文本")
 
-            info = ocr_data["添加"]
+            info = ocr_data[_("添加")]
             win_left, win_top, _, _ = win32gui.GetWindowRect(hwnd)
             # 点击"添加"文本中心 X，Y 偏移一个文本高度（即"+"图标所在位置）
             click_x = int(win_left + info["center"][0])
@@ -10415,10 +10406,10 @@ class Chat:
             png_bytes = capture_window(hwnd, mode="print_window")
             ocr_data = self._get_image_text(png_bytes)
 
-            if "移出" not in ocr_data:
+            if _("移出") not in ocr_data:
                 raise OCRError("OCR 未识别到'移出'文本")
 
-            info = ocr_data["移出"]
+            info = ocr_data[_("移出")]
             win_left, win_top, _, _ = win32gui.GetWindowRect(hwnd)
             click_x = int(win_left + info["center"][0])
             click_y = int(win_top + info["center"][1] - 2 * info["height"])
@@ -10645,42 +10636,42 @@ class Chat:
     @PIM.guard
     def pin_room_chat(self) -> None:
         """置顶当前群聊会话（通过 OCR 识别开关）"""
-        self._set_room_ocr_switch("置顶聊天", True)
+        self._set_room_ocr_switch(_("置顶聊天"), True)
 
     @PIM.guard
     def unpin_room_chat(self) -> None:
         """取消置顶当前群聊会话（通过 OCR 识别开关）"""
-        self._set_room_ocr_switch("置顶聊天", False)
+        self._set_room_ocr_switch(_("置顶聊天"), False)
 
     @PIM.guard
     def mute_room_chat(self) -> None:
         """开启当前群聊的消息免打扰（通过 OCR 识别开关）"""
-        self._set_room_ocr_switch("消息免打扰", True)
+        self._set_room_ocr_switch(_("消息免打扰"), True)
 
     @PIM.guard
     def unmute_room_chat(self) -> None:
         """关闭当前群聊的消息免打扰（通过 OCR 识别开关）"""
-        self._set_room_ocr_switch("消息免打扰", False)
+        self._set_room_ocr_switch(_("消息免打扰"), False)
 
     @PIM.guard
     def add_room_address_book(self) -> None:
         """将当前群聊保存到通讯录（通过 OCR 识别开关）"""
-        self._set_room_ocr_switch("保存到通讯录", True)
+        self._set_room_ocr_switch(_("保存到通讯录"), True)
 
     @PIM.guard
     def remove_room_address_book(self) -> None:
         """将当前群聊从通讯录移除（通过 OCR 识别开关）"""
-        self._set_room_ocr_switch("保存到通讯录", False)
+        self._set_room_ocr_switch(_("保存到通讯录"), False)
 
     @PIM.guard
     def display_room_member_nickname(self) -> None:
         """显示群成员昵称（通过 OCR 识别开关）"""
-        self._set_room_ocr_switch("显示群成员昵称", True)
+        self._set_room_ocr_switch(_("显示群成员昵称"), True)
 
     @PIM.guard
     def hidden_room_member_nickname(self) -> None:
         """隐藏群成员昵称（通过 OCR 识别开关）"""
-        self._set_room_ocr_switch("显示群成员昵称", False)
+        self._set_room_ocr_switch(_("显示群成员昵称"), False)
 
     @PIM.guard
     def fold_room_chat(self) -> None:
@@ -10708,13 +10699,13 @@ class Chat:
             png_bytes = capture_window(hwnd, mode="print_window")
             ocr_data = self._get_image_text(png_bytes)
             img = Image.open(io.BytesIO(png_bytes))
-            self._toggle_ocr_switch(img, ocr_data, hwnd, "消息免打扰", True)
+            self._toggle_ocr_switch(img, ocr_data, hwnd, _("消息免打扰"), True)
 
             # 开启消息免打扰后，"折叠该聊天"选项才会出现，重新截图
             png_bytes = capture_window(hwnd, mode="print_window")
             ocr_data = self._get_image_text(png_bytes)
             img = Image.open(io.BytesIO(png_bytes))
-            self._toggle_ocr_switch(img, ocr_data, hwnd, "折叠该聊天", True)
+            self._toggle_ocr_switch(img, ocr_data, hwnd, _("折叠该聊天"), True)
 
             logger.debug(f"折叠群聊成功: {self.chat_name}")
 
@@ -10747,8 +10738,8 @@ class Chat:
             img = Image.open(io.BytesIO(png_bytes))
 
             # 折叠该聊天只在消息免打扰开启时存在
-            if "折叠该聊天" in ocr_data:
-                self._toggle_ocr_switch(img, ocr_data, hwnd, "折叠该聊天", False)
+            if _("折叠该聊天") in ocr_data:
+                self._toggle_ocr_switch(img, ocr_data, hwnd, _("折叠该聊天"), False)
 
             logger.debug(f"取消折叠群聊成功: {self.chat_name}")
 
@@ -10923,9 +10914,9 @@ class Chat:
             # -- 群聊名称 --
             if name is not None:
                 png_bytes, ocr_data, win_left, win_top = _fresh_ocr()
-                if "群聊名称" not in ocr_data:
+                if _("群聊名称") not in ocr_data:
                     raise OCRError("OCR 未识别到'群聊名称'文本")
-                info = ocr_data["群聊名称"]
+                info = ocr_data[_("群聊名称")]
                 click_x = int(win_left + info["center"][0])
                 click_y = int(win_top + info["center"][1] + 1.5 * info["height"])
                 auto.Click(click_x, click_y)
@@ -10942,9 +10933,9 @@ class Chat:
             # -- 群公告 --
             if announcement is not None:
                 png_bytes, ocr_data, win_left, win_top = _fresh_ocr()
-                if "群公告" not in ocr_data:
+                if _("群公告") not in ocr_data:
                     raise OCRError("OCR 未识别到'群公告'文本")
-                info = ocr_data["群公告"]
+                info = ocr_data[_("群公告")]
                 click_x = int(win_left + info["center"][0])
                 click_y = int(win_top + info["center"][1] + 1.5 * info["height"])
                 auto.Click(click_x, click_y)
@@ -10962,8 +10953,8 @@ class Chat:
                 pane_ocr = self._get_image_text(pane_png)
 
                 # 如果之前发布过群公告，需要先点击"编辑群公告"
-                if "编辑群公告" in pane_ocr:
-                    ei = pane_ocr["编辑群公告"]
+                if _("编辑群公告") in pane_ocr:
+                    ei = pane_ocr[_("编辑群公告")]
                     pane_left, pane_top, _, _ = win32gui.GetWindowRect(pane_hwnd)
                     auto.Click(int(pane_left + ei["center"][0]),
                                int(pane_top + ei["center"][1]))
@@ -10978,9 +10969,9 @@ class Chat:
 
                 pane_png = capture_window(pane_hwnd, mode="print_window")
                 pane_ocr = self._get_image_text(pane_png)
-                if "完成" not in pane_ocr:
+                if _("完成") not in pane_ocr:
                     raise OCRError("OCR 未识别到'完成'按钮")
-                fi = pane_ocr["完成"]
+                fi = pane_ocr[_("完成")]
                 pane_left, pane_top, _, _ = win32gui.GetWindowRect(pane_hwnd)
                 auto.Click(int(pane_left + fi["center"][0]),
                            int(pane_top + fi["center"][1]))
@@ -11003,9 +10994,9 @@ class Chat:
             # -- 备注 --
             if remark is not None:
                 png_bytes, ocr_data, win_left, win_top = _fresh_ocr()
-                if "备注" not in ocr_data:
+                if _("备注") not in ocr_data:
                     raise OCRError("OCR 未识别到'备注'文本")
-                info = ocr_data["备注"]
+                info = ocr_data[_("备注")]
                 click_x = int(win_left + info["center"][0])
                 click_y = int(win_top + info["center"][1] + 1.5 * info["height"])
                 auto.Click(click_x, click_y)
@@ -11020,7 +11011,7 @@ class Chat:
             if my_nickname is not None:
                 png_bytes, ocr_data, win_left, win_top = _fresh_ocr()
                 ocr_key = None
-                for candidate in ("我在本群的昵称", "我在本群的呢称"):
+                for candidate in (_("我在本群的昵称"), "我在本群的呢称"):
                     if candidate in ocr_data:
                         ocr_key = candidate
                         break
@@ -11065,11 +11056,11 @@ class Chat:
                 # 每个开关独立截图+OCR，因为点击后界面状态会变化
                 # 折叠该聊天紧跟在消息免打扰之后操作
                 for switch_name, switch_val in [
-                    ("消息免打扰", mute),
-                    ("折叠该聊天", fold),
-                    ("置顶聊天", pin),
-                    ("保存到通讯录", save_address_book),
-                    ("显示群成员昵称", display_member_nickname),
+                    (_("消息免打扰"), mute),
+                    (_("折叠该聊天"), fold),
+                    (_("置顶聊天"), pin),
+                    (_("保存到通讯录"), save_address_book),
+                    (_("显示群成员昵称"), display_member_nickname),
                 ]:
                     if switch_val is None:
                         continue
@@ -11516,10 +11507,10 @@ class Chat:
             png_bytes = capture_window(hwnd, mode="print_window")
             ocr_data = self._get_image_text(png_bytes)
 
-            if "备注" not in ocr_data:
+            if _("备注") not in ocr_data:
                 raise OCRError("OCR 未识别到'备注'文本，请确认聊天信息面板已展开")
 
-            info = ocr_data["备注"]
+            info = ocr_data[_("备注")]
             win_left, win_top, _, _ = win32gui.GetWindowRect(hwnd)
             click_x = int(win_left + info["center"][0])
             click_y = int(win_top + info["center"][1] + info["height"])
@@ -11579,7 +11570,7 @@ class Chat:
 
             # OCR 可能识别为完整文本或拆分文本，按优先级匹配
             ocr_key = None
-            for candidate in ("我在本群的昵称", "我在本群的呢称"):
+            for candidate in (_("我在本群的昵称"), "我在本群的呢称"):
                 if candidate in ocr_data:
                     ocr_key = candidate
                     break
@@ -11866,7 +11857,7 @@ class Chat:
         self._activate_window()
         try:
             self._open_contact_profile()
-            self._click_profile_menu_item("设置备注和标签")
+            self._click_profile_menu_item(_("设置备注和标签"))
 
             remark_pop = self._win.WindowControl(
                 ClassName="mmui::ProfileUniquePop",
@@ -11961,7 +11952,7 @@ class Chat:
                         if not phone_field.Exists(0, 0):
                             break
                         name = phone_field.Name
-                        if not name or name == "填写电话":
+                        if not name or name == _("填写电话"):
                             break
                         separator_view = phone_field.GetParentControl()
                         if separator_view:
@@ -12097,7 +12088,7 @@ class Chat:
         self._activate_window()
         try:
             self._open_contact_profile()
-            self._click_profile_menu_item("设置备注和标签")
+            self._click_profile_menu_item(_("设置备注和标签"))
             time.sleep(0.5)
 
             remark_pop = self._win.WindowControl(
@@ -12153,7 +12144,7 @@ class Chat:
         self._activate_window()
         try:
             self._open_contact_profile()
-            self._click_profile_menu_item("设置备注和标签")
+            self._click_profile_menu_item(_("设置备注和标签"))
             time.sleep(0.5)
 
             remark_pop = self._win.WindowControl(
@@ -12176,7 +12167,7 @@ class Chat:
             )
             if tag_text.Exists(maxSearchSeconds=1):
                 name = tag_text.Name
-                if name and name != "搜索或创建标签...":
+                if name and name != _("搜索或创建标签..."):
                     existing_labels = {t.strip() for t in name.split(",") if t.strip()}
 
             new_labels = [l for l in labels if l not in existing_labels]
@@ -12247,7 +12238,7 @@ class Chat:
         self._activate_window()
         try:
             self._open_contact_profile()
-            self._click_profile_menu_item("设置备注和标签")
+            self._click_profile_menu_item(_("设置备注和标签"))
             time.sleep(0.5)
 
             remark_pop = self._win.WindowControl(
@@ -12270,7 +12261,7 @@ class Chat:
             )
             if tag_text.Exists(maxSearchSeconds=1):
                 name = tag_text.Name
-                if name and name != "搜索或创建标签...":
+                if name and name != _("搜索或创建标签..."):
                     existing_labels = {t.strip() for t in name.split(",") if t.strip()}
 
             to_remove = [l for l in labels if l in existing_labels]
@@ -12323,7 +12314,7 @@ class Chat:
         self._activate_window()
         try:
             self._open_contact_profile()
-            self._click_profile_menu_item("设置备注和标签")
+            self._click_profile_menu_item(_("设置备注和标签"))
             time.sleep(0.5)
 
             remark_pop = self._win.WindowControl(
@@ -12429,7 +12420,7 @@ class Chat:
         self._activate_window()
         try:
             self._open_contact_profile()
-            self._click_profile_menu_item("设置备注和标签")
+            self._click_profile_menu_item(_("设置备注和标签"))
             time.sleep(0.5)
 
             remark_pop = self._win.WindowControl(
@@ -12511,7 +12502,7 @@ class Chat:
         self._activate_window()
         try:
             self._open_contact_profile()
-            self._click_profile_menu_item("设置备注和标签")
+            self._click_profile_menu_item(_("设置备注和标签"))
             time.sleep(0.5)
 
             remark_pop = self._win.WindowControl(
@@ -12598,7 +12589,7 @@ class Chat:
         self._activate_window()
         try:
             self._open_contact_profile()
-            self._click_profile_menu_item("设置备注和标签")
+            self._click_profile_menu_item(_("设置备注和标签"))
             time.sleep(0.5)
 
             remark_pop = self._win.WindowControl(
@@ -12630,7 +12621,7 @@ class Chat:
             # 收集所有图片项
             img_items = []
             for child in img_list.GetChildren():
-                if child.Name == "描述图片":
+                if child.Name == _("描述图片"):
                     img_items.append(child)
 
             if not img_items:
@@ -12838,7 +12829,7 @@ class Chat:
         self._activate_window()
         try:
             self._open_contact_profile()
-            self._click_profile_menu_item("删除联系人")
+            self._click_profile_menu_item(_("删除联系人"))
             time.sleep(0.5)
 
             confirm_btn = self._win.ButtonControl(Name=_(_("删除")))
@@ -12870,7 +12861,7 @@ class Chat:
         self._activate_window()
         try:
             self._open_contact_profile()
-            self._click_profile_menu_item("设置朋友权限")
+            self._click_profile_menu_item(_("设置朋友权限"))
             time.sleep(0.5)
 
             perm_pop = self._win.WindowControl(
@@ -12950,7 +12941,7 @@ class Chat:
         self._activate_window()
         try:
             self._open_contact_profile()
-            self._click_profile_menu_item("设置朋友权限")
+            self._click_profile_menu_item(_("设置朋友权限"))
             time.sleep(0.5)
 
             perm_pop = self._win.WindowControl(
@@ -12962,7 +12953,7 @@ class Chat:
 
             changed = False
 
-            target_name = "仅聊天" if permission == "chatonly" else "聊天、朋友圈、微信运动等"
+            target_name = _("仅聊天") if permission == "chatonly" else _("聊天、朋友圈、微信运动等")
             target_item = perm_pop.GroupControl(
                 ClassName="mmui::ProfileFormPermissionItemUi",
                 Name=target_name,
@@ -13053,7 +13044,7 @@ class Chat:
         self._activate_window()
         try:
             self._open_contact_profile()
-            self._click_profile_menu_item("设置备注和标签")
+            self._click_profile_menu_item(_("设置备注和标签"))
             time.sleep(0.5)
 
             remark_pop = self._win.WindowControl(
@@ -13085,7 +13076,7 @@ class Chat:
             # 收集所有图片项
             img_items = []
             for child in img_list.GetChildren():
-                if child.Name == "描述图片":
+                if child.Name == _("描述图片"):
                     img_items.append(child)
 
             if not img_items:
@@ -13165,7 +13156,7 @@ class Chat:
         self._activate_window()
         try:
             self._open_contact_profile()
-            self._click_profile_menu_item("设置备注和标签")
+            self._click_profile_menu_item(_("设置备注和标签"))
             time.sleep(0.5)
 
             remark_pop = self._win.WindowControl(
