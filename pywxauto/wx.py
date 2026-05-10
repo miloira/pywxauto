@@ -54,6 +54,12 @@ logger = logging.getLogger(__name__)
 # 全局后台模式标志，由 Weixin.__init__ 设置
 background: bool = False
 
+LANGUAGE_DESCRIPTION = {
+    "cn": "简体中文",
+    "cn_t": "繁體中文",
+    "en": "English"
+}
+
 LANGUAGE = {
     # ============================================================
     # 登录窗口 (Login 类)
@@ -13384,43 +13390,41 @@ class WeixinClient(WeixinWindow):
 
         ensure_narrator_registry()
 
-        # 通过 PID 精确绑定窗口，或按旧逻辑匹配第一个
-        if self.pid:
-            self._win: auto.WindowControl = auto.WindowControl(
-                ClassName=self.WINDOW_CLASS,
+        self._win: auto.WindowControl = auto.WindowControl(
+            ClassName=self.WINDOW_CLASS,
+            ProcessId=self.pid,
+            searchDepth=1
+        )
+        if not self._win.Exists(maxSearchSeconds=3):
+            # 主窗口未找到，检查是否存在登录窗口
+            login_win = auto.WindowControl(
+                ClassName=Login.WINDOW_CLASS,
                 ProcessId=self.pid,
                 searchDepth=1
             )
-            if not self._win.Exists(maxSearchSeconds=3):
-                # 主窗口未找到，检查是否存在登录窗口
-                login_win = auto.WindowControl(
-                    ClassName=Login.WINDOW_CLASS,
+            if login_win.Exists(maxSearchSeconds=3):
+                # 是登录窗口，走登录逻辑
+                login = Login(pid=self.pid)
+                self._handle_login(login)
+                # 登录完成后重新绑定主窗口
+                self._win = auto.WindowControl(
+                    ClassName=self.WINDOW_CLASS,
                     ProcessId=self.pid,
                     searchDepth=1
                 )
-                if login_win.Exists(maxSearchSeconds=3):
-                    # 是登录窗口，走登录逻辑
-                    login = Login(pid=self.pid)
-                    self._handle_login(login)
-                    # 登录完成后重新绑定主窗口
-                    self._win = auto.WindowControl(
-                        ClassName=self.WINDOW_CLASS,
-                        ProcessId=self.pid,
-                        searchDepth=1
-                    )
-                    if not self._win.Exists(maxSearchSeconds=5):
-                        raise LoginError(f"登录后未找到 PID={self.pid} 的微信主窗口")
-                else:
-                    raise WindowNotFoundError(f"未找到 PID={self.pid} 的微信主窗口或登录窗口")
-        else:
-            self._win: auto.WindowControl = auto.WindowControl(
-                ClassName=self.WINDOW_CLASS,
-                RegexName=self.WINDOW_REGEX,
-                searchDepth=1
-            )
-            # 记录绑定的 PID
-            if self._win.Exists(0, 0):
-                self.pid = self._win.ProcessId
+                if not self._win.Exists(maxSearchSeconds=5):
+                    raise LoginError(f"登录后未找到 PID={self.pid} 的微信主窗口")
+            else:
+                raise WindowNotFoundError(f"未找到 PID={self.pid} 的微信主窗口或登录窗口")
+
+        self.pid = self._win.ProcessId
+
+        # 自动检测微信界面语言并设置全局语言
+        detected_lang = _detect_language(self.pid)
+        _set_language(detected_lang)
+        self.language = detected_lang
+        self.language_name = LANGUAGE_DESCRIPTION[self.language]
+        logger.info(f"当前微信语言：{self.language_name}")
 
         self._ocr_engine = ocr_engine
         if self._ocr_engine == "wcocr":
