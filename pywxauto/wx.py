@@ -13965,7 +13965,7 @@ class WeixinClient(WeixinWindow):
         """
         try:
             return SeparateChat(self, contact_name)
-        except (RuntimeError, ValueError):
+        except (WxWindowNotFoundError, ValueError):
             return None
 
     def get_separate_chats(self) -> list[SeparateChat]:
@@ -13983,7 +13983,7 @@ class WeixinClient(WeixinWindow):
                         and ctrl.Name not in skip_names
                         and (not self.pid or ctrl.ProcessId == self.pid)):
                     result.append(SeparateChat(self, ctrl.Name))
-            except (RuntimeError, ValueError, Exception):
+            except (WxWindowNotFoundError, ValueError, Exception):
                 pass
         return result
 
@@ -14969,7 +14969,7 @@ class WeixinClient(WeixinWindow):
                             chat = SeparateChat(self, name)
                             self._chat_listeners[name] = chat
                             logger.info("已注册监听: [%s] %s", chat.chat_type, name)
-                        except (RuntimeError, ValueError):
+                        except (WxWindowNotFoundError, ValueError):
                             pass
             return list(self._chat_listeners.values())
 
