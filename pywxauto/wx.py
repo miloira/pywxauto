@@ -479,8 +479,13 @@ class WxAutoError(Exception):
     pass
 
 
-class WindowNotFoundError(WxAutoError):
-    """窗口或控件未找到"""
+class WxWindowNotFoundError(WxAutoError):
+    """窗口未找到"""
+    pass
+
+
+class WxControlNotFoundError(WxAutoError):
+    """窗口控件未找到"""
     pass
 
 
@@ -2273,7 +2278,7 @@ class Message:
         else:
             ctrl = self._find_ctrl()
             if not ctrl:
-                raise RuntimeError("未找到消息控件")
+                raise WxControlNotFoundError("未找到消息控件")
             input_wx.click(ctrl)
 
     @PIM.guard
@@ -2348,7 +2353,7 @@ class Message:
         else:
             target = self._find_ctrl()
             if not target:
-                raise RuntimeError("未找到消息控件")
+                raise WxControlNotFoundError("未找到消息控件")
             input_wx.click(target, button="right")
 
         time.sleep(0.5)
@@ -2367,7 +2372,7 @@ class Message:
         )
         if not menu_item.Exists(maxSearchSeconds=1):
             input_wx.send_keys(win, "{Esc}")
-            raise RuntimeError(f"右键菜单中未找到'{menu_name}'选项")
+            raise WxControlNotFoundError(f"右键菜单中未找到'{menu_name}'选项")
 
         input_wx.click(menu_item)
         time.sleep(0.3)
@@ -2480,14 +2485,14 @@ class Message:
                 searchDepth=3,
             )
             if not search_field.Exists(maxSearchSeconds=2):
-                raise RuntimeError("弹窗中未找到搜索区域")
+                raise WxControlNotFoundError("弹窗中未找到搜索区域")
             search_edit = search_field.EditControl(
                 ClassName="mmui::XValidatorTextEdit",
                 Name=_("搜索"),
                 searchDepth=1,
             )
             if not search_edit.Exists(maxSearchSeconds=2):
-                raise RuntimeError("弹窗中未找到搜索框")
+                raise WxControlNotFoundError("弹窗中未找到搜索框")
 
             input_wx.click(search_edit)
             time.sleep(0.3)
@@ -2510,7 +2515,7 @@ class Message:
                 searchDepth=2,
             )
             if not contact_row.Exists(maxSearchSeconds=3):
-                raise RuntimeError(f"搜索结果中未找到联系人: {nickname}")
+                raise WxControlNotFoundError(f"搜索结果中未找到联系人: {nickname}")
 
             input_wx.click(contact_row)
             time.sleep(0.5)
@@ -2534,7 +2539,7 @@ class Message:
             searchDepth=5,
         )
         if not send_btn.Exists(maxSearchSeconds=2):
-            raise RuntimeError("未找到'发送'按钮")
+            raise WxControlNotFoundError("未找到'发送'按钮")
 
         # 等待按钮可用
         for _ in range(10):
@@ -2641,7 +2646,7 @@ class Message:
         file_edit = save_dlg.EditControl(AutomationId="1001")
         if not file_edit.Exists(maxSearchSeconds=3):
             input_wx.send_keys(save_dlg, "{Esc}")
-            raise RuntimeError("未找到文件名输入框")
+            raise WxControlNotFoundError("未找到文件名输入框")
 
         # 设置保存路径
         vp = file_edit.GetValuePattern()
@@ -2698,7 +2703,7 @@ class Message:
             Name=_(_("删除")),
         )
         if not confirm_btn.Exists(maxSearchSeconds=3):
-            raise RuntimeError("未找到删除确认弹窗的'删除'按钮")
+            raise WxControlNotFoundError("未找到删除确认弹窗的'删除'按钮")
 
         input_wx.click(confirm_btn)
 
@@ -2814,7 +2819,7 @@ class VoiceMessage(Message):
 
         ctrl = self._find_ctrl()
         if not ctrl:
-            raise RuntimeError("未找到语音消息控件")
+            raise WxControlNotFoundError("未找到语音消息控件")
 
         input_wx.click(ctrl)
         self.played = True
@@ -3734,7 +3739,7 @@ class Login(WeixinWindow):
 
     def _ensure_exists(self) -> None:
         if not self._win.Exists(maxSearchSeconds=3):
-            raise WindowNotFoundError("微信登录窗口未找到")
+            raise WxWindowNotFoundError("微信登录窗口未找到")
 
     @property
     def nickname(self) -> Optional[str]:
@@ -3782,7 +3787,7 @@ class Login(WeixinWindow):
             Name=_("进入微信"),
         )
         if not btn.Exists(maxSearchSeconds=2):
-            raise RuntimeError("未找到'进入微信'按钮")
+            raise WxControlNotFoundError("未找到'进入微信'按钮")
         input_wx.click(btn)
 
         # 等待登录窗口消失
@@ -3808,7 +3813,7 @@ class Login(WeixinWindow):
             Name=_("切换账号"),
         )
         if not btn.Exists(maxSearchSeconds=2):
-            raise RuntimeError("未找到'切换账号'按钮")
+            raise WxControlNotFoundError("未找到'切换账号'按钮")
         input_wx.click(btn)
 
     def get_qrcode(self) -> bytes:
@@ -3826,7 +3831,7 @@ class Login(WeixinWindow):
             PNG 格式的二维码图片字节数据
 
         Raises:
-            WindowNotFoundError: 登录窗口未找到
+            WxWindowNotFoundError: 登录窗口未找到
             RuntimeError: 二维码控件未找到
         """
         self._ensure_exists()
@@ -3835,7 +3840,7 @@ class Login(WeixinWindow):
             Name=_("二维码"),
         )
         if not qr_ctrl.Exists(maxSearchSeconds=5):
-            raise RuntimeError("未找到二维码控件，请确认当前处于扫码登录界面")
+            raise WxControlNotFoundError("未找到二维码控件，请确认当前处于扫码登录界面")
 
         # 通过窗口截图 + 裁剪二维码区域获取图片
         hwnd = self._win.NativeWindowHandle
@@ -3858,7 +3863,7 @@ class Login(WeixinWindow):
             Name=_("仅传输文件"),
         )
         if not btn.Exists(maxSearchSeconds=2):
-            raise RuntimeError("未找到'仅传输文件'按钮")
+            raise WxControlNotFoundError("未找到'仅传输文件'按钮")
         input_wx.click(btn)
 
     # ---- 网络代理设置相关控件信息 ----
@@ -3910,7 +3915,7 @@ class Login(WeixinWindow):
             Name=_("网络代理设置"),
         )
         if not btn.Exists(maxSearchSeconds=2):
-            raise RuntimeError("未找到'网络代理设置'按钮")
+            raise WxControlNotFoundError("未找到'网络代理设置'按钮")
         input_wx.click(btn)
         time.sleep(0.5)
 
@@ -3936,7 +3941,7 @@ class Login(WeixinWindow):
             Name=_("返回"),
         )
         if not btn.Exists(maxSearchSeconds=2):
-            raise RuntimeError("未找到'返回'按钮")
+            raise WxControlNotFoundError("未找到'返回'按钮")
         input_wx.click(btn)
 
     @property
@@ -3954,7 +3959,7 @@ class Login(WeixinWindow):
             Name=_("使用代理"),
         )
         if not sw.Exists(maxSearchSeconds=2):
-            raise RuntimeError("未找到'使用代理'开关")
+            raise WxControlNotFoundError("未找到'使用代理'开关")
         toggle = sw.GetTogglePattern()
         if toggle:
             return toggle.ToggleState == 1
@@ -3976,7 +3981,7 @@ class Login(WeixinWindow):
             Name=_("使用代理"),
         )
         if not sw.Exists(maxSearchSeconds=2):
-            raise RuntimeError("未找到'使用代理'开关")
+            raise WxControlNotFoundError("未找到'使用代理'开关")
         input_wx.click(sw)
 
     @PIM.guard
@@ -3995,7 +4000,7 @@ class Login(WeixinWindow):
             Name=_("使用代理"),
         )
         if not sw.Exists(maxSearchSeconds=2):
-            raise RuntimeError("未找到'使用代理'开关")
+            raise WxControlNotFoundError("未找到'使用代理'开关")
         input_wx.click(sw)
 
     def _find_proxy_edit(self, name: str) -> auto.EditControl:
@@ -4020,7 +4025,7 @@ class Login(WeixinWindow):
             Name=name,
         )
         if not edit.Exists(maxSearchSeconds=2):
-            raise RuntimeError(f"未找到'{name}'输入框")
+            raise WxControlNotFoundError(f"未找到'{name}'输入框")
         return edit
 
     def _set_proxy_field(self, name: str, value: str) -> None:
@@ -4123,7 +4128,7 @@ class Login(WeixinWindow):
             Name=_("保存"),
         )
         if not btn.Exists(maxSearchSeconds=2):
-            raise RuntimeError("未找到'保存'按钮")
+            raise WxControlNotFoundError("未找到'保存'按钮")
         input_wx.click(btn)
 
     @PIM.guard
@@ -4135,7 +4140,7 @@ class Login(WeixinWindow):
             Name=_("关闭"),
         )
         if not btn.Exists(maxSearchSeconds=1):
-            raise RuntimeError("未找到关闭按钮")
+            raise WxControlNotFoundError("未找到关闭按钮")
         input_wx.click(btn)
 
     def __str__(self) -> str:
@@ -4180,33 +4185,33 @@ class WeixinUpdate(WeixinWindow):
     def ignore(self) -> None:
         """点击"忽略本次更新"按钮"""
         if not self.exists:
-            raise RuntimeError("更新窗口未找到")
+            raise WxWindowNotFoundError("更新窗口未找到")
         self.activate()
         btn = self._win.ButtonControl(Name="忽略本次更新")
         if not btn.Exists(maxSearchSeconds=2):
-            raise RuntimeError("未找到'忽略本次更新'按钮")
+            raise WxControlNotFoundError("未找到'忽略本次更新'按钮")
         input_wx.click(btn)
 
     @PIM.guard
     def process_later(self) -> None:
         """点击"稍后处理"按钮"""
         if not self.exists:
-            raise RuntimeError("更新窗口未找到")
+            raise WxWindowNotFoundError("更新窗口未找到")
         self.activate()
         btn = self._win.ButtonControl(Name="稍后处理")
         if not btn.Exists(maxSearchSeconds=2):
-            raise RuntimeError("未找到'稍后处理'按钮")
+            raise WxControlNotFoundError("未找到'稍后处理'按钮")
         input_wx.click(btn)
 
     @PIM.guard
     def update(self) -> None:
         """点击"立即更新"按钮"""
         if not self.exists:
-            raise RuntimeError("更新窗口未找到")
+            raise WxWindowNotFoundError("更新窗口未找到")
         self.activate()
         btn = self._win.ButtonControl(Name="更新")
         if not btn.Exists(maxSearchSeconds=2):
-            raise RuntimeError("未找到'更新'按钮")
+            raise WxControlNotFoundError("未找到'更新'按钮")
         input_wx.click(btn)
 
     def __str__(self) -> str:
@@ -4256,7 +4261,7 @@ class VoipCall(WeixinWindow):
 
     def _ensure_exists(self) -> None:
         if not self._win.Exists(maxSearchSeconds=3):
-            raise RuntimeError("通话窗口未找到")
+            raise WxWindowNotFoundError("通话窗口未找到")
 
     @property
     def _toolbar(self) -> auto.GroupControl:
@@ -4272,7 +4277,7 @@ class VoipCall(WeixinWindow):
             )
             if btn.Exists(0, 0):
                 return btn
-        raise RuntimeError(f"工具栏中未找到按钮: {names}")
+        raise WxControlNotFoundError(f"工具栏中未找到按钮: {names}")
 
     @property
     def contact_name(self) -> Optional[str]:
@@ -4363,8 +4368,8 @@ class VoipCall(WeixinWindow):
         """结束通话（自动识别取消/挂断）"""
         try:
             btn = self._find_toolbar_button("取消", "挂断")
-        except RuntimeError:
-            raise RuntimeError("未找到取消或挂断按钮")
+        except WxControlNotFoundError:
+            raise WxControlNotFoundError("未找到取消或挂断按钮")
         input_wx.click(btn)
 
     @PIM.guard
@@ -4423,7 +4428,7 @@ class NoteEditor(WeixinWindow):
             ProcessId=wx.pid
         )
         if not win.Exists(0, 0):
-            raise RuntimeError("笔记编辑窗口未找到")
+            raise WxWindowNotFoundError("笔记编辑窗口未找到")
         self._hwnd = win.NativeWindowHandle
         self._win = win
 
@@ -4439,7 +4444,7 @@ class NoteEditor(WeixinWindow):
 
     def _ensure_exists(self) -> None:
         if not self.exists:
-            raise RuntimeError("笔记编辑窗口未找到")
+            raise WxWindowNotFoundError("笔记编辑窗口未找到")
 
     def activate(self) -> None:
         self._ensure_exists()
@@ -4503,7 +4508,7 @@ class NoteEditor(WeixinWindow):
         self.focus_editor()
         editor = self._editor
         if not editor.Exists(maxSearchSeconds=2):
-            raise RuntimeError("未找到笔记编辑器输入控件")
+            raise WxControlNotFoundError("未找到笔记编辑器输入控件")
         vp = editor.GetValuePattern()
         if not vp:
             raise RuntimeError("编辑器不支持 ValuePattern")
@@ -4515,7 +4520,7 @@ class NoteEditor(WeixinWindow):
         self.focus_editor()
         editor = self._editor
         if not editor.Exists(maxSearchSeconds=2):
-            raise RuntimeError("未找到笔记编辑器输入控件")
+            raise WxControlNotFoundError("未找到笔记编辑器输入控件")
         input_wx.paste_or_type(editor, text)
 
     @PIM.guard
@@ -4739,7 +4744,7 @@ class SessionItem:
         session._session_context_action(self.name, _("删除"))
         confirm_btn = session._win.ButtonControl(Name=_(_("删除")), ClassName="mmui::XOutlineButton")
         if not confirm_btn.Exists(maxSearchSeconds=2):
-            raise RuntimeError("未找到删除确认弹窗")
+            raise WxControlNotFoundError("未找到删除确认弹窗")
         input_wx.click(confirm_btn)
 
     def open(self) -> None:
@@ -4832,7 +4837,7 @@ class Session:
         """获取当前可见的会话列表"""
         lc = self._list_control
         if not lc.Exists(maxSearchSeconds=3):
-            raise RuntimeError("未找到会话列表控件")
+            raise WxControlNotFoundError("未找到会话列表控件")
 
         sessions: list[SessionItem] = []
         for ctrl, _ in auto.WalkControl(lc):
@@ -4884,7 +4889,7 @@ class Session:
             AutomationId=f"session_item_{name}",
         )
         if not item.Exists(maxSearchSeconds=2):
-            raise RuntimeError(f"会话列表中未找到: {name}")
+            raise WxControlNotFoundError(f"会话列表中未找到: {name}")
         input_wx.click(item)
         time.sleep(0.3)
 
@@ -4898,7 +4903,7 @@ class Session:
     def search(self, keyword: str, chat_type: Optional[list[str]] = None) -> None:
         """搜索并打开会话（search_and_select 的别名，失败时抛异常）"""
         if not self.search_and_select(keyword, chat_type):
-            raise RuntimeError(f"搜索未找到结果: {keyword}")
+            raise WxControlNotFoundError(f"搜索未找到结果: {keyword}")
 
     @PIM.guard
     def open_by_search(self, name: str, chat_type: Optional[list[str]] = None,
@@ -4961,7 +4966,7 @@ class Session:
         """
         lc = self._list_control
         if not lc.Exists(maxSearchSeconds=2):
-            raise RuntimeError("未找到会话列表控件")
+            raise WxControlNotFoundError("未找到会话列表控件")
         delta = -clicks if direction == "down" else clicks
         rect = lc.BoundingRectangle
         cx = (rect.left + rect.right) // 2
@@ -4985,7 +4990,7 @@ class Session:
         self.wx.activate()
         lc = self._list_control
         if not lc.Exists(maxSearchSeconds=3):
-            raise RuntimeError("未找到会话列表控件")
+            raise WxControlNotFoundError("未找到会话列表控件")
 
         time.sleep(0.1)
         input_wx.focus(lc)
@@ -5049,7 +5054,7 @@ class Session:
         # 会话不可见，通过滚动查找
         lc = self._list_control
         if not lc.Exists(maxSearchSeconds=3):
-            raise RuntimeError("未找到会话列表控件")
+            raise WxControlNotFoundError("未找到会话列表控件")
 
         input_wx.focus(lc)
         time.sleep(0.2)
@@ -5091,7 +5096,7 @@ class Session:
                 no_new_count = 0
             prev_names = curr_names
 
-        raise RuntimeError(f"会话列表中未找到: {name}")
+        raise WxControlNotFoundError(f"会话列表中未找到: {name}")
 
     def _right_click_session(self, name: str) -> None:
         """右键点击指定会话，弹出上下文菜单"""
@@ -5115,7 +5120,7 @@ class Session:
         if not menu_item.Exists(maxSearchSeconds=1):
             # 关闭菜单
             input_wx.send_keys(self._win, "{Esc}")
-            raise RuntimeError(f"菜单中未找到: {menu_name}")
+            raise WxControlNotFoundError(f"菜单中未找到: {menu_name}")
         input_wx.click(menu_item)
         time.sleep(0.3)
 
@@ -5207,7 +5212,7 @@ class Session:
             Name=_(_("删除")), ClassName="mmui::XOutlineButton",
         )
         if not confirm_btn.Exists(maxSearchSeconds=2):
-            raise RuntimeError("未找到删除确认弹窗")
+            raise WxControlNotFoundError("未找到删除确认弹窗")
         input_wx.click(confirm_btn)
 
     @PIM.guard
@@ -5260,7 +5265,7 @@ class Session:
             Name=_("快捷操作"),
         )
         if not btn.Exists(maxSearchSeconds=2):
-            raise RuntimeError("未找到快捷操作按钮")
+            raise WxControlNotFoundError("未找到快捷操作按钮")
         input_wx.click(btn)
         time.sleep(0.3)
 
@@ -5283,7 +5288,7 @@ class Session:
         if not item.Exists(maxSearchSeconds=1):
             # 关闭菜单
             self._click_quick_action_button()
-            raise RuntimeError(f"快捷操作菜单中未找到: {item_name}")
+            raise WxControlNotFoundError(f"快捷操作菜单中未找到: {item_name}")
         input_wx.click(item)
         time.sleep(0.3)
 
@@ -5351,13 +5356,13 @@ class Session:
                 searchDepth=3,
             )
             if not search_field.Exists(maxSearchSeconds=2):
-                raise RuntimeError("发起群聊窗口中未找到搜索区域")
+                raise WxControlNotFoundError("发起群聊窗口中未找到搜索区域")
             search_edit = search_field.EditControl(
                 ClassName="mmui::XValidatorTextEdit", Name=_("搜索"),
                 searchDepth=1,
             )
             if not search_edit.Exists(maxSearchSeconds=2):
-                raise RuntimeError("发起群聊窗口中未找到搜索框")
+                raise WxControlNotFoundError("发起群聊窗口中未找到搜索框")
 
             # 清空搜索框并通过键盘输入昵称
             input_wx.click(search_edit)
@@ -5388,7 +5393,7 @@ class Session:
                 searchDepth=1,
             )
             if not contact_row.Exists(maxSearchSeconds=3):
-                raise RuntimeError(f"未找到联系人: {nickname}")
+                raise WxControlNotFoundError(f"未找到联系人: {nickname}")
 
             input_wx.click(contact_row)
             time.sleep(0.5)
@@ -5407,7 +5412,7 @@ class Session:
             searchDepth=3,
         )
         if not detail_view.Exists(maxSearchSeconds=2):
-            raise RuntimeError("未找到详情面板")
+            raise WxControlNotFoundError("未找到详情面板")
         confirm_btn = detail_view.ButtonControl(
             ClassName="mmui::XOutlineButton",
             AutomationId="confirm_btn",
@@ -5415,7 +5420,7 @@ class Session:
             searchDepth=2,
         )
         if not confirm_btn.Exists(maxSearchSeconds=3):
-            raise RuntimeError("未找到完成按钮")
+            raise WxControlNotFoundError("未找到完成按钮")
         input_wx.click(confirm_btn)
         time.sleep(0.5)
 
@@ -5467,7 +5472,7 @@ class Session:
             ClassName="mmui::XValidatorTextEdit", Name=_("搜索"),
         )
         if not search_edit.Exists(maxSearchSeconds=2):
-            raise RuntimeError("添加朋友窗口中未找到搜索框")
+            raise WxControlNotFoundError("添加朋友窗口中未找到搜索框")
         input_wx.click(search_edit)
         time.sleep(0.2)
         # search_edit.GetValuePattern().SetValue(keyword)
@@ -5477,7 +5482,7 @@ class Session:
             ClassName="mmui::XOutlineButton", Name=_("搜索"),
         )
         if not search_btn.Exists(maxSearchSeconds=1):
-            raise RuntimeError("未找到搜索按钮")
+            raise WxControlNotFoundError("未找到搜索按钮")
         input_wx.click(search_btn)
         time.sleep(1)
 
@@ -5488,7 +5493,7 @@ class Session:
             chat_btn = add_friend_win.ButtonControl(Name="发消息")
             if chat_btn.Exists(0, 0):
                 raise RuntimeError("对方已经是好友，无需添加")
-            raise RuntimeError("未找到'添加到通讯录'按钮，可能搜索无结果")
+            raise WxControlNotFoundError("未找到'添加到通讯录'按钮，可能搜索无结果")
         input_wx.click(add_btn)
         time.sleep(1)
 
@@ -5561,7 +5566,7 @@ class Session:
             Name=_("确定"), ClassName="mmui::XOutlineButton",
         )
         if not confirm_btn.Exists(maxSearchSeconds=1):
-            raise RuntimeError("未找到确定按钮")
+            raise WxControlNotFoundError("未找到确定按钮")
         input_wx.click(confirm_btn)
 
     @PIM.guard
@@ -5626,7 +5631,7 @@ class Moment:
         self.friend_circle._open_window()
         ctrl = self._find_cell()
         if not ctrl:
-            raise RuntimeError(f"未找到朋友圈动态: {self.sender}")
+            raise WxControlNotFoundError(f"未找到朋友圈动态: {self.sender}")
         self._scroll_into_view(ctrl)
 
         win = self.friend_circle._win
@@ -5661,7 +5666,7 @@ class Moment:
         self.friend_circle._open_window()
         ctrl = self._find_cell()
         if not ctrl:
-            raise RuntimeError(f"未找到朋友圈动态: {self.sender}")
+            raise WxControlNotFoundError(f"未找到朋友圈动态: {self.sender}")
         self._scroll_into_view(ctrl)
 
         win = self.friend_circle._win
@@ -5694,7 +5699,7 @@ class Moment:
         self.friend_circle._open_window()
         ctrl = self._find_cell()
         if not ctrl:
-            raise RuntimeError(f"未找到朋友圈动态: {self.sender}")
+            raise WxControlNotFoundError(f"未找到朋友圈动态: {self.sender}")
         self._scroll_into_view(ctrl)
 
         if not self._click_action_button(ctrl, "评论"):
@@ -5707,7 +5712,7 @@ class Moment:
         comment_cell = ctrl.GetNextSiblingControl()
         if (not comment_cell
                 or comment_cell.ClassName != "mmui::TimelineCommentCell"):
-            raise RuntimeError("未找到当前动态的评论区控件")
+            raise WxControlNotFoundError("未找到当前动态的评论区控件")
 
         rect = comment_cell.BoundingRectangle
         send_x = rect.right - 70
@@ -5723,7 +5728,7 @@ class Moment:
         self.friend_circle._open_window()
         ctrl = self._find_cell()
         if not ctrl:
-            raise RuntimeError(f"未找到朋友圈动态: {self.sender}")
+            raise WxControlNotFoundError(f"未找到朋友圈动态: {self.sender}")
         return self._scroll_into_view(ctrl)
 
     def _find_cell(self) -> "auto.Control | None":
@@ -5960,7 +5965,7 @@ class FriendCircle(WeixinWindow):
             AutomationId=self.SNS_LIST_ID,
         )
         if not lc.Exists(maxSearchSeconds=5):
-            raise RuntimeError("未找到朋友圈列表控件 (sns_list)")
+            raise WxControlNotFoundError("未找到朋友圈列表控件 (sns_list)")
         return lc
 
     def _parse_moment_name(self, runtime_id: tuple, raw_name: str,
@@ -6309,7 +6314,7 @@ class FriendCircle(WeixinWindow):
             AutomationId=self.TOOLBAR_ID,
         )
         if not toolbar.Exists(maxSearchSeconds=2):
-            raise RuntimeError("未找到朋友圈工具栏")
+            raise WxControlNotFoundError("未找到朋友圈工具栏")
 
         # 查找工具栏中的"发表"按钮
         publish_tab = toolbar.ButtonControl(
@@ -6317,7 +6322,7 @@ class FriendCircle(WeixinWindow):
             Name=self.PUBLISH_TAB_NAME,
         )
         if not publish_tab.Exists(maxSearchSeconds=2):
-            raise RuntimeError("未找到工具栏'发表'按钮")
+            raise WxControlNotFoundError("未找到工具栏'发表'按钮")
 
         if text_only:
             # 纯文本发布：移动鼠标到"发表"按钮，长按 3 秒触发文字发布面板
@@ -6361,7 +6366,7 @@ class FriendCircle(WeixinWindow):
             searchDepth=10,
         )
         if not edit.Exists(maxSearchSeconds=3):
-            raise RuntimeError("未找到朋友圈文本输入框")
+            raise WxControlNotFoundError("未找到朋友圈文本输入框")
         return edit
 
     def _find_publish_button(self, panel: auto.Control) -> auto.ButtonControl:
@@ -6376,7 +6381,7 @@ class FriendCircle(WeixinWindow):
             searchDepth=3,
         )
         if not btn.Exists(maxSearchSeconds=3):
-            raise RuntimeError("未找到'发表'按钮")
+            raise WxControlNotFoundError("未找到'发表'按钮")
         return btn
 
     def _find_cancel_button(self, panel: auto.Control) -> auto.ButtonControl:
@@ -6391,7 +6396,7 @@ class FriendCircle(WeixinWindow):
             searchDepth=10,
         )
         if not btn.Exists(maxSearchSeconds=3):
-            raise RuntimeError("未找到'取消'按钮")
+            raise WxControlNotFoundError("未找到'取消'按钮")
         return btn
 
     def _select_file_in_dialog(self, file_path: str) -> None:
@@ -6413,7 +6418,7 @@ class FriendCircle(WeixinWindow):
         if not file_edit.Exists(maxSearchSeconds=3):
             file_edit = file_dlg.EditControl(AutomationId="1148")
         if not file_edit.Exists(maxSearchSeconds=3):
-            raise RuntimeError("未找到文件名输入框")
+            raise WxControlNotFoundError("未找到文件名输入框")
 
         vp = file_edit.GetValuePattern()
         if vp:
@@ -6446,7 +6451,7 @@ class FriendCircle(WeixinWindow):
             Name="提醒谁看",
         )
         if not remind_btn.Exists(maxSearchSeconds=2):
-            raise RuntimeError("未找到'提醒谁看'按钮")
+            raise WxControlNotFoundError("未找到'提醒谁看'按钮")
         input_wx.click(remind_btn)
         time.sleep(0.5)
 
@@ -6495,7 +6500,7 @@ class FriendCircle(WeixinWindow):
             searchDepth=5,
         )
         if not privacy_btn.Exists(maxSearchSeconds=2):
-            raise RuntimeError("未找到'谁可以看'隐私按钮")
+            raise WxControlNotFoundError("未找到'谁可以看'隐私按钮")
         input_wx.click(privacy_btn)
         time.sleep(0.5)
 
@@ -6508,7 +6513,7 @@ class FriendCircle(WeixinWindow):
             searchDepth=10,
         )
         if not radio.Exists(maxSearchSeconds=2):
-            raise RuntimeError(f"未找到隐私选项 '{permission}'")
+            raise WxControlNotFoundError(f"未找到隐私选项 '{permission}'")
         input_wx.click(radio)
         time.sleep(0.5)
 
@@ -6526,7 +6531,7 @@ class FriendCircle(WeixinWindow):
             searchDepth=10,
         )
         if not confirm_btn.Exists(maxSearchSeconds=2):
-            raise RuntimeError("未找到隐私设置'确定'按钮")
+            raise WxControlNotFoundError("未找到隐私设置'确定'按钮")
         input_wx.click(confirm_btn)
 
     def _select_in_session_picker(
@@ -6609,7 +6614,7 @@ class FriendCircle(WeixinWindow):
                 searchDepth=5,
             )
             if not search_edit.Exists(maxSearchSeconds=2):
-                raise RuntimeError("未找到搜索框")
+                raise WxControlNotFoundError("未找到搜索框")
 
             not_found: list[str] = []
 
@@ -6663,7 +6668,7 @@ class FriendCircle(WeixinWindow):
             searchDepth=5,
         )
         if not confirm_btn.Exists(maxSearchSeconds=2):
-            raise RuntimeError("未找到'完成'按钮")
+            raise WxControlNotFoundError("未找到'完成'按钮")
         input_wx.click(confirm_btn)
 
     @PIM.guard
@@ -6713,7 +6718,7 @@ class FriendCircle(WeixinWindow):
                 Name="选照片或视频",
             )
             if not menu_item.Exists(maxSearchSeconds=2):
-                raise RuntimeError("未找到'选照片或视频'菜单项")
+                raise WxControlNotFoundError("未找到'选照片或视频'菜单项")
             input_wx.click(menu_item)
             time.sleep(1)
 
@@ -6739,7 +6744,7 @@ class FriendCircle(WeixinWindow):
                         searchDepth=10,
                     )
                     if not add_cell.Exists(maxSearchSeconds=3):
-                        raise RuntimeError("未找到'添加图片'按钮")
+                        raise WxControlNotFoundError("未找到'添加图片'按钮")
 
                     input_wx.click(add_cell)
                     time.sleep(1)
@@ -6752,7 +6757,7 @@ class FriendCircle(WeixinWindow):
                 Name="发表文字",
             )
             if not menu_item.Exists(maxSearchSeconds=2):
-                raise RuntimeError("未找到'发表文字'菜单项")
+                raise WxControlNotFoundError("未找到'发表文字'菜单项")
             input_wx.click(menu_item)
             time.sleep(1)
 
@@ -6814,14 +6819,14 @@ class FriendCircle(WeixinWindow):
             AutomationId=self.TOOLBAR_ID,
         )
         if not toolbar.Exists(maxSearchSeconds=2):
-            raise RuntimeError("未找到朋友圈工具栏")
+            raise WxControlNotFoundError("未找到朋友圈工具栏")
 
         btn = toolbar.ButtonControl(
             ClassName="mmui::XTabBarItem",
             Name=name,
         )
         if not btn.Exists(maxSearchSeconds=2):
-            raise RuntimeError(f"未找到工具栏'{name}'按钮")
+            raise WxControlNotFoundError(f"未找到工具栏'{name}'按钮")
         return btn
 
     @PIM.guard
@@ -6895,7 +6900,7 @@ class ChatFile:
         time.sleep(0.5)
         menu = self.file_manager._find_context_menu_by_point()
         if not menu:
-            raise RuntimeError("未找到右键菜单")
+            raise WxControlNotFoundError("未找到右键菜单")
         return menu
 
     def _click_menu_item(self, menu, item_name: str) -> auto.Control:
@@ -6906,7 +6911,7 @@ class ChatFile:
                 target = child
                 break
         if not target:
-            raise RuntimeError(f"未找到'{item_name}'菜单项")
+            raise WxControlNotFoundError(f"未找到'{item_name}'菜单项")
         input_wx.click(target)
         return target
 
@@ -6914,11 +6919,11 @@ class ChatFile:
         """处理 Windows 文件保存对话框：填入路径并保存"""
         save_dialog = self.file_manager._win.WindowControl(ClassName="#32770", searchDepth=3)
         if not save_dialog.Exists(maxSearchSeconds=5):
-            raise RuntimeError("未找到 Windows 文件保存对话框")
+            raise WxControlNotFoundError("未找到 Windows 文件保存对话框")
 
         file_name_edit = save_dialog.EditControl(AutomationId="1001", searchDepth=10)
         if not file_name_edit.Exists(maxSearchSeconds=3):
-            raise RuntimeError("未找到文件名输入框")
+            raise WxControlNotFoundError("未找到文件名输入框")
 
         input_wx.paste_or_type(file_name_edit, file_path)
 
@@ -7113,7 +7118,7 @@ class FileManager(WeixinWindow):
                 Name="聊天文件", searchDepth=10
             )
             if not chat_file_btn.Exists(maxSearchSeconds=3):
-                raise RuntimeError("未找到'聊天文件'按钮")
+                raise WxControlNotFoundError("未找到'聊天文件'按钮")
 
             input_wx.click(chat_file_btn)
 
@@ -7141,7 +7146,7 @@ class FileManager(WeixinWindow):
             searchDepth=10,
         )
         if not filter_btn.Exists(maxSearchSeconds=3):
-            raise RuntimeError(f"未找到'{filter_name}'筛选按钮")
+            raise WxControlNotFoundError(f"未找到'{filter_name}'筛选按钮")
 
         input_wx.click(filter_btn)
         return True
@@ -8152,7 +8157,7 @@ class Chat:
 
         field = self._input_field
         if not field.Exists(maxSearchSeconds=2):
-            raise RuntimeError("未找到聊天输入框")
+            raise WxControlNotFoundError("未找到聊天输入框")
         
         if background:
             input_wx.paste_or_type(field, content)
@@ -8257,7 +8262,7 @@ class Chat:
             self.clear_input()
             field = self._input_field
             if not field.Exists(maxSearchSeconds=2):
-                raise RuntimeError("未找到聊天输入框")
+                raise WxControlNotFoundError("未找到聊天输入框")
 
             if background:
                 # 后台模式：复制粘贴文件，失败时重试最多 3 次
@@ -8335,11 +8340,11 @@ class Chat:
             searchDepth=20
         )
         if not toolbar.Exists(maxSearchSeconds=2):
-            raise RuntimeError("未找到聊天工具栏")
+            raise WxControlNotFoundError("未找到聊天工具栏")
 
         file_btn = toolbar.ButtonControl(Name=_("发送文件"))
         if not file_btn.Exists(maxSearchSeconds=2):
-            raise RuntimeError("未找到'发送文件'按钮")
+            raise WxControlNotFoundError("未找到'发送文件'按钮")
         input_wx.click(file_btn)
         time.sleep(0.5)
 
@@ -8353,7 +8358,7 @@ class Chat:
         if not edit.Exists(0, 0):
             edit = dlg.EditControl(AutomationId="1148")
         if not edit.Exists(maxSearchSeconds=2):
-            raise RuntimeError("未找到文件名输入框")
+            raise WxControlNotFoundError("未找到文件名输入框")
         # edit.GetValuePattern().SetValue(file_path)
         input_wx.focus(edit)
         input_wx.paste_or_type(edit, file_path)
@@ -8366,7 +8371,7 @@ class Chat:
         if not open_btn.Exists(0, 0):
             open_btn = dlg.ButtonControl(AutomationId="1")
         if not open_btn.Exists(maxSearchSeconds=2):
-            raise RuntimeError("未找到'打开'按钮")
+            raise WxControlNotFoundError("未找到'打开'按钮")
         input_wx.click(open_btn)
         time.sleep(0.5)
 
@@ -8399,7 +8404,7 @@ class Chat:
 
         field = self._input_field
         if not field.Exists(maxSearchSeconds=2):
-            raise RuntimeError("未找到聊天输入框")
+            raise WxControlNotFoundError("未找到聊天输入框")
 
         # 点击输入框确保聊天窗口获得焦点
         input_wx.click(field)
@@ -8433,7 +8438,7 @@ class Chat:
         self.clear_input()
         field = self._input_field
         if not field.Exists(maxSearchSeconds=2):
-            raise RuntimeError("未找到聊天输入框")
+            raise WxControlNotFoundError("未找到聊天输入框")
 
         self._add_at_members(field, at_members)
 
@@ -8503,7 +8508,7 @@ class Chat:
             searchDepth=20
         )
         if not toolbar.Exists(maxSearchSeconds=2):
-            raise RuntimeError("未找到聊天工具栏")
+            raise WxControlNotFoundError("未找到聊天工具栏")
 
         # 查找"发送收藏"按钮（嵌套在 GroupControl 内）
         fav_btn = toolbar.ButtonControl(
@@ -8512,7 +8517,7 @@ class Chat:
             searchDepth=5,
         )
         if not fav_btn.Exists(maxSearchSeconds=2):
-            raise RuntimeError("未找到'发送收藏'按钮")
+            raise WxControlNotFoundError("未找到'发送收藏'按钮")
 
         input_wx.click(fav_btn)
 
@@ -8570,7 +8575,7 @@ class Chat:
             if edit_rect.top >= detail_rect.top - 100 and edit_rect.left < detail_rect.left:
                 return edit
 
-        raise RuntimeError("未找到收藏面板搜索框")
+        raise WxControlNotFoundError("未找到收藏面板搜索框")
 
     def _find_collection_item(self, detail_list, keyword) -> Optional[auto.ListItemControl]:
         """
@@ -8643,13 +8648,13 @@ class Chat:
         )
         if not detail_list.Exists(maxSearchSeconds=3):
             self._close_collection_panel()
-            raise RuntimeError("搜索后未找到收藏详情列表")
+            raise WxControlNotFoundError("搜索后未找到收藏详情列表")
 
         # 4. 选中第一个搜索结果
         matched_item = self._find_collection_item(detail_list, keyword)
         if not matched_item:
             self._close_collection_panel()
-            raise RuntimeError(f"未找到匹配的收藏项: {keyword}")
+            raise WxControlNotFoundError(f"未找到匹配的收藏项: {keyword}")
         input_wx.click(matched_item)
 
         # 5. 点击"发送"按钮
@@ -8659,7 +8664,7 @@ class Chat:
         )
         if not send_btn.Exists(maxSearchSeconds=2):
             self._close_collection_panel()
-            raise RuntimeError("未找到'发送'按钮")
+            raise WxControlNotFoundError("未找到'发送'按钮")
 
         # 等待按钮变为可用
         for _ in range(10):
@@ -8793,7 +8798,7 @@ class Chat:
             searchDepth=1
         )
         if not popover.Exists(maxSearchSeconds=3):
-            raise RuntimeError("未找到表情弹窗")
+            raise WxWindowNotFoundError("未找到表情弹窗")
         return popover
 
     def _open_emoji_panel(self) -> None:
@@ -8819,7 +8824,7 @@ class Chat:
             searchDepth=20
         )
         if not toolbar.Exists(maxSearchSeconds=2):
-            raise RuntimeError("未找到聊天工具栏")
+            raise WxControlNotFoundError("未找到聊天工具栏")
 
         # 查找"发送表情"按钮
         emoji_btn = toolbar.ButtonControl(
@@ -8828,7 +8833,7 @@ class Chat:
             searchDepth=5,
         )
         if not emoji_btn.Exists(maxSearchSeconds=2):
-            raise RuntimeError("未找到'发送表情'按钮")
+            raise WxControlNotFoundError("未找到'发送表情'按钮")
 
         input_wx.click(emoji_btn)
 
@@ -8864,14 +8869,14 @@ class Chat:
             AutomationId=self.EMOJI_PANEL_TOOLBAR_ID,
         )
         if not panel_toolbar.Exists(maxSearchSeconds=2):
-            raise RuntimeError("未找到表情面板工具栏")
+            raise WxControlNotFoundError("未找到表情面板工具栏")
 
         search_tab = panel_toolbar.TabItemControl(
             ClassName=self.EMOJI_SEARCH_TAB_CLASS,
             Name=self.EMOJI_SEARCH_TAB_NAME,
         )
         if not search_tab.Exists(maxSearchSeconds=2):
-            raise RuntimeError("未找到'搜索表情'标签")
+            raise WxControlNotFoundError("未找到'搜索表情'标签")
 
         input_wx.click(search_tab)
 
@@ -8894,7 +8899,7 @@ class Chat:
             if edit.Exists(maxSearchSeconds=2):
                 return edit
 
-        raise RuntimeError("未找到表情搜索输入框")
+        raise WxControlNotFoundError("未找到表情搜索输入框")
 
     def _click_emoji_search_result(
         self, popover: auto.WindowControl, index: int,
@@ -8911,7 +8916,7 @@ class Chat:
             Name=self.EMOJI_SEARCH_RESULT_NAME,
         )
         if not result_doc.Exists(maxSearchSeconds=3):
-            raise RuntimeError("未找到表情搜索结果区域")
+            raise WxControlNotFoundError("未找到表情搜索结果区域")
 
         # 收集所有 ListItemControl（即表情项）
         items = result_doc.GetChildren()
@@ -8919,11 +8924,11 @@ class Chat:
         for i, child in enumerate(items):
             if i == 0:
                 if not child.Exists(maxSearchSeconds=10):
-                    raise RuntimeError("未找到任何表情")
+                    raise WxControlNotFoundError("未找到任何表情")
             self._collect_emotion_items(child, emotion_items)
 
         if not emotion_items:
-            raise RuntimeError("搜索结果为空，未找到任何表情")
+            raise WxControlNotFoundError("搜索结果为空，未找到任何表情")
 
         if index > len(emotion_items):
             raise RuntimeError(
@@ -8951,14 +8956,14 @@ class Chat:
             AutomationId=self.EMOJI_PANEL_TOOLBAR_ID,
         )
         if not panel_toolbar.Exists(maxSearchSeconds=2):
-            raise RuntimeError("未找到表情面板工具栏")
+            raise WxControlNotFoundError("未找到表情面板工具栏")
 
         custom_tab = panel_toolbar.TabItemControl(
             ClassName=self.EMOJI_CUSTOM_TAB_CLASS,
             Name=self.EMOJI_CUSTOM_TAB_NAME,
         )
         if not custom_tab.Exists(maxSearchSeconds=2):
-            raise RuntimeError("未找到'自定义表情'标签")
+            raise WxControlNotFoundError("未找到'自定义表情'标签")
         input_wx.click(custom_tab)
 
     def _click_custom_emoji_item(
@@ -8975,7 +8980,7 @@ class Chat:
             ClassName=self.EMOJI_CUSTOM_GRID_CLASS,
         )
         if not grid.Exists(maxSearchSeconds=3):
-            raise RuntimeError("未找到自定义表情列表")
+            raise WxControlNotFoundError("未找到自定义表情列表")
 
         items = grid.GetChildren()
         emoji_items = [
@@ -9079,7 +9084,7 @@ class Chat:
             Name=_("聊天信息"),
         )
         if not btn.Exists(maxSearchSeconds=2):
-            raise RuntimeError("未找到'聊天信息'按钮")
+            raise WxControlNotFoundError("未找到'聊天信息'按钮")
         input_wx.click(btn)
 
     def _click_contact_avatar(self) -> None:
@@ -9089,7 +9094,7 @@ class Chat:
             AutomationId="single_chat_member_cell",
         )
         if not avatar.Exists(maxSearchSeconds=3):
-            raise RuntimeError("未找到联系人头像")
+            raise WxControlNotFoundError("未找到联系人头像")
         input_wx.click(avatar)
 
     def _click_profile_more_button(self) -> None:
@@ -9109,7 +9114,7 @@ class Chat:
                     input_wx.click(child)
                     return
 
-        raise RuntimeError("未找到资料面板'更多'按钮")
+        raise WxControlNotFoundError("未找到资料面板'更多'按钮")
 
     def _click_recommend_contact(self) -> None:
         """点击弹出菜单中的"把他推荐给朋友" """
@@ -9118,7 +9123,7 @@ class Chat:
             Name="把他推荐给朋友",
         )
         if not menu_item.Exists(maxSearchSeconds=2):
-            raise RuntimeError("未找到'把他推荐给朋友'菜单项")
+            raise WxControlNotFoundError("未找到'把他推荐给朋友'菜单项")
         input_wx.click(menu_item)
 
     def _search_and_select_receiver(self, receiver_nickname: str) -> None:
@@ -9135,13 +9140,13 @@ class Chat:
             ClassName="mmui::XSearchField",
         )
         if not search_field.Exists(maxSearchSeconds=2):
-            raise RuntimeError("弹窗中未找到搜索区域")
+            raise WxControlNotFoundError("弹窗中未找到搜索区域")
 
         search_edit = search_field.EditControl(
             ClassName="mmui::XValidatorTextEdit", Name=_("搜索"),
         )
         if not search_edit.Exists(maxSearchSeconds=2):
-            raise RuntimeError("弹窗中未找到搜索框")
+            raise WxControlNotFoundError("弹窗中未找到搜索框")
 
         # 输入接收者昵称（通过剪贴板粘贴，确保触发搜索）
         input_wx.click(search_edit)
@@ -9171,7 +9176,7 @@ class Chat:
             ClassName="mmui::SearchContactCellView",
         )
         if not contact_row.Exists(maxSearchSeconds=3):
-            raise RuntimeError(f"搜索结果中未找到联系人: {receiver_nickname}")
+            raise WxControlNotFoundError(f"搜索结果中未找到联系人: {receiver_nickname}")
 
         # 关键：在选中联系人之前先获取发送按钮引用，
         # 因为选中后 SPDetailView 面板会刷新重建，旧控件引用会失效，
@@ -9180,7 +9185,7 @@ class Chat:
             AutomationId="confirm_btn",
         )
         if not send_btn.Exists(maxSearchSeconds=2):
-            raise RuntimeError("未找到'发送'按钮")
+            raise WxControlNotFoundError("未找到'发送'按钮")
 
         # 移动鼠标到搜索结果上，再按空格键选中
         input_wx.click(contact_row)
@@ -9297,7 +9302,7 @@ class Chat:
                     names = [c.Name for c in fuzzy]
                     raise RuntimeError(f"@群成员模糊匹配到多个: {names}")
                 else:
-                    raise RuntimeError(f"@群成员失败，未找到: {member}")
+                    raise WxControlNotFoundError(f"@群成员失败，未找到: {member}")
             else:
                 # 昵称含空格：取最长关键字搜索，然后逐项匹配
                 member_keywords = member.split(" ")
@@ -9324,7 +9329,7 @@ class Chat:
                 fuzzy = [c for c in controls if member_keyword in c.Name]
 
                 if len(fuzzy) == 0:
-                    raise RuntimeError(f"@群成员失败，未找到: {member}")
+                    raise WxControlNotFoundError(f"@群成员失败，未找到: {member}")
                 elif len(fuzzy) == 1:
                     # 唯一匹配，直接回车选中
                     input_wx.send_keys(None, "{Enter}")
@@ -9354,7 +9359,7 @@ class Chat:
                     if not matched:
                         input_wx.send_keys(None, "{Esc}")
                         time.sleep(0.3)
-                        raise RuntimeError(f"@群成员失败，未找到完全匹配: {member}")
+                        raise WxControlNotFoundError(f"@群成员失败，未找到完全匹配: {member}")
 
     def _click_voip_menu(self, menu_name: str) -> None:
         """
@@ -9367,7 +9372,7 @@ class Chat:
         """
         btn = self._win.ButtonControl(AutomationId="voip_button")
         if not btn.Exists(maxSearchSeconds=2):
-            raise RuntimeError("未找到通话按钮")
+            raise WxControlNotFoundError("未找到通话按钮")
         input_wx.click(btn)
         time.sleep(0.3)
 
@@ -9381,7 +9386,7 @@ class Chat:
         )
         if not item.Exists(maxSearchSeconds=1):
             input_wx.send_keys(self._win, "{Esc}")
-            raise RuntimeError(f"通话菜单中未找到: {menu_name}")
+            raise WxControlNotFoundError(f"通话菜单中未找到: {menu_name}")
         input_wx.click(item)
         time.sleep(0.3)
 
@@ -9418,7 +9423,7 @@ class Chat:
         )
         
         if not item.Exists(maxSearchSeconds=2):
-            raise RuntimeError(f"会话列表中未找到: {contact_name}")
+            raise WxControlNotFoundError(f"会话列表中未找到: {contact_name}")
         
         input_wx.click(item, click="double")
         time.sleep(0.5)
@@ -9944,7 +9949,7 @@ class Chat:
                 Name="清空聊天记录",
             )
             if not clear_btn.Exists(maxSearchSeconds=3):
-                raise RuntimeError("未找到'清空聊天记录'按钮")
+                raise WxControlNotFoundError("未找到'清空聊天记录'按钮")
             input_wx.click(clear_btn)
             time.sleep(0.5)
 
@@ -9954,7 +9959,7 @@ class Chat:
                 ClassName="mmui::XOutlineButton",
             )
             if not confirm_btn.Exists(maxSearchSeconds=3):
-                raise RuntimeError("未找到'清空'确认按钮")
+                raise WxControlNotFoundError("未找到'清空'确认按钮")
             input_wx.click(confirm_btn)
             time.sleep(0.3)
 
@@ -9998,7 +10003,7 @@ class Chat:
                 ClassName="mmui::ChatRoomMemberInfoView",
             )
             if not member_info_view.Exists(maxSearchSeconds=3):
-                raise RuntimeError("未找到群聊信息面板 (mmui::ChatRoomMemberInfoView)")
+                raise WxControlNotFoundError("未找到群聊信息面板 (mmui::ChatRoomMemberInfoView)")
 
             # 3. 将该区域滚动到底部
             rect = member_info_view.BoundingRectangle
@@ -10038,7 +10043,7 @@ class Chat:
                 ClassName="mmui::XOutlineButton",
             )
             if not confirm_btn.Exists(maxSearchSeconds=3):
-                raise RuntimeError("未找到'清空'确认按钮")
+                raise WxControlNotFoundError("未找到'清空'确认按钮")
             input_wx.click(confirm_btn)
             time.sleep(0.3)
 
@@ -10081,7 +10086,7 @@ class Chat:
                 ClassName="mmui::ChatRoomMemberInfoView",
             )
             if not member_info_view.Exists(maxSearchSeconds=3):
-                raise RuntimeError("未找到群聊信息面板 (mmui::ChatRoomMemberInfoView)")
+                raise WxControlNotFoundError("未找到群聊信息面板 (mmui::ChatRoomMemberInfoView)")
 
             # 3. 将该区域滚动到底部
             rect = member_info_view.BoundingRectangle
@@ -10117,7 +10122,7 @@ class Chat:
                 ClassName="mmui::XOutlineButton",
             )
             if not confirm_btn.Exists(maxSearchSeconds=3):
-                raise RuntimeError("未找到'确定'确认按钮")
+                raise WxControlNotFoundError("未找到'确定'确认按钮")
             input_wx.click(confirm_btn)
             logger.debug(f"退出群聊成功: {self.chat_name}")
 
@@ -10199,13 +10204,13 @@ class Chat:
                     searchDepth=3,
                 )
                 if not search_field.Exists(maxSearchSeconds=2):
-                    raise RuntimeError("未找到搜索区域")
+                    raise WxControlNotFoundError("未找到搜索区域")
                 search_edit = search_field.EditControl(
                     ClassName="mmui::XValidatorTextEdit", Name=_("搜索"),
                     searchDepth=1,
                 )
                 if not search_edit.Exists(maxSearchSeconds=2):
-                    raise RuntimeError("未找到搜索框")
+                    raise WxControlNotFoundError("未找到搜索框")
 
                 input_wx.click(search_edit)
                 time.sleep(0.3)
@@ -10235,7 +10240,7 @@ class Chat:
                     searchDepth=1,
                 )
                 if not contact_row.Exists(maxSearchSeconds=3):
-                    raise RuntimeError(f"未找到联系人: {nickname}")
+                    raise WxControlNotFoundError(f"未找到联系人: {nickname}")
 
                 input_wx.click(contact_row)
                 time.sleep(0.5)
@@ -10252,7 +10257,7 @@ class Chat:
                 searchDepth=3,
             )
             if not detail_view.Exists(maxSearchSeconds=2):
-                raise RuntimeError("未找到详情面板")
+                raise WxControlNotFoundError("未找到详情面板")
             confirm_btn = detail_view.ButtonControl(
                 ClassName="mmui::XOutlineButton",
                 AutomationId="confirm_btn",
@@ -10260,7 +10265,7 @@ class Chat:
                 searchDepth=2,
             )
             if not confirm_btn.Exists(maxSearchSeconds=3):
-                raise RuntimeError("未找到'添加'按钮")
+                raise WxControlNotFoundError("未找到'添加'按钮")
             input_wx.click(confirm_btn)
 
             time.sleep(0.5)
@@ -10365,13 +10370,13 @@ class Chat:
                     searchDepth=3,
                 )
                 if not search_field.Exists(maxSearchSeconds=2):
-                    raise RuntimeError("未找到搜索区域")
+                    raise WxControlNotFoundError("未找到搜索区域")
                 search_edit = search_field.EditControl(
                     ClassName="mmui::XValidatorTextEdit", Name=_("搜索"),
                     searchDepth=1,
                 )
                 if not search_edit.Exists(maxSearchSeconds=2):
-                    raise RuntimeError("未找到搜索框")
+                    raise WxControlNotFoundError("未找到搜索框")
 
                 input_wx.click(search_edit)
                 time.sleep(0.3)
@@ -10403,7 +10408,7 @@ class Chat:
                     searchDepth=1,
                 )
                 if not contact_row.Exists(maxSearchSeconds=3):
-                    raise RuntimeError(f"未找到成员: {nickname}")
+                    raise WxControlNotFoundError(f"未找到成员: {nickname}")
 
                 input_wx.click(contact_row)
                 time.sleep(0.5)
@@ -10420,7 +10425,7 @@ class Chat:
                 searchDepth=3,
             )
             if not detail_view.Exists(maxSearchSeconds=2):
-                raise RuntimeError("未找到详情面板")
+                raise WxControlNotFoundError("未找到详情面板")
             confirm_btn = detail_view.ButtonControl(
                 ClassName="mmui::XOutlineButton",
                 AutomationId="confirm_btn",
@@ -10428,7 +10433,7 @@ class Chat:
                 searchDepth=2,
             )
             if not confirm_btn.Exists(maxSearchSeconds=3):
-                raise RuntimeError("未找到'移出'按钮")
+                raise WxControlNotFoundError("未找到'移出'按钮")
             input_wx.click(confirm_btn)
             time.sleep(0.5)
 
@@ -10471,7 +10476,7 @@ class Chat:
             ClassName="mmui::ChatRoomMemberInfoView",
         )
         if not member_info_view.Exists(maxSearchSeconds=3):
-            raise RuntimeError("未找到群聊信息面板 (mmui::ChatRoomMemberInfoView)")
+            raise WxControlNotFoundError("未找到群聊信息面板 (mmui::ChatRoomMemberInfoView)")
 
         rect = member_info_view.BoundingRectangle
         cx = rect.left + rect.width() // 2
@@ -10867,7 +10872,7 @@ class Chat:
                 pane_title = f"“{self.chat_name}”的群公告"
                 announcement_pane = auto.PaneControl(Name=pane_title)
                 if not announcement_pane.Exists(maxSearchSeconds=3):
-                    raise RuntimeError("未找到群公告编辑窗口")
+                    raise WxWindowNotFoundError("未找到群公告编辑窗口")
 
                 pane_hwnd = announcement_pane.NativeWindowHandle
                 if not pane_hwnd:
@@ -11015,7 +11020,7 @@ class Chat:
             Name=name,
         )
         if not sw.Exists(maxSearchSeconds=3):
-            raise RuntimeError(f"未找到'{name}'开关")
+            raise WxControlNotFoundError(f"未找到'{name}'开关")
         toggle = sw.GetTogglePattern()
         is_on = toggle.ToggleState == 1 if toggle else False
         return sw, is_on
@@ -11212,7 +11217,7 @@ class Chat:
             Name=item_name,
         )
         if not btn.Exists(maxSearchSeconds=3):
-            raise RuntimeError(f"未找到'{item_name}'按钮")
+            raise WxControlNotFoundError(f"未找到'{item_name}'按钮")
         input_wx.click(btn)
         time.sleep(0.5)
 
@@ -11332,7 +11337,7 @@ class Chat:
             pane_title = f"“{self.chat_name}”的群公告"
             announcement_pane = auto.PaneControl(Name=pane_title)
             if not announcement_pane.Exists(maxSearchSeconds=3):
-                raise RuntimeError("未找到群公告编辑窗口")
+                raise WxWindowNotFoundError("未找到群公告编辑窗口")
 
             # 识别群公告编辑窗口
             pane_hwnd = announcement_pane.NativeWindowHandle
@@ -11376,7 +11381,7 @@ class Chat:
             # 点击"发布"按钮（WebView 内的按钮，支持 InvokePattern）
             publish_btn = announcement_pane.ButtonControl(Name="发布")
             if not publish_btn.Exists(maxSearchSeconds=3):
-                raise RuntimeError("未找到'发布'按钮")
+                raise WxControlNotFoundError("未找到'发布'按钮")
             # publish_btn.GetInvokePattern().Invoke()
             input_wx.click(publish_btn)
 
@@ -11568,7 +11573,7 @@ class Chat:
         )
         if not menu_item.Exists(maxSearchSeconds=2):
             input_wx.send_keys(self._win, "{Esc}")
-            raise RuntimeError(f"未找到'{menu_name}'菜单项")
+            raise WxControlNotFoundError(f"未找到'{menu_name}'菜单项")
         input_wx.click(menu_item)
 
     def _cleanup_profile(self) -> None:
@@ -11630,7 +11635,7 @@ class Chat:
                 ClassName="mmui::ContactProfileView",
             )
             if not profile.Exists(maxSearchSeconds=3):
-                raise RuntimeError("未找到联系人资料面板")
+                raise WxControlNotFoundError("未找到联系人资料面板")
 
             result = {
                 "display_name": None,
@@ -11787,7 +11792,7 @@ class Chat:
                 Name="设置备注和标签",
             )
             if not remark_pop.Exists(maxSearchSeconds=3):
-                raise RuntimeError("未找到'设置备注和标签'弹窗")
+                raise WxControlNotFoundError("未找到'设置备注和标签'弹窗")
 
             # ---- 1. 备注 ----
             if remark is not None:
@@ -12019,14 +12024,14 @@ class Chat:
                 Name="设置备注和标签",
             )
             if not remark_pop.Exists(maxSearchSeconds=3):
-                raise RuntimeError("未找到'设置备注和标签'弹窗")
+                raise WxControlNotFoundError("未找到'设置备注和标签'弹窗")
 
             remark_edit = remark_pop.EditControl(
                 ClassName="mmui::XLineEdit",
                 Name="修改备注名",
             )
             if not remark_edit.Exists(maxSearchSeconds=3):
-                raise RuntimeError("未找到'修改备注名'编辑框")
+                raise WxControlNotFoundError("未找到'修改备注名'编辑框")
 
             input_wx.click(remark_edit)
             time.sleep(0.2)
@@ -12041,7 +12046,7 @@ class Chat:
                 Name=_("完成"),
             )
             if not ok_btn.Exists(maxSearchSeconds=2):
-                raise RuntimeError("未找到'完成'按钮")
+                raise WxControlNotFoundError("未找到'完成'按钮")
             input_wx.click(ok_btn)
             time.sleep(0.3)
 
@@ -12075,7 +12080,7 @@ class Chat:
                 Name="设置备注和标签",
             )
             if not remark_pop.Exists(maxSearchSeconds=3):
-                raise RuntimeError("未找到'设置备注和标签'弹窗")
+                raise WxControlNotFoundError("未找到'设置备注和标签'弹窗")
 
             existing_labels = set()
             tag_btn = remark_pop.ButtonControl(
@@ -12083,7 +12088,7 @@ class Chat:
                 AutomationId="button",
             )
             if not tag_btn.Exists(maxSearchSeconds=3):
-                raise RuntimeError("未找到'修改标签'按钮")
+                raise WxControlNotFoundError("未找到'修改标签'按钮")
 
             tag_text = tag_btn.TextControl(
                 ClassName="mmui::XTextView",
@@ -12110,7 +12115,7 @@ class Chat:
                     Name=_("搜索"),
                 )
                 if not tag_edit.Exists(maxSearchSeconds=3):
-                    raise RuntimeError("未找到标签搜索输入框")
+                    raise WxControlNotFoundError("未找到标签搜索输入框")
 
                 input_wx.click(tag_edit)
                 time.sleep(0.2)
@@ -12169,7 +12174,7 @@ class Chat:
                 Name="设置备注和标签",
             )
             if not remark_pop.Exists(maxSearchSeconds=3):
-                raise RuntimeError("未找到'设置备注和标签'弹窗")
+                raise WxControlNotFoundError("未找到'设置备注和标签'弹窗")
 
             existing_labels = set()
             tag_btn = remark_pop.ButtonControl(
@@ -12177,7 +12182,7 @@ class Chat:
                 AutomationId="button",
             )
             if not tag_btn.Exists(maxSearchSeconds=3):
-                raise RuntimeError("未找到'修改标签'按钮")
+                raise WxControlNotFoundError("未找到'修改标签'按钮")
 
             tag_text = tag_btn.TextControl(
                 ClassName="mmui::XTextView",
@@ -12245,7 +12250,7 @@ class Chat:
                 Name="设置备注和标签",
             )
             if not remark_pop.Exists(maxSearchSeconds=3):
-                raise RuntimeError("未找到'设置备注和标签'弹窗")
+                raise WxControlNotFoundError("未找到'设置备注和标签'弹窗")
 
             # 读取已有电话号码
             existing_phones = set()
@@ -12286,7 +12291,7 @@ class Chat:
                         AutomationId="button",
                     )
                     if not add_btn.Exists(maxSearchSeconds=2):
-                        raise RuntimeError("未找到'添加电话'按钮")
+                        raise WxControlNotFoundError("未找到'添加电话'按钮")
                     input_wx.click(add_btn)
                     time.sleep(0.3)
 
@@ -12295,13 +12300,13 @@ class Chat:
                     Name="填写电话",
                 )
                 if not empty_field.Exists(maxSearchSeconds=2):
-                    raise RuntimeError("未找到空的电话号码输入框")
+                    raise WxControlNotFoundError("未找到空的电话号码输入框")
 
                 phone_edit = empty_field.EditControl(
                     ClassName="mmui::XLineEdit",
                 )
                 if not phone_edit.Exists(maxSearchSeconds=2):
-                    raise RuntimeError("未找到电话号码编辑框")
+                    raise WxControlNotFoundError("未找到电话号码编辑框")
 
                 input_wx.click(phone_edit)
                 time.sleep(0.2)
@@ -12351,7 +12356,7 @@ class Chat:
                 Name="设置备注和标签",
             )
             if not remark_pop.Exists(maxSearchSeconds=3):
-                raise RuntimeError("未找到'设置备注和标签'弹窗")
+                raise WxControlNotFoundError("未找到'设置备注和标签'弹窗")
 
             # 滚动到底部，确保"添加图片"按钮可见
             scroll_area = remark_pop.GroupControl(ClassName="QFScrollArea")
@@ -12369,7 +12374,7 @@ class Chat:
                     AutomationId="desc_img_list_view_.add_button_view",
                 )
                 if not add_img_btn.Exists(maxSearchSeconds=2):
-                    raise RuntimeError("未找到'添加图片'按钮")
+                    raise WxControlNotFoundError("未找到'添加图片'按钮")
 
                 input_wx.click(add_img_btn)
                 time.sleep(1)
@@ -12384,7 +12389,7 @@ class Chat:
                 if not edit.Exists(0, 0):
                     edit = dlg.EditControl(AutomationId="1148")
                 if not edit.Exists(maxSearchSeconds=2):
-                    raise RuntimeError("未找到文件名输入框")
+                    raise WxControlNotFoundError("未找到文件名输入框")
 
                 abs_path = os.path.abspath(img_path)
                 # edit.GetValuePattern().SetValue(abs_path)
@@ -12399,7 +12404,7 @@ class Chat:
                 Name=_("完成"),
             )
             if not ok_btn.Exists(maxSearchSeconds=2):
-                raise RuntimeError("未找到'完成'按钮")
+                raise WxControlNotFoundError("未找到'完成'按钮")
             input_wx.click(ok_btn)
             time.sleep(0.3)
 
@@ -12433,13 +12438,13 @@ class Chat:
                 Name="设置备注和标签",
             )
             if not remark_pop.Exists(maxSearchSeconds=3):
-                raise RuntimeError("未找到'设置备注和标签'弹窗")
+                raise WxControlNotFoundError("未找到'设置备注和标签'弹窗")
 
             phone_area = remark_pop.GroupControl(
                 ClassName="mmui::ProfileFormPhoneView",
             )
             if not phone_area.Exists(maxSearchSeconds=2):
-                raise RuntimeError("未找到电话区域")
+                raise WxControlNotFoundError("未找到电话区域")
 
             # 读取已有电话号码
             existing_phones = set()
@@ -12520,7 +12525,7 @@ class Chat:
                 Name="设置备注和标签",
             )
             if not remark_pop.Exists(maxSearchSeconds=3):
-                raise RuntimeError("未找到'设置备注和标签'弹窗")
+                raise WxControlNotFoundError("未找到'设置备注和标签'弹窗")
 
             # 滚动到底部，确保图片区域可见
             scroll_area = remark_pop.GroupControl(ClassName="QFScrollArea")
@@ -12629,7 +12634,7 @@ class Chat:
             )
             if not menu_item.Exists(maxSearchSeconds=2):
                 input_wx.send_keys(self._win, "{Esc}")
-                raise RuntimeError("未找到'设为星标朋友'菜单项")
+                raise WxControlNotFoundError("未找到'设为星标朋友'菜单项")
             input_wx.click(menu_item)
             time.sleep(0.3)
             logger.debug(f"设为星标朋友成功: {self.chat_name}")
@@ -12662,7 +12667,7 @@ class Chat:
             )
             if not menu_item.Exists(maxSearchSeconds=2):
                 input_wx.send_keys(self._win, "{Esc}")
-                raise RuntimeError("未找到'不再设为星标朋友'菜单项")
+                raise WxControlNotFoundError("未找到'不再设为星标朋友'菜单项")
             input_wx.click(menu_item)
             time.sleep(0.3)
             logger.debug(f"取消星标朋友成功: {self.chat_name}")
@@ -12695,7 +12700,7 @@ class Chat:
             )
             if not menu_item.Exists(maxSearchSeconds=2):
                 input_wx.send_keys(self._win, "{Esc}")
-                raise RuntimeError("未找到'加入黑名单'菜单项")
+                raise WxControlNotFoundError("未找到'加入黑名单'菜单项")
             input_wx.click(menu_item)
             time.sleep(0.5)
 
@@ -12736,7 +12741,7 @@ class Chat:
             )
             if not menu_item.Exists(maxSearchSeconds=2):
                 input_wx.send_keys(self._win, "{Esc}")
-                raise RuntimeError("未找到'移出黑名单'菜单项")
+                raise WxControlNotFoundError("未找到'移出黑名单'菜单项")
             input_wx.click(menu_item)
             time.sleep(0.3)
             logger.debug(f"移出黑名单成功: {self.chat_name}")
@@ -12792,7 +12797,7 @@ class Chat:
                 Name="朋友权限",
             )
             if not perm_pop.Exists(maxSearchSeconds=3):
-                raise RuntimeError("未找到'朋友权限'弹窗")
+                raise WxControlNotFoundError("未找到'朋友权限'弹窗")
 
             result = {
                 "permission": "all",
@@ -12872,7 +12877,7 @@ class Chat:
                 Name="朋友权限",
             )
             if not perm_pop.Exists(maxSearchSeconds=3):
-                raise RuntimeError("未找到'朋友权限'弹窗")
+                raise WxControlNotFoundError("未找到'朋友权限'弹窗")
 
             changed = False
 
@@ -12882,7 +12887,7 @@ class Chat:
                 Name=target_name,
             )
             if not target_item.Exists(maxSearchSeconds=1):
-                raise RuntimeError(f"未找到权限选项: {target_name}")
+                raise WxControlNotFoundError(f"未找到权限选项: {target_name}")
 
             text_icon = target_item.GroupControl(
                 AutomationId="text_separator_v_view.text_icon_h_view",
@@ -12975,7 +12980,7 @@ class Chat:
                 Name="设置备注和标签",
             )
             if not remark_pop.Exists(maxSearchSeconds=3):
-                raise RuntimeError("未找到'设置备注和标签'弹窗")
+                raise WxControlNotFoundError("未找到'设置备注和标签'弹窗")
 
             # 滚动到底部，确保图片区域可见
             scroll_area = remark_pop.GroupControl(ClassName="QFScrollArea")
@@ -13087,7 +13092,7 @@ class Chat:
                 Name="设置备注和标签",
             )
             if not remark_pop.Exists(maxSearchSeconds=3):
-                raise RuntimeError("未找到'设置备注和标签'弹窗")
+                raise WxControlNotFoundError("未找到'设置备注和标签'弹窗")
 
             # 滚动到底部，确保图片区域可见
             scroll_area = remark_pop.GroupControl(ClassName="QFScrollArea")
@@ -13245,9 +13250,9 @@ class SeparateChat(Chat, WeixinWindow):
             if found_hwnd:
                 self._win = auto.ControlFromHandle(found_hwnd)
                 if self._win is None or not self._win.Exists(0, 0):
-                    raise RuntimeError(f"独立聊天窗口未找到: {contact_name}")
+                    raise WxWindowNotFoundError(f"独立聊天窗口未找到: {contact_name}")
             else:
-                raise RuntimeError(f"独立聊天窗口未找到: {contact_name}")
+                raise WxWindowNotFoundError(f"独立聊天窗口未找到: {contact_name}")
 
         # 如果关联的 WeixinClient 启用了 resize，调整聊天窗口大小
         if wx and wx.resize:
@@ -13486,9 +13491,9 @@ class WeixinClient(WeixinWindow):
                         if not self._win.Exists(maxSearchSeconds=5):
                             raise LoginError(f"登录后未找到 PID={self.pid} 的微信主窗口")
                     else:
-                        raise WindowNotFoundError(f"未找到 PID={self.pid} 的登录窗口")
+                        raise WxWindowNotFoundError(f"未找到 PID={self.pid} 的登录窗口")
                 else:
-                    raise WindowNotFoundError(f"未找到 PID={self.pid} 的微信主窗口或登录窗口")
+                    raise WxWindowNotFoundError(f"未找到 PID={self.pid} 的微信主窗口或登录窗口")
 
         self.pid = self._win.ProcessId
 
@@ -13636,7 +13641,7 @@ class WeixinClient(WeixinWindow):
             匹配的 WindowControl
 
         Raises:
-            WindowNotFoundError: 未找到匹配的窗口
+            WxWindowNotFoundError: 未找到匹配的窗口
         """
         win = auto.WindowControl(
             ClassName="mmui::MainWindow",
@@ -13644,7 +13649,7 @@ class WeixinClient(WeixinWindow):
             searchDepth=1,
         )
         if not win.Exists(maxSearchSeconds=3):
-            raise WindowNotFoundError(f"未找到 PID={pid} 的微信主窗口")
+            raise WxWindowNotFoundError(f"未找到 PID={pid} 的微信主窗口")
         return win
 
     def is_exists_window(self, timeout: float = 30, interval: float = 0.1) -> bool:
@@ -14289,7 +14294,7 @@ class WeixinClient(WeixinWindow):
         # 点击"设置"按钮
         setting_btn = self._win.ButtonControl(Name="设置", searchDepth=10)
         if not setting_btn.Exists(maxSearchSeconds=3):
-            raise RuntimeError("未找到'设置'按钮")
+            raise WxControlNotFoundError("未找到'设置'按钮")
         input_wx.click(setting_btn)
         time.sleep(0.5)
 
@@ -14320,7 +14325,7 @@ class WeixinClient(WeixinWindow):
                     ClassName="mmui::PreferencePageAccount",
                 )
                 if not page.Exists(maxSearchSeconds=3):
-                    raise RuntimeError("未找到账号与存储页面")
+                    raise WxControlNotFoundError("未找到账号与存储页面")
 
             # 昵称和微信号在 ContactHeadView 旁边的 QWidget 容器中
             # 该容器包含两个 mmui::XTextView: 昵称和微信号
@@ -14388,7 +14393,7 @@ class WeixinClient(WeixinWindow):
             searchDepth=5,
         )
         if not wx_btn.Exists(maxSearchSeconds=2):
-            raise RuntimeError("未找到导航栏'微信'按钮")
+            raise WxControlNotFoundError("未找到导航栏'微信'按钮")
 
         # 点击"微信"按钮上方 35px（头像位置）
         rect = wx_btn.BoundingRectangle
@@ -14533,14 +14538,14 @@ class WeixinClient(WeixinWindow):
     #     self.activate()
     #     more_btn = self.navigator._win.ButtonControl(Name=_("更多"))
     #     if not more_btn.Exists(maxSearchSeconds=2):
-    #         raise RuntimeError("未找到更多按钮")
+    #         raise WxWindowNotFoundError("未找到更多按钮")
     #     more_btn.Click(ratioX=rand_ratio(), ratioY=rand_ratio())
     #     time.sleep(0.1)
     #
     #     lock_btn = self._win.ButtonControl(ClassName="mmui::XButton", Name="锁定")
     #     if not lock_btn.Exists(maxSearchSeconds=2):
     #         self._win.SendKeys("{Esc}")
-    #         raise RuntimeError("弹出菜单中未找到锁定按钮")
+    #         raise WxWindowNotFoundError("弹出菜单中未找到锁定按钮")
     #     lock_btn.Click(ratioX=rand_ratio(), ratioY=rand_ratio())
 
     @PIM.guard
@@ -15281,7 +15286,7 @@ class Weixin:
             连接成功的 PID
 
         Raises:
-            WindowNotFoundError: 指定 PID 的微信窗口未找到
+            WxWindowNotFoundError: 指定 PID 的微信窗口未找到
         """
         if pid in self._clients:
             client = self._clients[pid]
