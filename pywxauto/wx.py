@@ -13210,7 +13210,7 @@ class SeparateChat(Chat, WeixinWindow):
                 raise RuntimeError(f"独立聊天窗口未找到: {contact_name}")
 
         # 如果关联的 WeixinClient 启用了 resize，调整聊天窗口大小
-        if wx and wx._auto_resize:
+        if wx and wx.resize:
             hwnd = self._win.NativeWindowHandle
             if hwnd:
                 rect = win32gui.GetWindowRect(hwnd)
@@ -13331,6 +13331,7 @@ class WeixinClient(WeixinWindow):
         self, 
         pid: Optional[int] = None,
         on_login: "callable | None" = None,
+        default_login_timeout: float = 60,
         background: bool = False, 
         idle_wait: float = 0, 
         lock_input: bool = False, 
@@ -13386,7 +13387,8 @@ class WeixinClient(WeixinWindow):
         self.version = get_wechat_version(4)
         self.install_path = install_path or get_weixin_install_path()
         self._ee = EventEmitter()
-        self._on_login = on_login
+        self.on_login = on_login
+        self.default_login_timeout = default_login_timeout
 
         ensure_narrator_registry()
 
@@ -13434,9 +13436,9 @@ class WeixinClient(WeixinWindow):
         else:
             self._rapid_ocr = RapidOCR()
 
-        self._auto_resize = resize
+        self.resize = resize
         hwnd = self._win.NativeWindowHandle
-        if resize and hwnd:
+        if self.resize and hwnd:
             # 根据桌面大小计算窗口尺寸：宽高为桌面的 1/6
             desktop_width = win32api.GetSystemMetrics(win32con.SM_CXSCREEN)
             desktop_height = win32api.GetSystemMetrics(win32con.SM_CYSCREEN)
@@ -13537,11 +13539,11 @@ class WeixinClient(WeixinWindow):
 
         login.activate()
 
-        if self._on_login:
-            self._on_login(login)
+        if self.on_login:
+            self.on_login(login)
         else:
             # 等待用户手动登录（60秒超时）
-            logger.info("等待手动登录...")
+            logger.info("等待手动登录...(请在60秒内完成登录)")
             for _ in range(600):
                 if self.find_wechat_window_by_pid(self.pid):
                     break
