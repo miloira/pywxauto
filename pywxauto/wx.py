@@ -5945,7 +5945,7 @@ class MomentItem:
 
         如果已点赞则不重复操作，返回 True。
         """
-        self.moment._open_window()
+        self.moment._ensure_ready()
         ctrl = self._find_cell()
         if not ctrl:
             raise WxControlNotFoundError(f"未找到朋友圈动态: {self.sender}")
@@ -5980,7 +5980,7 @@ class MomentItem:
 
         如果未点赞则不操作，返回 True。
         """
-        self.moment._open_window()
+        self.moment._ensure_ready()
         ctrl = self._find_cell()
         if not ctrl:
             raise WxControlNotFoundError(f"未找到朋友圈动态: {self.sender}")
@@ -6013,7 +6013,7 @@ class MomentItem:
         if not content or not content.strip():
             raise ValueError("评论内容不能为空")
 
-        self.moment._open_window()
+        self.moment._ensure_ready()
         ctrl = self._find_cell()
         if not ctrl:
             raise WxControlNotFoundError(f"未找到朋友圈动态: {self.sender}")
@@ -6042,7 +6042,7 @@ class MomentItem:
 
     def scroll_to_visible(self) -> bool:
         """将此条动态滚动到可见区域"""
-        self.moment._open_window()
+        self.moment._ensure_ready()
         ctrl = self._find_cell()
         if not ctrl:
             raise WxControlNotFoundError(f"未找到朋友圈动态: {self.sender}")
@@ -6241,7 +6241,7 @@ class Moment(WeixinWindow):
             searchDepth=1
         )
 
-    def _open_window(self) -> None:
+    def _ensure_ready(self) -> None:
         """
         打开朋友圈独立窗口。
 
@@ -6430,7 +6430,7 @@ class Moment(WeixinWindow):
         Returns:
             Moment 列表，长度 <= count
         """
-        self._open_window()
+        self._ensure_ready()
 
         if position == "top":
             refresh_btn = self._win.ButtonControl(
@@ -6516,7 +6516,7 @@ class Moment(WeixinWindow):
         if PIM._running and PIM.idle_wait > 0:
             PIM.wait_for_idle(PIM.idle_wait)
 
-        self._open_window()
+        self._ensure_ready()
 
         if position == "top":
             refresh_btn = self._win.ButtonControl(
@@ -7019,7 +7019,7 @@ class Moment(WeixinWindow):
         if not text and not has_media:
             raise ValueError("text 和 images/video 至少指定一个")
 
-        self._open_window()
+        self._ensure_ready()
 
         # 右键"发表"按钮弹出菜单
         publish_tab = self._find_toolbar_button(i_("发表"))
@@ -7151,7 +7151,7 @@ class Moment(WeixinWindow):
 
         点击工具栏"刷新"按钮，回到列表顶部并加载最新动态。
         """
-        self._open_window()
+        self._ensure_ready()
         btn = self._find_toolbar_button(i_("刷新"))
         input_wx.click(btn)
 
