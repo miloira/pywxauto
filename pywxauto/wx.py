@@ -4988,7 +4988,6 @@ class Navigator:
             if avatar_ctrl.Exists(0, 0):
                 try:
                     input_wx.click(avatar_ctrl)
-                    time.sleep(1)
 
                     img_viewer = auto.WindowControl(
                         ClassName="mmui::PreviewWindow",
@@ -5003,7 +5002,7 @@ class Navigator:
                         if save_btn.Exists(maxSearchSeconds=2):
                             tmp_dir = os.path.join(tempfile.gettempdir(), "pywxauto_avatar")
                             os.makedirs(tmp_dir, exist_ok=True)
-                            tmp_path = os.path.join(tmp_dir, "avatar.png")
+                            tmp_path = os.path.join(tmp_dir, f"{result['account']}_avatar.png")
                             if os.path.exists(tmp_path):
                                 os.remove(tmp_path)
 
@@ -5019,18 +5018,12 @@ class Navigator:
                                     else:
                                         input_wx.send_keys(file_edit, "{Ctrl}a{Del}")
                                         input_wx.paste_or_type(file_edit, tmp_path)
-                                    time.sleep(0.3)
 
                                     dlg_save_btn = save_dlg.ButtonControl(AutomationId="1")
                                     if dlg_save_btn.Exists(maxSearchSeconds=2):
                                         input_wx.click(dlg_save_btn)
                                     else:
                                         input_wx.send_keys(save_dlg, "{Alt}S")
-                                    time.sleep(1)
-
-                                    if save_dlg.Exists(maxSearchSeconds=0.5):
-                                        input_wx.send_keys(save_dlg, "{Alt}Y")
-                                        time.sleep(0.5)
 
                                     if os.path.exists(tmp_path):
                                         with open(tmp_path, "rb") as f:
@@ -5040,13 +5033,9 @@ class Navigator:
                                 else:
                                     input_wx.send_keys(save_dlg, "{Esc}")
 
-                        time.sleep(0.3)
-                        close_btn = img_viewer.ButtonControl(
-                            ClassName="mmui::XButton", Name=i_("关闭"),
-                        )
-                        if close_btn.Exists(maxSearchSeconds=1):
-                            input_wx.click(close_btn)
-                        time.sleep(0.3)
+                        img_hwnd = img_viewer.NativeWindowHandle
+                        if img_hwnd:
+                            close_window(img_hwnd)
                 except Exception:
                     try:
                         iv = auto.WindowControl(
@@ -5055,12 +5044,11 @@ class Navigator:
                             searchDepth=1,
                         )
                         if iv.Exists(maxSearchSeconds=0.5):
-                            cb = iv.ButtonControl(ClassName="mmui::XButton", Name=i_("关闭"))
-                            if cb.Exists(0, 0):
-                                input_wx.click(cb)
+                            iv_hwnd = iv.NativeWindowHandle
+                            if iv_hwnd:
+                                close_window(iv_hwnd)
                     except Exception:
                         pass
-
             return result
         finally:
             pass
@@ -7357,6 +7345,18 @@ class ChatFile:
         input_wx.click(target)
         return target
 
+    def _context_action(self, menu_name: str) -> None:
+        """
+        通用右键菜单操作：确保就绪 → 右键点击 → 点击指定菜单项。
+
+        Args:
+            menu_name: 菜单项名称
+        """
+        self._ensure_ready()
+        menu = self._right_click_and_find_menu()
+        self._click_menu_item(menu, menu_name)
+        time.sleep(0.5)
+
     def _handle_save_dialog(self, file_path: str) -> bool:
         """处理 Windows 文件保存对话框：填入路径并保存"""
         save_dialog = self.file_manager._win.WindowControl(ClassName="#32770", searchDepth=3)
@@ -7396,15 +7396,12 @@ class ChatFile:
         Returns:
             True 保存成功，False 保存失败
         """
-        self._ensure_ready()
-
         dir_path = os.path.dirname(file_path)
         if dir_path:
             os.makedirs(dir_path, exist_ok=True)
 
-        menu = self._right_click_and_find_menu()
-        self._click_menu_item(menu, "另存为...")
-        time.sleep(1)
+        self._context_action("另存为...")
+        time.sleep(0.5)
 
         return self._handle_save_dialog(file_path)
 
@@ -7424,15 +7421,12 @@ class ChatFile:
         Returns:
             True 下载成功，False 下载失败
         """
-        self._ensure_ready()
-
         dir_path = os.path.dirname(file_path)
         if dir_path:
             os.makedirs(dir_path, exist_ok=True)
 
-        menu = self._right_click_and_find_menu()
-        self._click_menu_item(menu, "下载到...")
-        time.sleep(1)
+        self._context_action("下载到...")
+        time.sleep(0.5)
 
         return self._handle_save_dialog(file_path)
 
@@ -7452,11 +7446,7 @@ class ChatFile:
         Returns:
             True 下载成功（状态变为已下载），False 下载超时
         """
-        self._ensure_ready()
-
-        menu = self._right_click_and_find_menu()
-        self._click_menu_item(menu, "下载")
-        time.sleep(0.5)
+        self._context_action(i_("下载"))
 
         # 轮询文件状态，等待下载完成
         deadline = time.monotonic() + timeout
@@ -7488,11 +7478,7 @@ class ChatFile:
         Returns:
             True 删除成功，False 删除失败
         """
-        self._ensure_ready()
-
-        menu = self._right_click_and_find_menu()
-        self._click_menu_item(menu, i_("删除"))
-        time.sleep(0.5)
+        self._context_action(i_("删除"))
 
         # 点击确认弹窗中的"删除"按钮
         delete_btn = self.file_manager._win.ButtonControl(
@@ -7503,6 +7489,39 @@ class ChatFile:
             time.sleep(0.5)
             return True
         return False
+
+    @PIM.guard
+    def copy(self) -> str:
+        """
+        复制此文件到剪贴板并返回复制的文件路径。
+
+        右键点击文件项，在菜单中点击"复制"，
+        然后从剪贴板读取复制的内容。
+
+        Returns:
+            复制到剪贴板的文本内容（通常为文件路径或文件名）
+        """
+        self._context_action(i_("复制"))
+        return get_clipboard()
+
+    @PIM.guard
+    def collect(self) -> None:
+        """
+        收藏此文件。
+
+        右键点击文件项，在菜单中点击"收藏"。
+        """
+        self._context_action(i_("收藏"))
+
+    @PIM.guard
+    def switch_to_message(self) -> None:
+        """
+        定位到聊天位置。
+
+        右键点击文件项，在菜单中点击"定位到聊天位置"，
+        微信会跳转到该文件消息所在的聊天会话并滚动到对应位置。
+        """
+        self._context_action("定位到聊天位置")
 
 
 class FileManager(WeixinWindow):
