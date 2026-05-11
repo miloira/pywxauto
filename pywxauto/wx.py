@@ -6200,7 +6200,6 @@ class Moment(WeixinWindow):
       即: "昵称 正文内容 [附件描述] 时间戳"
     """
 
-    MOMENT_TAB_NAME = "朋友圈"
     # 朋友圈独立窗口
     SNS_WINDOW_CLASS = "mmui::SNSWindow"
     SNS_WINDOW_ID = "SNSWindow"
@@ -7393,7 +7392,6 @@ class FileManager(WeixinWindow):
     """
 
     FILE_LIST_CELL_CLASS = "mmui::FileListCell"
-    MORE_BTN_AUTOMATION_ID = "main_tabbar.tabbar_setting"
     FILE_TYPE_FILTER_CLASS = "mmui::XTableCell"
     CONTEXT_MENU_WIN_CLASS = "mmui::XMenu"
     # 确认对话框的类名（微信 v4 使用 mmui::XDialog，浮动于桌面层级）
@@ -7727,9 +7725,6 @@ class Chat:
 
     # ---- ClassName -> 消息类型映射（供状态检测使用） ----
     _TEXT_CLASS_NAMES = {"mmui::ChatTextItemView"}
-    _FILE_CLASS_NAMES = {"mmui::ChatFileItemView"}
-    _IMAGE_CLASS_NAMES = {"mmui::ChatImageItemView"}
-    _VIDEO_CLASS_NAMES = {"mmui::ChatVideoItemView"}
     _EMOTION_CLASS_NAMES = {"mmui::ChatEmojiItemView", "mmui::ChatBubbleReferItemView"}
     _FILE_BUBBLE_CLASS_NAMES = {"mmui::ChatFileItemView", "mmui::ChatBubbleItemView"}
 
