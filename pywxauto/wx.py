@@ -2089,7 +2089,8 @@ class Message:
     def __init__(self, *, sender: str = "", sender_type: SenderType = SenderType.UNKNOWN,
                  content: str = "", raw_name: str = "",
                  status: MessageStatus = MessageStatus.UNKNOWN,
-                 runtime_id: tuple = (), bubble_rect: tuple = ()):
+                 runtime_id: tuple = (), bubble_rect: tuple = (),
+                 room: Optional[str] = None):
         self.sender: str = sender
         self.sender_type: SenderType = sender_type
         self.content: str = content
@@ -2097,6 +2098,7 @@ class Message:
         self.status: MessageStatus = status
         self.runtime_id: tuple = runtime_id
         self.bubble_rect: tuple = bubble_rect
+        self.room: Optional[str] = room  # 群聊名称，私聊为 None
         self.msg_id: int = 0  # 消息唯一标识，由 get_visible_messages 计算
         self.control: object = None  # 消息控件引用（uiautomation Control）
         self.chat: object = None
@@ -2113,12 +2115,13 @@ class Message:
             "msg_id": self.msg_id,
             "sender": self.sender,
             "sender_type": self.sender_type.value,
+            "room": self.room,
             "content": self.content,
             "raw_name": self.raw_name,
             "status": self.status.value,
         }
         _base_keys = {"sender", "sender_type", "content", "raw_name",
-                      "status", "runtime_id", "chat", "msg_id", "control"}
+                      "status", "runtime_id", "chat", "msg_id", "control", "room"}
         for key, value in self.__dict__.items():
             if key.startswith("_") or key in _base_keys:
                 continue
@@ -10016,6 +10019,14 @@ class Chat:
                 sender, sender_type, bubble_rect = self._detect_sender(
                     hwnd, ctrl, chat_name,
                 )
+                # 群聊中对方发的消息，OCR 识别控件顶部 0-38px 区域提取真实发送者昵称
+                if sender_type == SenderType.FRIEND and self.chat_type == "群聊":
+                    try:
+                        ocr_sender = self._ocr_sender_name(hwnd, ctrl)
+                        if ocr_sender:
+                            sender = ocr_sender
+                    except Exception:
+                        pass
                 # 写入缓存
                 if sender_cache is not None and rid:
                     sender_cache[rid] = (sender, sender_type, bubble_rect)
@@ -10024,6 +10035,7 @@ class Chat:
             msg = self._build_message(msg_cls, raw_name, sender, sender_type,
                                       runtime_id=rid)
             msg.bubble_rect = bubble_rect
+            msg.room = chat_name if self.chat_type == "群聊" else None
             msg.chat = self
             msg.control = ctrl
             msg.msg_id = hash((rid, msg.__class__.__name__, raw_name, sender_type, msg.content))
@@ -10093,6 +10105,60 @@ class Chat:
         if re.match(rf"^{re.escape(emoji_kw)}(\s+\[.+\])?$", name):
             return EmotionMessage
         return QuoteMessage
+
+    def _ocr_sender_name(self, hwnd: int, ctrl) -> str:
+        """
+        通过 OCR 识别消息控件顶部 0-38px 区域，提取群聊中的发送者昵称。
+
+        群聊消息在气泡上方会显示发送者昵称（约在控件顶部 0-38px 高度范围内）。
+        截取该区域后使用 OCR 识别文本，返回识别到的昵称。
+
+        Args:
+            hwnd: 窗口句柄
+            ctrl: 消息 ListItemControl 控件
+
+        Returns:
+            识别到的发送者昵称，识别失败返回空字符串
+        """
+        try:
+            if hwnd:
+                # 截取控件完整区域
+                png_bytes = capture_control(hwnd, ctrl, offset_right=15, mode="print_window")
+                img = Image.open(io.BytesIO(png_bytes))
+            else:
+                tmp_fd, tmp_path = tempfile.mkstemp(suffix=".png", prefix="_wxuia_sender_")
+                os.close(tmp_fd)
+                try:
+                    ctrl.CaptureToImage(tmp_path)
+                    img = Image.open(tmp_path)
+                finally:
+                    try:
+                        os.remove(tmp_path)
+                    except OSError:
+                        pass
+
+            w, h = img.size
+            if h <= 38 or w <= 0:
+                return ""
+
+            # 裁剪顶部 0-38px 区域（昵称显示区域）
+            sender_area = img.crop((75, 0, w - 75, 38))  # 跳过左右头像区域
+
+            # 转为 bytes 进行 OCR
+            buf = io.BytesIO()
+            sender_area.save(buf, format="PNG")
+            ocr_result = self._get_image_text(buf.getvalue())
+
+            if not ocr_result:
+                return ""
+
+            # 取第一个识别结果作为发送者昵称
+            # OCR 返回 {text: {center, ...}} 格式，取第一个 key
+            sender_name = next(iter(ocr_result), "")
+            return sender_name.strip()
+
+        except Exception:
+            return ""
 
     @staticmethod
     def _detect_sender(
