@@ -137,7 +137,7 @@ LANGUAGE = {
     "删除": {"cn": "删除", "cn_t": "", "en": "Delete"},
     "联系人": {"cn": "联系人", "cn_t": "", "en": "Contacts"},
     "群聊": {"cn": "群聊", "cn_t": "", "en": "Group Chats"},
-    "功能": {"cn": "功能", "cn_t": "", "en": ""},
+    "功能": {"cn": "功能", "cn_t": "", "en": "Features"},
     "最常使用": {"cn": "最常使用", "cn_t": "", "en": "Most used"},
     "添加到通讯录": {"cn": "添加到通讯录", "cn_t": "", "en": "Add to Contacts"},
     "发消息": {"cn": "发消息", "cn_t": "", "en": "Messages"},
