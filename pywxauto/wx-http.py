@@ -209,7 +209,7 @@ async def _dispatch_callback(message_data: dict):
         logger.warning(f"回调推送异常: {e}")
 
 
-def _on_message(client: Weixin, chat, message: Message):
+def _on_message(weixin: Weixin, chat, message: Message):
     """统一消息处理器，将消息推送到回调地址"""
     if not _callback_url:
         return
@@ -238,8 +238,8 @@ async def lifespan(app: FastAPI):
 
     # 注册全局消息处理器
     @wx.on()
-    def _handler(client, chat, message):
-        _on_message(client, chat, message)
+    def _handler(weixin, chat, message):
+        _on_message(weixin, chat, message)
 
     yield
 

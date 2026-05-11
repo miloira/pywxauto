@@ -15169,7 +15169,7 @@ class WeixinManager:
 
         # 统一监听
         @wx.on(Event.TEXT)
-        def on_text(pid, client, message):
+        def on_text(pid, weixin, message):
             print(f"[PID={pid}] {message.sender}: {message.content}")
 
         wx.add_chat_listen(pid1, ["张三", "李四"])
@@ -15204,7 +15204,7 @@ class WeixinManager:
             wxocr_weixin_install_path: 微信 OCR 安装路径，None 时自动检测
             wxocr_plugin_path:         微信 OCR 插件路径，None 时自动检测
         """
-        self._clients: dict[int, Weixin] = {}
+        self._instances: dict[int, Weixin] = {}
         self._default_kwargs = {
             "background": background,
             "idle_wait": idle_wait,
@@ -15292,15 +15292,15 @@ class WeixinManager:
         Raises:
             WxWindowNotFoundError: 指定 PID 的微信窗口未找到
         """
-        if pid in self._clients:
-            client = self._clients[pid]
-            if client.is_online:
+        if pid in self._instances:
+            weixin = self._instances[pid]
+            if weixin.is_online:
                 return pid
 
         # 合并参数
         params = {**self._default_kwargs, **kwargs}
-        client = Weixin(pid=pid, on_login=on_login, **params)
-        self._clients[pid] = client
+        weixin = Weixin(pid=pid, on_login=on_login, **params)
+        self._instances[pid] = weixin
         return pid
 
     def connect_all(self, on_login: "callable | None" = None, **kwargs) -> list[int]:
@@ -15336,14 +15336,14 @@ class WeixinManager:
         Args:
             pid: 要断开的微信进程 PID
         """
-        client = self._clients.pop(pid, None)
-        if client:
-            client.move_back()
+        weixin = self._instances.pop(pid, None)
+        if weixin:
+            weixin.move_back()
             logger.info(f"已断开 PID={pid}")
 
     def disconnect_all(self) -> None:
         """断开所有已连接的微信客户端。"""
-        for pid in list(self._clients.keys()):
+        for pid in list(self._instances.keys()):
             self.disconnect(pid)
 
     def close(self, pid: int) -> None:
@@ -15353,15 +15353,15 @@ class WeixinManager:
         Args:
             pid: 要关闭的微信进程 PID
         """
-        client = self._clients.pop(pid, None)
-        if client:
-            client.move_back()
+        weixin = self._instances.pop(pid, None)
+        if weixin:
+            weixin.move_back()
             try:
-                client.close()
+                weixin.close()
             except Exception:
                 pass
 
-    def get_client(self, pid: int) -> Weixin:
+    def get_weixin(self, pid: int) -> Weixin:
         """
         获取指定 PID 的 Weixin 实例。
 
@@ -15374,86 +15374,86 @@ class WeixinManager:
         Raises:
             KeyError: PID 未连接
         """
-        if pid not in self._clients:
+        if pid not in self._instances:
             raise KeyError(f"PID={pid} 未连接，请先调用 connect({pid})")
-        return self._clients[pid]
+        return self._instances[pid]
 
     @property
     def pids(self) -> list[int]:
         """所有已连接的 PID 列表"""
-        return list(self._clients.keys())
+        return list(self._instances.keys())
 
     @property
-    def clients(self) -> dict[int, Weixin]:
+    def instances(self) -> dict[int, Weixin]:
         """所有已连接的 {pid: Weixin} 字典"""
-        return dict(self._clients)
+        return dict(self._instances)
 
     def __len__(self) -> int:
-        return len(self._clients)
+        return len(self._instances)
 
     def __contains__(self, pid: int) -> bool:
-        return pid in self._clients
+        return pid in self._instances
 
     def __getitem__(self, pid: int) -> Weixin:
-        return self.get_client(pid)
+        return self.get_weixin(pid)
 
     # ---- 消息发送 ----
 
     def send_text(self, pid: int, nickname: str, content: str, reply_to: "Message | int | None" = None, timeout: float = 0) -> "MessageStatus":
         """发送文本"""
-        return self.get_client(pid).send_text(nickname, content, reply_to=reply_to, timeout=timeout)
+        return self.get_weixin(pid).send_text(nickname, content, reply_to=reply_to, timeout=timeout)
 
     def send_file(self, pid: int, nickname: str, file_path: "str | list[str]", reply_to: "Message | int | None" = None, timeout: float = 0) -> "MessageStatus":
         """发送文件"""
-        return self.get_client(pid).send_file(nickname, file_path, reply_to=reply_to, timeout=timeout)
+        return self.get_weixin(pid).send_file(nickname, file_path, reply_to=reply_to, timeout=timeout)
 
     def send_image(self, pid: int, nickname: str, file_path: "str | list[str]", reply_to: "Message | int | None" = None, timeout: float = 0) -> "MessageStatus":
         """发送图片"""
-        return self.get_client(pid).send_image(nickname, file_path, reply_to=reply_to, timeout=timeout)
+        return self.get_weixin(pid).send_image(nickname, file_path, reply_to=reply_to, timeout=timeout)
 
     def send_video(self, pid: int, nickname: str, file_path: "str | list[str]", reply_to: "Message | int | None" = None, timeout: float = 0) -> "MessageStatus":
         """发送视频"""
-        return self.get_client(pid).send_video(nickname, file_path, reply_to=reply_to, timeout=timeout)
+        return self.get_weixin(pid).send_video(nickname, file_path, reply_to=reply_to, timeout=timeout)
 
     def send_at(self, pid: int, nickname: str, content: str, at_members: list[str], reply_to: "Message | int | None" = None, timeout: float = 0) -> "MessageStatus":
         """发送群@消息"""
-        return self.get_client(pid).send_at(nickname, content, at_members, reply_to=reply_to, timeout=timeout)
+        return self.get_weixin(pid).send_at(nickname, content, at_members, reply_to=reply_to, timeout=timeout)
 
     def send_emotion(self, pid: int, nickname: str, keyword: str = None, index: int = 1, reply_to: "Message | int | None" = None, timeout: float = 0) -> "MessageStatus":
         """发送表情"""
-        return self.get_client(pid).send_emotion(nickname, keyword, index, reply_to=reply_to, timeout=timeout)
+        return self.get_weixin(pid).send_emotion(nickname, keyword, index, reply_to=reply_to, timeout=timeout)
 
     def send_collection(self, pid: int, nickname: str, keyword: str, reply_to: "Message | int | None" = None, timeout: float = 0) -> "MessageStatus":
         """发送收藏内容"""
-        return self.get_client(pid).send_collection(nickname, keyword, reply_to=reply_to, timeout=timeout)
+        return self.get_weixin(pid).send_collection(nickname, keyword, reply_to=reply_to, timeout=timeout)
 
     def send_card(self, pid: int, nickname: str, share: str) -> bool:
         """发送名片"""
-        return self.get_client(pid).send_card(nickname, share)
+        return self.get_weixin(pid).send_card(nickname, share)
 
     # ---- 会话管理 ----
 
     def open_session(self, pid: int, nickname: str) -> "Chat":
         """打开会话"""
-        return self.get_client(pid).open_session(nickname)
+        return self.get_weixin(pid).open_session(nickname)
 
     def open_session_by_search(self, pid: int, nickname: str, chat_type: Optional[list[str]] = None, force_search: bool = False) -> "Chat":
         """通过搜索打开会话"""
-        return self.get_client(pid).open_session_by_search(nickname, chat_type, force_search)
+        return self.get_weixin(pid).open_session_by_search(nickname, chat_type, force_search)
 
     def close_session(self, pid: int, nickname: str) -> None:
         """关闭会话"""
-        return self.get_client(pid).close_session(nickname)
+        return self.get_weixin(pid).close_session(nickname)
 
     def create_room(self, pid: int, nickname_list: list[str]) -> None:
         """发起群聊"""
-        return self.get_client(pid).create_room(nickname_list)
+        return self.get_weixin(pid).create_room(nickname_list)
 
     def add_friend(self, pid: int, keyword: str, message: Optional[str] = None,
                    remark: Optional[str] = None, permission: Optional[str] = None,
                    hide_my_posts: bool = False, hide_their_posts: bool = False) -> None:
         """添加朋友"""
-        return self.get_client(pid).add_friend(
+        return self.get_weixin(pid).add_friend(
             keyword, message=message, remark=remark,
             permission=permission, hide_my_posts=hide_my_posts,
             hide_their_posts=hide_their_posts,
@@ -15461,108 +15461,108 @@ class WeixinManager:
 
     def create_note(self, pid: int, content: str) -> None:
         """创建笔记"""
-        return self.get_client(pid).create_note(content)
+        return self.get_weixin(pid).create_note(content)
 
     # ---- 联系人操作 ----
 
     def get_contact_profile(self, pid: int, nickname: str) -> dict:
         """获取联系人资料"""
-        return self.get_client(pid).get_contact_profile(nickname)
+        return self.get_weixin(pid).get_contact_profile(nickname)
 
     def set_contact_info(self, pid: int, nickname: str, **kwargs) -> None:
         """设置联系人信息"""
-        return self.get_client(pid).set_contact_info(nickname, **kwargs)
+        return self.get_weixin(pid).set_contact_info(nickname, **kwargs)
 
     def set_contact_remark(self, pid: int, nickname: str, remark: str) -> None:
         """设置联系人备注"""
-        return self.get_client(pid).set_contact_remark(nickname, remark)
+        return self.get_weixin(pid).set_contact_remark(nickname, remark)
 
     def add_contact_label(self, pid: int, nickname: str, labels: list[str]) -> None:
         """添加联系人标签"""
-        return self.get_client(pid).add_contact_label(nickname, labels)
+        return self.get_weixin(pid).add_contact_label(nickname, labels)
 
     def remove_contact_label(self, pid: int, nickname: str, labels: list[str]) -> None:
         """移除联系人标签"""
-        return self.get_client(pid).remove_contact_label(nickname, labels)
+        return self.get_weixin(pid).remove_contact_label(nickname, labels)
 
     def set_contact_star(self, pid: int, nickname: str) -> None:
         """设为星标朋友"""
-        return self.get_client(pid).set_contact_star(nickname)
+        return self.get_weixin(pid).set_contact_star(nickname)
 
     def cancel_contact_star(self, pid: int, nickname: str) -> None:
         """取消星标朋友"""
-        return self.get_client(pid).cancel_contact_star(nickname)
+        return self.get_weixin(pid).cancel_contact_star(nickname)
 
     def black_contact(self, pid: int, nickname: str) -> None:
         """加入黑名单"""
-        return self.get_client(pid).black_contact(nickname)
+        return self.get_weixin(pid).black_contact(nickname)
 
     def unblack_contact(self, pid: int, nickname: str) -> None:
         """移出黑名单"""
-        return self.get_client(pid).unblack_contact(nickname)
+        return self.get_weixin(pid).unblack_contact(nickname)
 
     def delete_contact(self, pid: int, nickname: str) -> None:
         """删除联系人"""
-        return self.get_client(pid).delete_contact(nickname)
+        return self.get_weixin(pid).delete_contact(nickname)
 
     # ---- 群聊操作 ----
 
     def set_room_name(self, pid: int, nickname: str, name: str) -> None:
         """设置群聊名称"""
-        return self.get_client(pid).set_room_name(nickname, name)
+        return self.get_weixin(pid).set_room_name(nickname, name)
 
     def set_room_announcement(self, pid: int, nickname: str, content: str) -> None:
         """设置群公告"""
-        return self.get_client(pid).set_room_announcement(nickname, content)
+        return self.get_weixin(pid).set_room_announcement(nickname, content)
 
     def add_room_members(self, pid: int, nickname: str, members: list[str]) -> None:
         """添加群成员"""
-        return self.get_client(pid).add_room_members(nickname, members)
+        return self.get_weixin(pid).add_room_members(nickname, members)
 
     def remove_room_members(self, pid: int, nickname: str, members: list[str]) -> None:
         """移除群成员"""
-        return self.get_client(pid).remove_room_members(nickname, members)
+        return self.get_weixin(pid).remove_room_members(nickname, members)
 
     def exit_room(self, pid: int, nickname: str) -> None:
         """退出群聊"""
-        return self.get_client(pid).exit_room(nickname)
+        return self.get_weixin(pid).exit_room(nickname)
 
     def pin_chat(self, pid: int, nickname: str) -> None:
         """置顶会话"""
-        return self.get_client(pid).pin_chat(nickname)
+        return self.get_weixin(pid).pin_chat(nickname)
 
     def unpin_chat(self, pid: int, nickname: str) -> None:
         """取消置顶"""
-        return self.get_client(pid).unpin_chat(nickname)
+        return self.get_weixin(pid).unpin_chat(nickname)
 
     def mute_chat(self, pid: int, nickname: str) -> None:
         """消息免打扰"""
-        return self.get_client(pid).mute_chat(nickname)
+        return self.get_weixin(pid).mute_chat(nickname)
 
     def unmute_chat(self, pid: int, nickname: str) -> None:
         """取消免打扰"""
-        return self.get_client(pid).unmute_chat(nickname)
+        return self.get_weixin(pid).unmute_chat(nickname)
 
     # ---- 个人资料 ----
 
     def get_self_profile(self, pid: int) -> dict:
         """获取当前登录账号的个人资料（昵称、微信号）"""
-        return self.get_client(pid).get_self_profile()
+        return self.get_weixin(pid).get_self_profile()
 
     def get_self_info(self, pid: int) -> dict:
         """通过点击头像打开资料面板获取个人资料（昵称、微信号）"""
-        return self.get_client(pid).get_self_info()
+        return self.get_weixin(pid).get_self_info()
 
     # ---- 朋友圈 ----
 
     def get_moments(self, pid: int, count: int = 10, position: str = "top") -> list:
         """获取朋友圈动态"""
-        return self.get_client(pid).get_moments(count, position)
+        return self.get_weixin(pid).get_moments(count, position)
 
     def publish(self, pid: int, text: Optional[str] = None, images: list[str] = None,
                 video: str = None, **kwargs) -> bool:
         """发布朋友圈"""
-        return self.get_client(pid).friend_circle.publish(text=text, images=images, video=video, **kwargs)
+        return self.get_weixin(pid).friend_circle.publish(text=text, images=images, video=video, **kwargs)
 
     # ---- 统一消息监听 ----
 
@@ -15570,17 +15570,17 @@ class WeixinManager:
         """
         注册消息事件处理器（装饰器）。
 
-        回调签名: callback(client: Weixin, chat: SeparateChat, message: Message)
+        回调签名: callback(weixin: Weixin, chat: SeparateChat, message: Message)
         message.pid 可获取来源微信进程 PID。
 
         用法::
 
             @wx.on(Event.TEXT)
-            def on_text(client, chat, message):
+            def on_text(weixin, chat, message):
                 print(f"[PID={message.pid}] {message.sender}: {message.content}")
 
             @wx.on()  # 监听所有消息
-            def on_all(client, chat, message):
+            def on_all(weixin, chat, message):
                 print(f"[PID={message.pid}] {message}")
         """
         def decorator(func):
@@ -15599,7 +15599,7 @@ class WeixinManager:
         """
         注册一次性消息事件处理器（装饰器）。
 
-        回调签名: callback(client: Weixin, chat: SeparateChat, message: Message)
+        回调签名: callback(weixin: Weixin, chat: SeparateChat, message: Message)
         """
         def decorator(func):
             if not events:
@@ -15629,11 +15629,11 @@ class WeixinManager:
             else:
                 self._ee.remove_listener(event, func)
 
-    def _emit(self, pid: int, client: Weixin, chat: "SeparateChat", message: "Message") -> None:
-        """触发消息事件，回调签名: callback(client, chat, message)"""
+    def _emit(self, pid: int, weixin: Weixin, chat: "SeparateChat", message: "Message") -> None:
+        """触发消息事件，回调签名: callback(weixin, chat, message)"""
         event_type = _MSG_CLASS_TO_EVENT.get(type(message), Event.OTHER)
-        self._ee.emit(event_type, client, chat, message)
-        self._ee.emit(Event.ALL, client, chat, message)
+        self._ee.emit(event_type, weixin, chat, message)
+        self._ee.emit(Event.ALL, weixin, chat, message)
 
     @property
     def has_handlers(self) -> bool:
@@ -15651,8 +15651,8 @@ class WeixinManager:
         Returns:
             注册成功的 SeparateChat 列表
         """
-        client = self.get_client(pid)
-        return client.add_chat_listen(names)
+        weixin = self.get_weixin(pid)
+        return weixin.add_chat_listen(names)
 
     def add_all_chats_listen(self) -> dict[int, list["SeparateChat"]]:
         """
@@ -15662,8 +15662,8 @@ class WeixinManager:
             {pid: [SeparateChat, ...]} 字典
         """
         result: dict[int, list["SeparateChat"]] = {}
-        for pid, client in self._clients.items():
-            chats = client.add_chat_listen(None)
+        for pid, weixin in self._instances.items():
+            chats = weixin.add_chat_listen(None)
             if chats:
                 result[pid] = chats
         return result
@@ -15676,13 +15676,13 @@ class WeixinManager:
             pid:   微信进程 PID
             names: 要移除的名称，None 移除该客户端的所有监听
         """
-        client = self.get_client(pid)
-        client.remove_chat_listen(names)
+        weixin = self.get_weixin(pid)
+        weixin.remove_chat_listen(names)
 
     def remove_all_chat_listen(self) -> None:
         """移除所有客户端的所有聊天监听。"""
-        for client in self._clients.values():
-            client.remove_chat_listen(None)
+        for weixin in self._instances.values():
+            weixin.remove_chat_listen(None)
 
     def run(self, interval: float = 0.1, idle_interval: float = 0.1) -> None:
         """
@@ -15701,12 +15701,12 @@ class WeixinManager:
             )
 
         # 收集所有有监听的客户端
-        listen_clients: dict[int, Weixin] = {}
-        for pid, client in self._clients.items():
-            if hasattr(client, '_chat_listeners') and client._chat_listeners:
-                listen_clients[pid] = client
+        listen_instances: dict[int, Weixin] = {}
+        for pid, weixin in self._instances.items():
+            if hasattr(weixin, '_chat_listeners') and weixin._chat_listeners:
+                listen_instances[pid] = weixin
 
-        if not listen_clients:
+        if not listen_instances:
             raise RuntimeError("未注册任何监听，请先调用 add_chat_listen")
 
         self._stop_event = threading.Event()
@@ -15714,11 +15714,11 @@ class WeixinManager:
         msg_queue: Queue[tuple[int, Weixin, SeparateChat, Message]] = Queue()
         threads: dict[str, threading.Thread] = {}
 
-        def _watch_chat(pid: int, client: Weixin, chat: "SeparateChat", name: str) -> None:
+        def _watch_chat(pid: int, weixin: Weixin, chat: "SeparateChat", name: str) -> None:
             known_rids: set[tuple] = set()
             sender_cache: dict[tuple, tuple] = {}
             first_scan = True
-            offscreen = client.background
+            offscreen = weixin.background
 
             # 监听前滚动到最新消息
             chat.page_end()
@@ -15766,7 +15766,7 @@ class WeixinManager:
                 for msg in visible:
                     if msg.runtime_id and msg.runtime_id in new_rids:
                         msg.pid = pid
-                        msg_queue.put((pid, client, chat, msg))
+                        msg_queue.put((pid, weixin, chat, msg))
 
                 known_rids = curr_rids
 
@@ -15780,15 +15780,15 @@ class WeixinManager:
                     pass
 
         # 为每个客户端的每个监听启动线程
-        for pid, client in listen_clients.items():
-            for name, chat in client._chat_listeners.items():
+        for pid, weixin in listen_instances.items():
+            for name, chat in weixin._chat_listeners.items():
                 if not chat.exists:
                     logger.warning("窗口已关闭，跳过: [PID=%d] %s", pid, name)
                     continue
                 thread_name = f"listen-{pid}-{name}"
                 t = threading.Thread(
                     target=_watch_chat,
-                    args=(pid, client, chat, name),
+                    args=(pid, weixin, chat, name),
                     daemon=True,
                     name=thread_name,
                 )
@@ -15801,12 +15801,12 @@ class WeixinManager:
 
         # 输出监听列表
         tree_lines = ["*监听列表"]
-        for pi, (pid, client) in enumerate(listen_clients.items()):
-            is_last_pid = pi == len(listen_clients) - 1
+        for pi, (pid, weixin) in enumerate(listen_instances.items()):
+            is_last_pid = pi == len(listen_instances) - 1
             branch = "└── " if is_last_pid else "├── "
             tree_lines.append(f"{branch}PID={pid}")
             prefix = "    " if is_last_pid else "│   "
-            items = list(client._chat_listeners.items())
+            items = list(weixin._chat_listeners.items())
             for ni, (name, chat) in enumerate(items):
                 is_last = ni == len(items) - 1
                 node = "└── " if is_last else "├── "
@@ -15823,11 +15823,11 @@ class WeixinManager:
                     break
 
                 try:
-                    pid, client, chat, msg = msg_queue.get(timeout=0.1)
+                    pid, weixin, chat, msg = msg_queue.get(timeout=0.1)
                 except Empty:
                     continue
                 try:
-                    self._emit(pid, client, chat, msg)
+                    self._emit(pid, weixin, chat, msg)
                 except Exception:
                     logger.exception("事件分发异常 [PID=%d] [%s]", pid, chat.chat_name)
         except KeyboardInterrupt:
@@ -15848,12 +15848,12 @@ class WeixinManager:
         """
         if self._stop_event is not None:
             self._stop_event.set()
-        for client in self._clients.values():
-            client.move_back()
+        for weixin in self._instances.values():
+            weixin.move_back()
 
     def __str__(self) -> str:
         pids = self.pids
-        return f"WeixinManager(clients={len(pids)}, pids={pids})"
+        return f"WeixinManager(instances={len(pids)}, pids={pids})"
 
     def __repr__(self) -> str:
         return self.__str__()
