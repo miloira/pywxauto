@@ -111,7 +111,7 @@ LANGUAGE = {
     "微信": {"cn": "微信", "cn_t": "", "en": "Weixin"},
     "通讯录": {"cn": "通讯录", "cn_t": "", "en": "Contacts"},
     "收藏": {"cn": "收藏", "cn_t": "", "en": "Favorites"},
-    "朋友圈": {"cn": "朋友圈", "cn_t": "", "en": "Moments"},
+    "朋友圈": {"cn": "朋友圈", "cn_t": "", "en": "MomentItems"},
     "视频号": {"cn": "视频号", "cn_t": "", "en": "Channels"},
     "搜一搜": {"cn": "搜一搜", "cn_t": "", "en": "Search"},
     "手机": {"cn": "手机", "cn_t": "", "en": "Mobile"},
@@ -226,9 +226,9 @@ LANGUAGE = {
     "聊天、朋友圈、微信运动等": {"cn": "聊天、朋友圈、微信运动等", "cn_t": "", "en": "Chats, Moments, WeRun, etc."},
 
     # ============================================================
-    # 朋友圈 (FriendCircle 类)
+    # 朋友圈 (Moment 类)
     # ============================================================
-    "朋友圈": {"cn": "朋友圈", "cn_t": "", "en": "Moments"},
+    "朋友圈": {"cn": "朋友圈", "cn_t": "", "en": "MomentItems"},
     "刷新": {"cn": "刷新", "cn_t": "", "en": "Refresh"},
     "发表": {"cn": "发表", "cn_t": "", "en": "Post"},
     "公开": {"cn": "公开", "cn_t": "", "en": "All"},
@@ -5613,10 +5613,10 @@ class Session:
             return f"Session(error={e!r})"
 
 
-class Moment:
+class MomentItem:
     """朋友圈动态条目"""
 
-    def __init__(self, friend_circle: "FriendCircle", runtime_id: tuple, *,
+    def __init__(self, moment: "Moment", runtime_id: tuple, *,
                  type="", sender="", content="",
                  raw_text="", timestamp="", image_count=0,
                  cell_type="", scroll_offset: int = 0):
@@ -5624,7 +5624,7 @@ class Moment:
         初始化朋友圈动态条目。
 
         Args:
-            friend_circle: 关联的 FriendCircle 实例。
+            moment: 关联的 Moment 实例。
             runtime_id: UI Automation RuntimeId。
             type: 动态类型（如 "文本"、"图片"、"视频"、"分享"）。
             sender: 发送者昵称。
@@ -5635,7 +5635,7 @@ class Moment:
             cell_type: 控件 ClassName。
             scroll_offset: 该动态在列表中的累计滚动偏移（像素）。
         """
-        self.friend_circle = friend_circle
+        self.moment = moment
         self.runtime_id = runtime_id
         self.type = type
         self.sender = sender
@@ -5652,13 +5652,13 @@ class Moment:
 
         如果已点赞则不重复操作，返回 True。
         """
-        self.friend_circle._open_window()
+        self.moment._open_window()
         ctrl = self._find_cell()
         if not ctrl:
             raise WxControlNotFoundError(f"未找到朋友圈动态: {self.sender}")
         self._scroll_into_view(ctrl)
 
-        win = self.friend_circle._win
+        win = self.moment._win
         if not self._open_action_bar(ctrl):
             return False
 
@@ -5687,13 +5687,13 @@ class Moment:
 
         如果未点赞则不操作，返回 True。
         """
-        self.friend_circle._open_window()
+        self.moment._open_window()
         ctrl = self._find_cell()
         if not ctrl:
             raise WxControlNotFoundError(f"未找到朋友圈动态: {self.sender}")
         self._scroll_into_view(ctrl)
 
-        win = self.friend_circle._win
+        win = self.moment._win
         if not self._open_action_bar(ctrl):
             return False
 
@@ -5720,7 +5720,7 @@ class Moment:
         if not content or not content.strip():
             raise ValueError("评论内容不能为空")
 
-        self.friend_circle._open_window()
+        self.moment._open_window()
         ctrl = self._find_cell()
         if not ctrl:
             raise WxControlNotFoundError(f"未找到朋友圈动态: {self.sender}")
@@ -5749,7 +5749,7 @@ class Moment:
 
     def scroll_to_visible(self) -> bool:
         """将此条动态滚动到可见区域"""
-        self.friend_circle._open_window()
+        self.moment._open_window()
         ctrl = self._find_cell()
         if not ctrl:
             raise WxControlNotFoundError(f"未找到朋友圈动态: {self.sender}")
@@ -5764,16 +5764,16 @@ class Moment:
         2. 点击"刷新"回到列表顶部
         3. 边滚动边匹配：每滚一小段就检查可见区域，命中立即返回
         """
-        lc = self.friend_circle._find_sns_list()
+        lc = self.moment._find_sns_list()
 
         def _match_in_visible():
             for ctrl, _ in auto.WalkControl(lc):
                 if ctrl.ControlType != auto.ControlType.ListItemControl:
                     continue
                 cls_name = ctrl.ClassName or ""
-                if not cls_name.startswith(FriendCircle.TIMELINE_CELL_PREFIX):
+                if not cls_name.startswith(Moment.TIMELINE_CELL_PREFIX):
                     continue
-                if cls_name in FriendCircle.SKIP_CELL_CLASSES:
+                if cls_name in Moment.SKIP_CELL_CLASSES:
                     continue
                 if (ctrl.Name
                         and self.sender in ctrl.Name
@@ -5787,7 +5787,7 @@ class Moment:
             return result
 
         # 回到顶部
-        refresh_btn = self.friend_circle._win.ButtonControl(
+        refresh_btn = self.moment._win.ButtonControl(
             ClassName="mmui::XTabBarItem",
             Name=i_("刷新"),
         )
@@ -5816,7 +5816,7 @@ class Moment:
 
     def _scroll_into_view(self, ctrl) -> bool:
         """将控件滚动到朋友圈列表可见区域内"""
-        lc = self.friend_circle._find_sns_list()
+        lc = self.moment._find_sns_list()
         list_rect = lc.BoundingRectangle
         for _ in range(30):
             ctrl_rect = ctrl.BoundingRectangle
@@ -5832,7 +5832,7 @@ class Moment:
 
         从动态右下角逐步向左移动鼠标并点击，直到操作栏出现。
         """
-        win = self.friend_circle._win
+        win = self.moment._win
         distance = 30
         while distance < 200:
             ctrl_rect = ctrl.BoundingRectangle
@@ -5853,7 +5853,7 @@ class Moment:
 
     def _click_action_button(self, ctrl, button_name: str) -> bool:
         """触发操作栏后点击指定按钮（用于评论等）"""
-        win = self.friend_circle._win
+        win = self.moment._win
         if not self._open_action_bar(ctrl):
             return False
 
@@ -5865,7 +5865,7 @@ class Moment:
         return False
 
     def __repr__(self):
-        return (f"Moment(type={self.type!r}, sender={self.sender!r}, "
+        return (f"MomentItem(type={self.type!r}, sender={self.sender!r}, "
                 f"content={self.content!r}, timestamp={self.timestamp!r})")
 
     def __str__(self):
@@ -5884,9 +5884,9 @@ class Moment:
         }
 
 
-class FriendCircle(WeixinWindow):
+class Moment(WeixinWindow):
     """
-    朋友圈（FriendCircle）操作类。
+    朋友圈（Moment）操作类。
 
     继承自 WeixinWindow，复用通用窗口操作（activate、pin、unpin、
     minimize、maximize、restore、close）。
@@ -5988,7 +5988,7 @@ class FriendCircle(WeixinWindow):
         return lc
 
     def _parse_moment_name(self, runtime_id: tuple, raw_name: str,
-                           cls_name: str = "", scroll_offset: int = 0) -> Moment | None:
+                           cls_name: str = "", scroll_offset: int = 0) -> MomentItem | None:
         """
         解析单条朋友圈动态 ListItem 的 Name 属性。
 
@@ -6080,7 +6080,7 @@ class FriendCircle(WeixinWindow):
         else:
             moment_type = "其他"
 
-        return Moment(
+        return MomentItem(
             self, 
             runtime_id,
             type=moment_type,
@@ -6122,7 +6122,7 @@ class FriendCircle(WeixinWindow):
         return items
 
     @PIM.guard
-    def get_moments(self, count: int = 10, position: str = "top") -> list[Moment]:
+    def get_moments(self, count: int = 10, position: str = "top") -> list[MomentItem]:
         """
         获取朋友圈动态列表。
 
@@ -6151,7 +6151,7 @@ class FriendCircle(WeixinWindow):
 
         lc = self._find_sns_list()
 
-        moments: list[Moment] = []
+        moments: list[MomentItem] = []
         seen_keys: set[tuple] = set()  # (runtime_id, raw_text) 组合去重
         cumulative_height: int = 0  # 已采集朋友圈的高度累加
 
@@ -6216,9 +6216,9 @@ class FriendCircle(WeixinWindow):
 
         用法::
 
-            for item in wx.friend_circle.iter_moments(10):
+            for item in wx.moment.iter_moments(10):
                 print(item)
-                wx.friend_circle.like(item)
+                wx.moment.like(item)
         """
         # 手动执行 guard 等待（替代 @PIM.guard）
         if PIM._running and PIM.idle_wait > 0:
@@ -6278,21 +6278,21 @@ class FriendCircle(WeixinWindow):
                 input_wx.send_keys(lc, "{PageDown}")
                 time.sleep(0.5)
 
-    def like(self, moment: Moment) -> bool:
+    def like(self, moment_item: MomentItem) -> bool:
         """对指定动态点赞"""
-        return moment.like()
+        return moment_item.like()
 
-    def unlike(self, moment: Moment) -> bool:
+    def unlike(self, moment_item: MomentItem) -> bool:
         """取消指定动态的点赞"""
-        return moment.unlike()
+        return moment_item.unlike()
 
-    def comment(self, moment: Moment, content: str) -> bool:
+    def comment(self, moment_item: MomentItem, content: str) -> bool:
         """对指定动态评论"""
-        return moment.comment(content)
+        return moment_item.comment(content)
 
-    def scroll_into_visible(self, moment: Moment) -> bool:
+    def scroll_into_visible(self, moment_item: MomentItem) -> bool:
         """将指定动态滚动到可见区域"""
-        return moment.scroll_to_visible()
+        return moment_item.scroll_to_visible()
 
     # ---- 发布相关控件信息 ----
     # 发布面板: GroupControl, ClassName="mmui::SnsPublishPanel",
@@ -6864,7 +6864,7 @@ class FriendCircle(WeixinWindow):
         input_wx.click(btn)
 
     def __str__(self) -> str:
-        return "FriendCircle(朋友圈)"
+        return "Moment(朋友圈)"
 
 
 class ChatFile:
@@ -13536,7 +13536,7 @@ class Weixin(WeixinWindow):
         self.navigator = Navigator(self)
         self.session = Session(self)
         self.file_manager = FileManager(self)
-        self.friend_circle = FriendCircle(self)
+        self.moment = Moment(self)
         logger.info(f"微信客户端({self.version}) - 已连接")
 
     def __del__(self):
@@ -14633,32 +14633,32 @@ class Weixin(WeixinWindow):
         input_wx.click(control, button=button, click=click)
 
     def get_moments(self, count: int = 10, position: str = "top") -> list:
-        """获取朋友圈动态列表，委托给 friend_circle"""
-        return self.friend_circle.get_moments(count, position)
+        """获取朋友圈动态列表，委托给 moment"""
+        return self.moment.get_moments(count, position)
 
     def iter_moments(self, count: int = 10, position: str = "top"):
-        """逐条获取朋友圈动态（生成器），委托给 friend_circle"""
-        yield from self.friend_circle.iter_moments(count, position)
+        """逐条获取朋友圈动态（生成器），委托给 moment"""
+        yield from self.moment.iter_moments(count, position)
 
-    def like_moment(self, moment: "Moment") -> bool:
+    def like_moment(self, moment_item: "MomentItem") -> bool:
         """对指定动态点赞"""
-        return self.friend_circle.like(moment)
+        return self.moment.like(moment_item)
 
-    def unlike_moment(self, moment: "Moment") -> bool:
+    def unlike_moment(self, moment_item: "MomentItem") -> bool:
         """取消指定动态的点赞"""
-        return self.friend_circle.unlike(moment)
+        return self.moment.unlike(moment_item)
 
-    def comment_moment(self, moment: "Moment", content: str) -> bool:
+    def comment_moment(self, moment_item: "MomentItem", content: str) -> bool:
         """对指定动态评论"""
-        return self.friend_circle.comment(moment, content)
+        return self.moment.comment(moment_item, content)
 
-    def refresh_friend_circle(self) -> None:
+    def refresh_moment(self) -> None:
         """刷新朋友圈，回到列表顶部并加载最新动态"""
-        self.friend_circle.refresh()
+        self.moment.refresh()
 
-    def close_friend_circle(self) -> None:
+    def close_moment(self) -> None:
         """关闭朋友圈窗口"""
-        self.friend_circle.close()
+        self.moment.close()
 
     def ocr(self, image: bytes | str) -> dict:
         """
@@ -15562,7 +15562,7 @@ class WeixinManager:
     def publish(self, pid: int, text: Optional[str] = None, images: list[str] = None,
                 video: str = None, **kwargs) -> bool:
         """发布朋友圈"""
-        return self.get_weixin(pid).friend_circle.publish(text=text, images=images, video=video, **kwargs)
+        return self.get_weixin(pid).moment.publish(text=text, images=images, video=video, **kwargs)
 
     # ---- 统一消息监听 ----
 

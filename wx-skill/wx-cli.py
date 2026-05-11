@@ -319,7 +319,7 @@ def cmd_publish_moment(args):
     permission_contacts = args.permission_contacts if args.permission_contacts else None
     permission_labels = args.permission_labels if args.permission_labels else None
 
-    result = weixin.friend_circle.publish(
+    result = weixin.moment.publish(
         text=args.text,
         images=images,
         video=video,
