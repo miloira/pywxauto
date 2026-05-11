@@ -5503,7 +5503,7 @@ class Session:
         keyword: 搜索关键词
         chat_type: 优先匹配的分类，如 ["联系人", "群聊", "功能", "公众号", "更多", "聊天记录", "聊天文件", "搜索网络结果", "收藏", "最近使用过的小程序", "服务号", "最近使用", "最常使用"]
         """
-        chat_type = chat_type or [i_("最常使用"), i_("联系人"), i_("群聊")]
+        chat_type = chat_type or [i_("最常使用"), i_("联系人"), i_("群聊"), i_("功能")]
         edit = self._get_search_edit()
         input_wx.click(edit)
         input_wx.paste_or_type(edit, keyword)
@@ -5529,12 +5529,12 @@ class Session:
     @PIM.guard
     def search_contact(self, keyword: str) -> bool:
         """搜索联系人并打开会话"""
-        return self.search_and_select(keyword, chat_type=[i_("最常使用"), i_("联系人")])
+        return self.search_and_select(keyword, chat_type=[i_("最常使用"), i_("联系人"), i_("功能")])
 
     @PIM.guard
     def search_group(self, keyword: str) -> bool:
         """搜索群聊并打开会话"""
-        return self.search_and_select(keyword, chat_type=[i_("最常使用"), i_("群聊")])
+        return self.search_and_select(keyword, chat_type=[i_("最常使用"), i_("群聊"), i_("功能")])
 
     def _click_quick_action_button(self) -> None:
         """点击快捷操作按钮"""
@@ -5546,7 +5546,6 @@ class Session:
         if not btn.Exists(maxSearchSeconds=2):
             raise WxControlNotFoundError("未找到快捷操作按钮")
         input_wx.click(btn)
-        time.sleep(0.3)
 
     def _click_quick_action_item(self, item_name: str) -> None:
         """
