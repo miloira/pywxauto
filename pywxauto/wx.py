@@ -7438,7 +7438,14 @@ class ChatFile:
         流程:
         1. 右键点击文件项 → 弹出微信右键菜单
         2. 点击"下载"菜单项 → 开始下载
-        3. 轮询文件状态，等待 file_status 变为空（即已下载）
+        3. 轮询：对文件管理器窗口执行 Refind() 刷新 COM 引用，
+           重新枚举子控件获取新的 IUIAutomationElement，
+           通过文件名匹配检查状态
+
+        注意：uiautomation 库缓存了 IUIAutomationElement COM 指针，
+        旧指针在控件重建后会返回过时的属性值。
+        必须通过重新搜索（GetChildren/FindAll）获取新的 COM 对象，
+        才能读到最新的 Name 属性——这也是 Inspect.exe 能实时看到变化的原因。
 
         Args:
             timeout: 等待下载完成的超时时间（秒），默认 60 秒
@@ -7446,22 +7453,36 @@ class ChatFile:
         Returns:
             True 下载成功（状态变为已下载），False 下载超时
         """
+        file_name = self.file_name
+
         self._context_action(i_("下载"))
 
-        # 轮询文件状态，等待下载完成
+        # 轮询：刷新窗口 COM 引用，重新枚举文件列表控件
         deadline = time.monotonic() + timeout
         while time.monotonic() < deadline:
-            cell_text = self._cell.Name
-            if not cell_text:
-                time.sleep(1)
-                continue
-
-            chat_file = self.file_manager.parse_file_cell_text(cell_text)
-            if chat_file and not chat_file.file_status:
-                self.file_status = ""
-                return True
-
             time.sleep(1)
+
+            try:
+                # Refind 强制重新搜索窗口，获取新的 IUIAutomationElement
+                self.file_manager._win.Refind(maxSearchSeconds=3)
+
+                # 重新枚举所有文件 cell（每个都是新的 COM 对象）
+                cells = self.file_manager._find_all_file_cells(self.file_manager._win)
+                for cell in cells:
+                    cell_text = cell.Name
+                    if not cell_text:
+                        continue
+                    chat_file = self.file_manager.parse_file_cell_text(cell_text)
+                    if chat_file and chat_file.file_name == file_name:
+                        if not chat_file.file_status:
+                            # 下载完成，更新自身状态和 cell 引用
+                            self.file_status = ""
+                            self._cell = cell
+                            return True
+                        # 还在下载中，继续等待
+                        break
+            except Exception:
+                pass
 
         return False
 
@@ -10135,6 +10156,43 @@ class Chat:
         # ---- 检测气泡区域 ----
         bubble_left, bubble_right = Chat._detect_bubble_rect(img, w, h, sender_type)
 
+        # ---- 保存标记点截图到当前路径（调试用） ----
+        try:
+            from PIL import ImageDraw
+            debug_img = img.copy()
+            draw = ImageDraw.Draw(debug_img)
+            scan_y = 38
+            # 标记边缘扫描点
+            if edge_scan_y >= 0:
+                # 画扫描线
+                draw.line([(0, edge_scan_y), (w - 1, edge_scan_y)], fill="yellow", width=1)
+                # 标记左侧扫描到的点
+                if edge_left_x >= 0:
+                    draw.ellipse(
+                        [(edge_left_x - 4, edge_scan_y - 4), (edge_left_x + 4, edge_scan_y + 4)],
+                        fill="red", outline="red",
+                    )
+                # 标记右侧扫描到的点
+                if edge_right_x >= 0:
+                    draw.ellipse(
+                        [(edge_right_x - 4, edge_scan_y - 4), (edge_right_x + 4, edge_scan_y + 4)],
+                        fill="blue", outline="blue",
+                    )
+            # 标记气泡边缘
+            if bubble_left > 0:
+                draw.line([(bubble_left, 0), (bubble_left, h - 1)], fill="green", width=1)
+            if bubble_right > 0:
+                draw.line([(bubble_right, 0), (bubble_right, h - 1)], fill="green", width=1)
+            # 标注识别结果
+            label = f"{sender}({sender_type.value})"
+            draw.text((5, 5), label, fill="red")
+
+            # 保存到当前路径
+            debug_filename = f"_sender_debug.png"
+            debug_img.save(debug_filename)
+        except Exception:
+            pass
+
         # 转换为屏幕坐标
         bubble_rect = ()
         if bubble_left > 0 or bubble_right > 0:
@@ -10159,54 +10217,73 @@ class Chat:
         """
         检测气泡的左边缘和右边缘 x 坐标（相对于控件截图）。
 
-        在 y=38 高度处扫描：
+        在 y=38、h*1/4、h*2/4、h*3/4 四个高度分别扫描，
+        取左右距离最大的结果（气泡最宽处）。
+
         - 对方消息（FRIEND）：先从左侧扫描找气泡左边缘，再从右侧扫描找气泡右边缘
         - 自己消息（SELF）：先从右侧扫描找气泡右边缘，再从左侧扫描找气泡左边缘
 
         Returns:
             (bubble_left, bubble_right) 相对于控件的 x 坐标，(0, 0) 表示未检测到
         """
-        scan_y = 38
-        if scan_y >= h:
+        if h <= 0:
             return 0, 0
 
         threshold = 3  # 连续非白色像素数
         skip_px = 75   # 跳过头像区域的像素
 
-        def _scan_left_to_right(start: int, end: int) -> int:
-            count = 0
-            for x in range(start, end):
-                r, g, b = img.getpixel((x, scan_y))[:3]
-                if Chat._is_non_white(r, g, b):
-                    count += 1
-                    if count >= threshold:
-                        return x - threshold + 1
-                else:
-                    count = 0
-            return 0
+        # 多个扫描高度
+        scan_ys = [38, h // 4, h // 2, h * 3 // 4]
+        # 去重并过滤无效值
+        scan_ys = list(dict.fromkeys(y for y in scan_ys if 0 < y < h))
 
-        def _scan_right_to_left(start: int, end: int) -> int:
-            count = 0
-            for x in range(start, end, -1):
-                r, g, b = img.getpixel((x, scan_y))[:3]
-                if Chat._is_non_white(r, g, b):
-                    count += 1
-                    if count >= threshold:
-                        return x + threshold - 1
-                else:
-                    count = 0
-            return 0
+        best_left = 0
+        best_right = 0
+        best_distance = 0
 
-        if sender_type == SenderType.FRIEND:
-            bubble_left = _scan_left_to_right(skip_px, w)
-            bubble_right = _scan_right_to_left(w - 1 - skip_px, -1)
-        elif sender_type == SenderType.SELF:
-            bubble_right = _scan_right_to_left(w - 1 - skip_px, -1)
-            bubble_left = _scan_left_to_right(skip_px, w)
-        else:
-            return 0, 0
+        for scan_y in scan_ys:
+            def _scan_left_to_right(start: int, end: int, sy: int = scan_y) -> int:
+                count = 0
+                for x in range(start, end):
+                    r, g, b = img.getpixel((x, sy))[:3]
+                    if Chat._is_non_white(r, g, b):
+                        count += 1
+                        if count >= threshold:
+                            return x - threshold + 1
+                    else:
+                        count = 0
+                return 0
 
-        return bubble_left, bubble_right
+            def _scan_right_to_left(start: int, end: int, sy: int = scan_y) -> int:
+                count = 0
+                for x in range(start, end, -1):
+                    r, g, b = img.getpixel((x, sy))[:3]
+                    if Chat._is_non_white(r, g, b):
+                        count += 1
+                        if count >= threshold:
+                            return x + threshold - 1
+                    else:
+                        count = 0
+                return 0
+
+            if sender_type == SenderType.FRIEND:
+                bubble_left = _scan_left_to_right(skip_px, w)
+                bubble_right = _scan_right_to_left(w - 1 - skip_px, -1)
+            elif sender_type == SenderType.SELF:
+                bubble_right = _scan_right_to_left(w - 1 - skip_px, -1)
+                bubble_left = _scan_left_to_right(skip_px, w)
+            else:
+                continue
+
+            # 取左右距离最大的结果
+            if bubble_left > 0 and bubble_right > 0:
+                distance = bubble_right - bubble_left
+                if distance > best_distance:
+                    best_distance = distance
+                    best_left = bubble_left
+                    best_right = bubble_right
+
+        return best_left, best_right
 
     @staticmethod
     def _is_non_white(r: int, g: int, b: int) -> bool:
