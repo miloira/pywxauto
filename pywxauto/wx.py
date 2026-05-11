@@ -4822,6 +4822,255 @@ class Navigator:
 
         input_wx.click(btn)
 
+    @PIM.guard
+    def get_self_profile(self) -> dict:
+        """
+        获取当前登录账号的个人资料（昵称、微信号）。
+
+        通过导航栏"更多" → 点击"设置"按钮打开设置窗口，
+        点击"账号与存储"菜单项，从右侧面板读取昵称和微信号，
+        然后关闭设置窗口。
+
+        Returns:
+            dict: {"nickname": str, "account": str}
+        """
+        self.wx.activate()
+        self.switch_to(i_("更多"))
+        time.sleep(0.3)
+
+        # 点击"设置"按钮
+        setting_btn = self._win.ButtonControl(Name=i_("设置"), searchDepth=10)
+        if not setting_btn.Exists(maxSearchSeconds=3):
+            raise WxControlNotFoundError("未找到'设置'按钮")
+        input_wx.click(setting_btn)
+        time.sleep(0.5)
+
+        # 等待设置窗口出现
+        setting_win = auto.WindowControl(
+            ClassName="mmui::PreferenceWindow",
+            ProcessId=self.wx.pid,
+            searchDepth=1,
+        )
+        if not setting_win.Exists(maxSearchSeconds=5):
+            raise RuntimeError("设置窗口未打开")
+
+        try:
+            page = setting_win.GroupControl(
+                ClassName="mmui::PreferencePageAccount",
+            )
+            if not page.Exists(maxSearchSeconds=3):
+                account_btn = setting_win.ButtonControl(
+                    ClassName="mmui::XButton",
+                    Name=i_("账号与存储"),
+                )
+                if account_btn.Exists(maxSearchSeconds=2):
+                    input_wx.click(account_btn)
+                    time.sleep(0.5)
+                page = setting_win.GroupControl(
+                    ClassName="mmui::PreferencePageAccount",
+                )
+                if not page.Exists(maxSearchSeconds=3):
+                    raise WxControlNotFoundError("未找到账号与存储页面")
+
+            nickname = ""
+            account = ""
+            head_view = page.ButtonControl(ClassName="mmui::ContactHeadView")
+            if head_view.Exists(maxSearchSeconds=2):
+                parent = head_view.GetParentControl()
+                if parent:
+                    texts = []
+                    for ctrl in parent.GetChildren():
+                        if (ctrl.ControlType == auto.ControlType.GroupControl
+                                and ctrl.ClassName == "QWidget"):
+                            for child in ctrl.GetChildren():
+                                if (child.ControlType == auto.ControlType.TextControl
+                                        and child.ClassName == "mmui::XTextView"
+                                        and child.Name):
+                                    texts.append(child.Name)
+                            if texts:
+                                break
+
+                    if len(texts) >= 1:
+                        nickname = texts[0]
+                    if len(texts) >= 2:
+                        account = texts[1]
+
+            return {"nickname": nickname, "account": account}
+        finally:
+            try:
+                wp = setting_win.GetWindowPattern()
+                if wp:
+                    wp.Close()
+                else:
+                    close_btn = setting_win.ButtonControl(
+                        ClassName="mmui::XButton", Name=i_("关闭"),
+                    )
+                    if close_btn.Exists(maxSearchSeconds=1):
+                        input_wx.click(close_btn)
+            except Exception:
+                pass
+            time.sleep(0.3)
+
+    @PIM.guard
+    def get_self_info(self) -> dict:
+        """
+        获取当前登录账号的个人资料（通过点击头像打开资料面板）。
+
+        点击导航栏"微信"按钮上方 35px 处（即头像位置）打开个人资料面板，
+        从面板中读取昵称、微信号和头像，然后关闭面板。
+
+        Returns:
+            dict: {"nickname": str, "account": str, "avatar": str}
+            avatar 为头像图片的 base64 编码字符串（PNG 格式）
+        """
+        self.wx.activate()
+
+        wx_btn = self._tabbar.ButtonControl(
+            ClassName="mmui::XTabBarItem",
+            Name=i_("微信"),
+            searchDepth=5,
+        )
+        if not wx_btn.Exists(maxSearchSeconds=2):
+            raise WxControlNotFoundError("未找到导航栏'微信'按钮")
+
+        rect = wx_btn.BoundingRectangle
+        click_x = (rect.left + rect.right) // 2
+        click_y = rect.top - 35
+        auto.Click(click_x, click_y)
+        time.sleep(0.5)
+
+        profile = self._win.GroupControl(
+            ClassName="mmui::ContactProfileView",
+        )
+        if not profile.Exists(maxSearchSeconds=3):
+            raise RuntimeError("个人资料面板未打开")
+
+        try:
+            result = {"nickname": "", "account": "", "avatar": ""}
+
+            display_name = profile.TextControl(
+                AutomationId="right_v_view.nickname_button_view.display_name_text",
+            )
+            if display_name.Exists(0, 0):
+                val = (display_name.Name or "").strip()
+                if val:
+                    result["nickname"] = val
+
+            key_map = {
+                "微信号：": "account",
+            }
+            info_center = profile.GroupControl(
+                AutomationId="right_v_view.user_info_center_view",
+            )
+            if info_center.Exists(0, 0):
+                for child in info_center.GetChildren():
+                    key_ctrl = child.TextControl(
+                        AutomationId="right_v_view.user_info_center_view.basic_line_view.basic_line.key_text",
+                    )
+                    if not key_ctrl.Exists(0, 0):
+                        continue
+                    key_name = key_ctrl.Name or ""
+                    field = key_map.get(key_name)
+                    if not field:
+                        continue
+                    val_ctrl = child.TextControl(
+                        ClassName="mmui::ContactProfileTextView",
+                    )
+                    if val_ctrl.Exists(0, 0):
+                        val = (val_ctrl.Name or "").strip()
+                        if val:
+                            result[field] = val
+
+            avatar_ctrl = profile.ButtonControl(
+                ClassName="mmui::ContactHeadView",
+                AutomationId="head_image_v_view.head_view_",
+            )
+            if avatar_ctrl.Exists(0, 0):
+                try:
+                    input_wx.click(avatar_ctrl)
+                    time.sleep(1)
+
+                    img_viewer = auto.WindowControl(
+                        ClassName="mmui::PreviewWindow",
+                        ProcessId=self.wx.pid,
+                        searchDepth=1,
+                    )
+                    if img_viewer.Exists(maxSearchSeconds=3):
+                        save_btn = img_viewer.ButtonControl(
+                            ClassName="mmui::XButton",
+                            Name=i_("保存"),
+                        )
+                        if save_btn.Exists(maxSearchSeconds=2):
+                            tmp_dir = os.path.join(tempfile.gettempdir(), "pywxauto_avatar")
+                            os.makedirs(tmp_dir, exist_ok=True)
+                            tmp_path = os.path.join(tmp_dir, "avatar.png")
+                            if os.path.exists(tmp_path):
+                                os.remove(tmp_path)
+
+                            input_wx.click(save_btn)
+
+                            save_dlg = auto.WindowControl(ClassName="#32770", ProcessId=self.wx.pid)
+                            if save_dlg.Exists(maxSearchSeconds=5):
+                                file_edit = save_dlg.EditControl(AutomationId="1001")
+                                if file_edit.Exists(maxSearchSeconds=2):
+                                    vp = file_edit.GetValuePattern()
+                                    if vp:
+                                        vp.SetValue(tmp_path)
+                                    else:
+                                        input_wx.send_keys(file_edit, "{Ctrl}a{Del}")
+                                        input_wx.paste_or_type(file_edit, tmp_path)
+                                    time.sleep(0.3)
+
+                                    dlg_save_btn = save_dlg.ButtonControl(AutomationId="1")
+                                    if dlg_save_btn.Exists(maxSearchSeconds=2):
+                                        input_wx.click(dlg_save_btn)
+                                    else:
+                                        input_wx.send_keys(save_dlg, "{Alt}S")
+                                    time.sleep(1)
+
+                                    if save_dlg.Exists(maxSearchSeconds=0.5):
+                                        input_wx.send_keys(save_dlg, "{Alt}Y")
+                                        time.sleep(0.5)
+
+                                    if os.path.exists(tmp_path):
+                                        with open(tmp_path, "rb") as f:
+                                            avatar_bytes = f.read()
+                                        result["avatar"] = base64.b64encode(avatar_bytes).decode("ascii")
+                                        os.remove(tmp_path)
+                                else:
+                                    input_wx.send_keys(save_dlg, "{Esc}")
+
+                        time.sleep(0.3)
+                        close_btn = img_viewer.ButtonControl(
+                            ClassName="mmui::XButton", Name=i_("关闭"),
+                        )
+                        if close_btn.Exists(maxSearchSeconds=1):
+                            input_wx.click(close_btn)
+                        time.sleep(0.3)
+                except Exception:
+                    try:
+                        iv = auto.WindowControl(
+                            ClassName="mmui::PreviewWindow",
+                            ProcessId=self.wx.pid,
+                            searchDepth=1,
+                        )
+                        if iv.Exists(maxSearchSeconds=0.5):
+                            cb = iv.ButtonControl(ClassName="mmui::XButton", Name=i_("关闭"))
+                            if cb.Exists(0, 0):
+                                input_wx.click(cb)
+                    except Exception:
+                        pass
+
+            return result
+        finally:
+            pass
+
+    @PIM.guard
+    def lock(self) -> None:
+        """锁定微信（Ctrl+L）"""
+        self.wx.activate()
+        input_wx.send_keys(None, "{Ctrl}l")
+
     def __str__(self) -> str:
         tabs = ", ".join(self.TABS.keys())
         return f"Navigator(tabs=[{tabs}])"
@@ -4852,6 +5101,12 @@ class Session:
     def is_visible(self) -> bool:
         """会话列表面板是否可见"""
         return self._list_control.Exists(0, 0)
+
+    def _ensure_ready(self) -> None:
+        """确保微信窗口激活且会话列表可见"""
+        self.wx.activate()
+        if not self.is_visible:
+            self.wx.navigator.switch_to(i_("微信"))
 
     @property
     def _list_control(self) -> auto.ListControl:
@@ -4947,7 +5202,7 @@ class Session:
             chat_type:    优先匹配的分类，如 ["联系人", "群聊", "功能"]
             force_search: 是否强制走搜索流程，跳过标题检查和列表直接点击
         """
-        self.wx.activate()
+        self._ensure_ready()
         if not force_search:
             # 检查当前聊天对象是否已经是目标会话
             for aid in Chat.TITLE_LABEL_IDS:
@@ -5011,7 +5266,7 @@ class Session:
         Returns:
             按出现顺序排列的完整会话列表
         """
-        self.wx.activate()
+        self._ensure_ready()
         lc = self._list_control
         if not lc.Exists(maxSearchSeconds=3):
             raise WxControlNotFoundError("未找到会话列表控件")
@@ -5150,7 +5405,7 @@ class Session:
 
     def _session_context_action(self, name: str, menu_name: str) -> None:
         """对指定会话执行右键菜单操作"""
-        self.wx.activate()
+        self._ensure_ready()
         self._right_click_session(name)
         self._click_context_menu_item(menu_name)
 
@@ -5197,7 +5452,7 @@ class Session:
     @PIM.guard
     def close(self, name: str) -> None:
         """关闭指定会话：如果该会话处于激活状态，点击一下取消选中"""
-        self.wx.activate()
+        self._ensure_ready()
         item = self._ensure_session_visible(name)
         try:
             pattern = item.GetSelectionItemPattern()
@@ -5210,7 +5465,7 @@ class Session:
     @PIM.guard
     def open(self, name: str) -> None:
         """通过在会话列表中查找并点击来打开指定会话，如果已激活则不操作"""
-        self.wx.activate()
+        self._ensure_ready()
         item = self._ensure_session_visible(name)
         try:
             pattern = item.GetSelectionItemPattern()
@@ -5283,7 +5538,7 @@ class Session:
 
     def _click_quick_action_button(self) -> None:
         """点击快捷操作按钮"""
-        self.wx.activate()
+        self._ensure_ready()
         btn = self._win.ButtonControl(
             ClassName="mmui::XButton",
             Name=i_("快捷操作"),
@@ -5314,7 +5569,6 @@ class Session:
             self._click_quick_action_button()
             raise WxControlNotFoundError(f"快捷操作菜单中未找到: {item_name}")
         input_wx.click(item)
-        time.sleep(0.3)
 
     def _quick_action(self, item_name: str) -> None:
         """执行快捷操作"""
@@ -5603,6 +5857,45 @@ class Session:
         """
         self._quick_action(i_("新建笔记"))
         return NoteEditor(self.wx)
+
+    @PIM.guard
+    def open_session(self, nickname: str) -> "Chat":
+        """通过在会话列表中查找并点击来打开指定会话，返回 Chat 对象"""
+        self._ensure_ready()
+        self.open(nickname)
+        for _ in range(10):
+            chat = self.wx.chat
+            if chat is not None:
+                return chat
+            time.sleep(0.3)
+        raise RuntimeError(f"打开会话失败: {nickname}")
+
+    @PIM.guard
+    def open_session_by_search(self, nickname: str, chat_type: Optional[list[str]] = None,
+                               force_search: bool = False) -> "Chat":
+        """通过搜索打开指定会话，返回 Chat 对象"""
+        self._ensure_ready()
+        self.open_by_search(nickname, chat_type, force_search)
+        for _ in range(10):
+            chat = self.wx.chat
+            if chat is not None:
+                return chat
+            time.sleep(0.3)
+        raise RuntimeError(f"打开会话失败: {nickname}")
+
+    @PIM.guard
+    def create_note(self, content: str) -> None:
+        """
+        创建笔记并写入内容，完成后关闭笔记窗口。
+
+        Args:
+            content: 笔记内容
+        """
+        self._ensure_ready()
+        note = self.new_note()
+        note.set_content(content)
+        note.save()
+        note.close()
 
     def __str__(self) -> str:
         try:
@@ -13713,31 +14006,12 @@ class Weixin(WeixinWindow):
     @PIM.guard
     def open_session(self, nickname: str) -> Chat:
         """通过在会话列表中查找并点击来打开指定会话，返回 Chat 对象"""
-        self.activate()
-        if not self.has_session:
-            self.navigator.switch_to(i_("微信"))
-        self.session.open(nickname)
-        for _ in range(10):
-            chat = self.chat
-            if chat is not None:
-                return chat
-            time.sleep(0.3)
-        raise RuntimeError(f"打开会话失败: {nickname}")
+        return self.session.open_session(nickname)
 
     @PIM.guard
     def open_session_by_search(self, nickname: str, chat_type: Optional[list[str]] = None, force_search: bool = False) -> Chat:
         """通过搜索打开指定会话，返回 Chat 对象"""
-        self.activate()
-        if not self.has_session:
-            self.navigator.switch_to(i_("微信"))
-        self.session.open_by_search(nickname, chat_type, force_search)
-        # 等待聊天界面加载完成（搜索点击后界面切换需要时间）
-        for _ in range(10):
-            chat = self.chat
-            if chat is not None:
-                return chat
-            time.sleep(0.3)
-        raise RuntimeError(f"打开会话失败: {nickname}")
+        return self.session.open_session_by_search(nickname, chat_type, force_search)
 
     def close_session(self, nickname: str) -> None:
         return self.session.close(nickname)
@@ -13778,52 +14052,18 @@ class Weixin(WeixinWindow):
         """发送语音消息"""
         return self.chat_with(nickname).send_voice(duration)
 
-    @PIM.guard
     def create_note(self, content: str) -> None:
-        """
-        创建笔记并写入内容，完成后关闭笔记窗口。
+        """创建笔记并写入内容，完成后关闭笔记窗口。"""
+        return self.session.create_note(content)
 
-        content: 笔记内容
-        """
-        self.activate()
-        self.navigator.switch_to(i_("微信"))
-        note = self.session.new_note()
-        note.set_content(content)
-        note.save()
-        note.close()
-
-    @PIM.guard
     def create_room(self, nickname_list: list[str]) -> None:
-        """
-        发起群聊。
-
-        nickname_list: 好友昵称列表，至少需要两个好友才能创建群聊。
-        """
-        self.activate()
-        if not self.has_session:
-            self.navigator.switch_to(i_("微信"))
+        """发起群聊。"""
         self.session.create_room(nickname_list)
 
-    @PIM.guard
     def add_friend(self, keyword: str, message: Optional[str] = None, remark: Optional[str] = None,
                    permission: Optional[str] = None, hide_my_posts: bool = False,
                    hide_their_posts: bool = False) -> None:
-        """
-        添加朋友完整流程。
-
-        Args:
-            keyword: 微信号/手机号
-            message: 申请消息（None 则使用默认消息）
-            remark: 备注名（None 则使用对方昵称）
-            permission: 朋友权限，可选值:
-                - "chatonly" : 仅聊天
-                - None : 聊天、朋友圈、微信运动等（默认）
-            hide_my_posts: 不让他（她）看我的朋友圈和状态
-            hide_their_posts: 不看他（她）的朋友圈和状态
-        """
-        self.activate()
-        if not self.has_session:
-            self.navigator.switch_to(i_("微信"))
+        """添加朋友。"""
         self.session.add_friend(
             keyword, message=message, remark=remark,
             permission=permission, hide_my_posts=hide_my_posts,
@@ -13886,8 +14126,7 @@ class Weixin(WeixinWindow):
 
     def get_contact_profile(self, nickname: str) -> dict:
         """获取联系人的资料信息"""
-        chat = self.chat_with(nickname)
-        return chat.get_contact_profile()
+        return self.chat_with(nickname).get_contact_profile()
 
     def set_contact_info(self, nickname: str, *,
                          remark: str = None,
@@ -13896,181 +14135,146 @@ class Weixin(WeixinWindow):
                          description: str = None,
                          images: list = None) -> None:
         """一次性设置联系人的备注、标签、电话、描述、图片"""
-        chat = self.chat_with(nickname)
-        return chat.set_contact_info(remark=remark, labels=labels, phones=phones,
+        return self.chat_with(nickname).set_contact_info(remark=remark, labels=labels, phones=phones,
                               description=description, images=images)
 
     def set_contact_remark(self, nickname: str, remark: str) -> None:
         """设置联系人的备注名"""
-        chat = self.chat_with(nickname)
-        return chat.set_contact_remark(remark)
+        return self.chat_with(nickname).set_contact_remark(remark)
 
     def set_contact_label(self, nickname: str, labels: list[str]) -> None:
         """为联系人设置标签"""
-        chat = self.chat_with(nickname)
-        return chat.set_contact_info(labels=labels)
+        return self.chat_with(nickname).set_contact_info(labels=labels)
 
     def set_contact_phone(self, nickname: str, phones: list[str]) -> None:
         """为联系人设置电话号码"""
-        chat = self.chat_with(nickname)
-        return chat.set_contact_info(phones=phones)
+        return self.chat_with(nickname).set_contact_info(phones=phones)
 
     def set_contact_description(self, nickname: str, description: str) -> None:
         """设置联系人的描述信息"""
-        chat = self.chat_with(nickname)
-        return chat.set_contact_info(description=description)
+        return self.chat_with(nickname).set_contact_info(description=description)
 
     def set_contact_image(self, nickname: str, images: list[str]) -> None:
         """设置联系人的备注图片（覆盖式）"""
-        chat = self.chat_with(nickname)
-        return chat.set_contact_info(images=images)
+        return self.chat_with(nickname).set_contact_info(images=images)
 
     def add_contact_label(self, nickname: str, labels: list[str]) -> None:
         """为联系人添加标签"""
-        chat = self.chat_with(nickname)
-        return chat.add_contact_label(labels)
+        return self.chat_with(nickname).add_contact_label(labels)
 
     def add_contact_phone(self, nickname: str, phones: list[str]) -> None:
         """为联系人添加电话号码"""
-        chat = self.chat_with(nickname)
-        return chat.add_contact_phone(phones)
+        return self.chat_with(nickname).add_contact_phone(phones)
 
     def add_contact_image(self, nickname: str, images: list[str]) -> None:
         """为联系人添加备注图片"""
-        chat = self.chat_with(nickname)
-        return chat.add_contact_image(images)
+        return self.chat_with(nickname).add_contact_image(images)
 
     def remove_contact_label(self, nickname: str, labels: list[str]) -> None:
         """移除联系人的标签"""
-        chat = self.chat_with(nickname)
-        return chat.remove_contact_label(labels)
+        return self.chat_with(nickname).remove_contact_label(labels)
 
     def remove_contact_phone(self, nickname: str, phones: list[str]) -> None:
         """移除联系人的电话号码"""
-        chat = self.chat_with(nickname)
-        return chat.remove_contact_phone(phones)
+        return self.chat_with(nickname).remove_contact_phone(phones)
 
     def remove_contact_image(self, nickname: str, images: list[int]) -> None:
         """删除联系人的备注图片（按序号）"""
-        chat = self.chat_with(nickname)
-        return chat.remove_contact_image(images)
+        return self.chat_with(nickname).remove_contact_image(images)
 
     def collect_contact_image(self, nickname: str, images: list[int]) -> int:
         """收藏联系人的指定备注图片"""
-        chat = self.chat_with(nickname)
-        return chat.collect_contact_image(images)
+        return self.chat_with(nickname).collect_contact_image(images)
 
     def save_contact_image(self, nickname: str, images: list[int], save_path: str) -> int:
         """保存联系人的指定备注图片到指定目录"""
-        chat = self.chat_with(nickname)
-        return chat.save_contact_image(images, save_path)
+        return self.chat_with(nickname).save_contact_image(images, save_path)
 
     def set_contact_star(self, nickname: str) -> None:
         """将联系人设为星标朋友"""
-        chat = self.chat_with(nickname)
-        return chat.set_contact_star()
+        return self.chat_with(nickname).set_contact_star()
 
     def cancel_contact_star(self, nickname: str) -> None:
         """取消联系人的星标朋友"""
-        chat = self.chat_with(nickname)
-        return chat.cancel_contact_star()
+        return self.chat_with(nickname).cancel_contact_star()
 
     def get_friend_permission(self, nickname: str) -> dict:
         """获取联系人的朋友权限设置"""
-        chat = self.chat_with(nickname)
-        return chat.get_friend_permission()
+        return self.chat_with(nickname).get_friend_permission()
 
     def set_friend_permission(self, nickname: str, permission: str = "all",
                               hide_my_posts: bool = False,
                               hide_their_posts: bool = False) -> None:
         """设置联系人的朋友权限"""
-        chat = self.chat_with(nickname)
-        return chat.set_friend_permission(permission, hide_my_posts, hide_their_posts)
+        return self.chat_with(nickname).set_friend_permission(permission, hide_my_posts, hide_their_posts)
 
     def black_contact(self, nickname: str) -> None:
         """将联系人加入黑名单"""
-        chat = self.chat_with(nickname)
-        return chat.black_contact()
+        return self.chat_with(nickname).black_contact()
 
     def unblack_contact(self, nickname: str) -> None:
         """将联系人移出黑名单"""
-        chat = self.chat_with(nickname)
-        return chat.unblack_contact()
+        return self.chat_with(nickname).unblack_contact()
 
     def delete_contact(self, nickname: str) -> None:
         """删除联系人"""
-        chat = self.chat_with(nickname)
-        return chat.delete_contact()
+        return self.chat_with(nickname).delete_contact()
 
     def recommend_contact(self, nickname: str, receiver_nickname: str) -> bool:
         """将指定联系人推荐给另一个朋友（发送名片）"""
-        chat = self.chat_with(nickname)
-        return chat.recommend_contact(receiver_nickname)
+        return self.chat_with(nickname).recommend_contact(receiver_nickname)
 
     def clear_chat_history(self, nickname: str) -> None:
         """清空指定会话的聊天记录"""
-        chat = self.chat_with(nickname)
-        return chat.clear_chat_history()
+        return self.chat_with(nickname).clear_chat_history()
 
     def clear_room_chat_history(self, nickname: str) -> None:
         """清空指定群聊会话的聊天记录"""
-        chat = self.chat_with(nickname)
-        return chat.clear_room_chat_history()
+        return self.chat_with(nickname).clear_room_chat_history()
 
     def exit_room(self, nickname: str) -> None:
         """退出指定群聊"""
-        chat = self.chat_with(nickname)
-        return chat.exit_room()
+        return self.chat_with(nickname).exit_room()
 
     def add_room_members(self, nickname: str, members: list[str]) -> None:
         """添加指定群聊的成员"""
-        chat = self.chat_with(nickname)
-        return chat.add_room_members(members)
+        return self.chat_with(nickname).add_room_members(members)
 
     def remove_room_members(self, nickname: str, members: list[str]) -> None:
         """移除指定群聊的成员"""
-        chat = self.chat_with(nickname)
-        return chat.remove_room_members(members)
+        return self.chat_with(nickname).remove_room_members(members)
 
     def pin_room_chat(self, nickname: str) -> None:
         """置顶指定群聊会话"""
-        chat = self.chat_with(nickname)
-        return chat.pin_room_chat()
+        return self.chat_with(nickname).pin_room_chat()
 
     def unpin_room_chat(self, nickname: str) -> None:
         """取消置顶指定群聊会话"""
-        chat = self.chat_with(nickname)
-        return chat.unpin_room_chat()
+        return self.chat_with(nickname).unpin_room_chat()
 
     def mute_room_chat(self, nickname: str) -> None:
         """开启指定群聊的消息免打扰"""
-        chat = self.chat_with(nickname)
-        return chat.mute_room_chat()
+        return self.chat_with(nickname).mute_room_chat()
 
     def unmute_room_chat(self, nickname: str) -> None:
         """关闭指定群聊的消息免打扰"""
-        chat = self.chat_with(nickname)
-        return chat.unmute_room_chat()
+        return self.chat_with(nickname).unmute_room_chat()
 
     def add_room_address_book(self, nickname: str) -> None:
         """将指定群聊保存到通讯录"""
-        chat = self.chat_with(nickname)
-        return chat.add_room_address_book()
+        return self.chat_with(nickname).add_room_address_book()
 
     def remove_room_address_book(self, nickname: str) -> None:
         """将指定群聊从通讯录移除"""
-        chat = self.chat_with(nickname)
-        return chat.remove_room_address_book()
+        return self.chat_with(nickname).remove_room_address_book()
 
     def display_room_member_nickname(self, nickname: str) -> None:
         """显示指定群聊的群成员昵称"""
-        chat = self.chat_with(nickname)
-        return chat.display_room_member_nickname()
+        return self.chat_with(nickname).display_room_member_nickname()
 
     def hidden_room_member_nickname(self, nickname: str) -> None:
         """隐藏指定群聊的群成员昵称"""
-        chat = self.chat_with(nickname)
-        return chat.hidden_room_member_nickname()
+        return self.chat_with(nickname).hidden_room_member_nickname()
 
     def set_room_info(self, nickname: str, name: str = None,
                       announcement: str = None, remark: str = None,
@@ -14079,8 +14283,7 @@ class Weixin(WeixinWindow):
                       display_member_nickname: bool = None,
                       fold: bool = None) -> None:
         """一次性设置指定群聊的多项信息"""
-        chat = self.chat_with(nickname)
-        return chat.set_room_info(
+        return self.chat_with(nickname).set_room_info(
             name=name, announcement=announcement, remark=remark,
             my_nickname=my_nickname, mute=mute, pin=pin,
             save_address_book=save_address_book,
@@ -14090,63 +14293,51 @@ class Weixin(WeixinWindow):
 
     def fold_room_chat(self, nickname: str) -> None:
         """折叠指定群聊会话"""
-        chat = self.chat_with(nickname)
-        return chat.fold_room_chat()
+        return self.chat_with(nickname).fold_room_chat()
 
     def unfold_room_chat(self, nickname: str) -> None:
         """取消折叠指定群聊会话"""
-        chat = self.chat_with(nickname)
-        return chat.unfold_room_chat()
+        return self.chat_with(nickname).unfold_room_chat()
 
     def pin_chat(self, nickname: str) -> None:
         """置顶指定会话"""
-        chat = self.chat_with(nickname)
-        return chat.pin_chat()
+        return self.chat_with(nickname).pin_chat()
 
     def unpin_chat(self, nickname: str) -> None:
         """取消置顶指定会话"""
-        chat = self.chat_with(nickname)
-        return chat.unpin_chat()
+        return self.chat_with(nickname).unpin_chat()
 
     def mute_chat(self, nickname: str) -> None:
         """开启指定会话的消息免打扰"""
-        chat = self.chat_with(nickname)
-        return chat.mute_chat()
+        return self.chat_with(nickname).mute_chat()
 
     def unmute_chat(self, nickname: str) -> None:
         """关闭指定会话的消息免打扰"""
-        chat = self.chat_with(nickname)
-        return chat.unmute_chat()
+        return self.chat_with(nickname).unmute_chat()
 
     def fold_chat(self, nickname: str) -> None:
         """折叠指定会话"""
-        chat = self.chat_with(nickname)
-        return chat.fold_chat()
+        return self.chat_with(nickname).fold_chat()
 
     def unfold_chat(self, nickname: str) -> None:
         """取消折叠指定会话"""
-        chat = self.chat_with(nickname)
-        return chat.unfold_chat()
+        return self.chat_with(nickname).unfold_chat()
 
     def set_room_name(self, nickname: str, name: str) -> None:
         """设置指定群聊的名称"""
-        chat = self.chat_with(nickname)
-        return chat.set_room_name(name)
+        return self.chat_with(nickname).set_room_name(name)
 
     def set_room_announcement(self, nickname: str, content: str) -> None:
         """设置指定群聊的群公告"""
-        chat = self.chat_with(nickname)
-        return chat.set_room_announcement(content)
+        return self.chat_with(nickname).set_room_announcement(content)
 
     def set_room_remark(self, nickname: str, remark: str) -> None:
         """设置指定群聊的备注"""
-        chat = self.chat_with(nickname)
-        return chat.set_room_remark(remark)
+        return self.chat_with(nickname).set_room_remark(remark)
 
     def set_room_nickname(self, nickname: str, my_nickname: str) -> None:
         """设置我在指定群聊中的昵称"""
-        chat = self.chat_with(nickname)
-        return chat.set_room_nickname(my_nickname)
+        return self.chat_with(nickname).set_room_nickname(my_nickname)
 
     def get_screenshot(self) -> bytes:
         """
@@ -14233,286 +14424,17 @@ class Weixin(WeixinWindow):
 
         return 0
 
-    @PIM.guard
     def get_self_profile(self) -> dict:
-        """
-        获取当前登录账号的个人资料（昵称、微信号）。
+        """获取当前登录账号的个人资料（昵称、微信号）"""
+        return self.navigator.get_self_profile()
 
-        通过导航栏"更多" → 点击"设置"按钮打开设置窗口，
-        点击"账号与存储"菜单项，从右侧面板读取昵称和微信号，
-        然后关闭设置窗口。
-
-        设置窗口: WindowControl, ClassName="mmui::PreferenceWindow"
-
-        Returns:
-            dict: {"nickname": str, "account": str}
-        """
-        self.activate()
-        self.navigator.switch_to(i_("更多"))
-        time.sleep(0.3)
-
-        # 点击"设置"按钮
-        setting_btn = self._win.ButtonControl(Name=i_("设置"), searchDepth=10)
-        if not setting_btn.Exists(maxSearchSeconds=3):
-            raise WxControlNotFoundError("未找到'设置'按钮")
-        input_wx.click(setting_btn)
-        time.sleep(0.5)
-
-        # 等待设置窗口出现
-        setting_win = auto.WindowControl(
-            ClassName="mmui::PreferenceWindow",
-            ProcessId=self.pid,
-            searchDepth=1,
-        )
-        if not setting_win.Exists(maxSearchSeconds=5):
-            raise RuntimeError("设置窗口未打开")
-
-        try:
-            # 右侧面板: mmui::PreferencePageAccount 内第一个区域包含头像、昵称、微信号
-            page = setting_win.GroupControl(
-                ClassName="mmui::PreferencePageAccount",
-            )
-            if not page.Exists(maxSearchSeconds=3):
-                # 可能需要先点击"账号与存储"
-                account_btn = setting_win.ButtonControl(
-                    ClassName="mmui::XButton",
-                    Name=i_("账号与存储"),
-                )
-                if account_btn.Exists(maxSearchSeconds=2):
-                    input_wx.click(account_btn)
-                    time.sleep(0.5)
-                page = setting_win.GroupControl(
-                    ClassName="mmui::PreferencePageAccount",
-                )
-                if not page.Exists(maxSearchSeconds=3):
-                    raise WxControlNotFoundError("未找到账号与存储页面")
-
-            # 昵称和微信号在 ContactHeadView 旁边的 QWidget 容器中
-            # 该容器包含两个 mmui::XTextView: 昵称和微信号
-            nickname = ""
-            account = ""
-            head_view = page.ButtonControl(ClassName="mmui::ContactHeadView")
-            if head_view.Exists(maxSearchSeconds=2):
-                # 头像的下一个兄弟控件就是包含昵称和微信号的容器
-                parent = head_view.GetParentControl()
-                if parent:
-                    texts = []
-                    for ctrl in parent.GetChildren():
-                        if (ctrl.ControlType == auto.ControlType.GroupControl
-                                and ctrl.ClassName == "QWidget"):
-                            # 这个 QWidget 包含昵称和微信号
-                            for child in ctrl.GetChildren():
-                                if (child.ControlType == auto.ControlType.TextControl
-                                        and child.ClassName == "mmui::XTextView"
-                                        and child.Name):
-                                    texts.append(child.Name)
-                            if texts:
-                                break
-
-                    if len(texts) >= 1:
-                        nickname = texts[0]
-                    if len(texts) >= 2:
-                        account = texts[1]
-
-            return {"nickname": nickname, "account": account}
-        finally:
-            # 关闭设置窗口
-            try:
-                wp = setting_win.GetWindowPattern()
-                if wp:
-                    wp.Close()
-                else:
-                    close_btn = setting_win.ButtonControl(
-                        ClassName="mmui::XButton", Name=i_("关闭"),
-                    )
-                    if close_btn.Exists(maxSearchSeconds=1):
-                        input_wx.click(close_btn)
-            except Exception:
-                pass
-            time.sleep(0.3)
-
-    @PIM.guard
     def get_self_info(self) -> dict:
-        """
-        获取当前登录账号的个人资料（通过点击头像打开资料面板）。
+        """获取当前登录账号的个人资料（昵称、微信号、头像）"""
+        return self.navigator.get_self_info()
 
-        点击导航栏"微信"按钮上方 35px 处（即头像位置）打开个人资料面板，
-        从面板中读取昵称、微信号和头像，然后关闭面板。
-
-        Returns:
-            dict: {"nickname": str, "account": str, "avatar": str}
-            avatar 为头像图片的 base64 编码字符串（PNG 格式）
-        """
-        self.activate()
-
-        # 获取导航栏"微信"按钮的位置
-        tabbar = self.navigator._tabbar
-        wx_btn = tabbar.ButtonControl(
-            ClassName="mmui::XTabBarItem",
-            Name=i_("微信"),
-            searchDepth=5,
-        )
-        if not wx_btn.Exists(maxSearchSeconds=2):
-            raise WxControlNotFoundError("未找到导航栏'微信'按钮")
-
-        # 点击"微信"按钮上方 35px（头像位置）
-        rect = wx_btn.BoundingRectangle
-        click_x = (rect.left + rect.right) // 2
-        click_y = rect.top - 35
-        auto.Click(click_x, click_y)
-        time.sleep(0.5)
-
-        # 等待资料面板出现（mmui::ContactProfileView）
-        profile = self._win.GroupControl(
-            ClassName="mmui::ContactProfileView",
-        )
-        if not profile.Exists(maxSearchSeconds=3):
-            raise RuntimeError("个人资料面板未打开")
-
-        try:
-            result = {"nickname": "", "account": "", "avatar": ""}
-
-            # 先获取昵称和微信号（在打开图片浏览器之前）
-            display_name = profile.TextControl(
-                AutomationId="right_v_view.nickname_button_view.display_name_text",
-            )
-            if display_name.Exists(0, 0):
-                val = (display_name.Name or "").strip()
-                if val:
-                    result["nickname"] = val
-
-            key_map = {
-                "微信号：": "account",
-            }
-            info_center = profile.GroupControl(
-                AutomationId="right_v_view.user_info_center_view",
-            )
-            if info_center.Exists(0, 0):
-                for child in info_center.GetChildren():
-                    key_ctrl = child.TextControl(
-                        AutomationId="right_v_view.user_info_center_view.basic_line_view.basic_line.key_text",
-                    )
-                    if not key_ctrl.Exists(0, 0):
-                        continue
-                    key_name = key_ctrl.Name or ""
-                    field = key_map.get(key_name)
-                    if not field:
-                        continue
-                    val_ctrl = child.TextControl(
-                        ClassName="mmui::ContactProfileTextView",
-                    )
-                    if val_ctrl.Exists(0, 0):
-                        val = (val_ctrl.Name or "").strip()
-                        if val:
-                            result[field] = val
-
-            # 头像: 点击头像打开图片浏览器，点击保存按钮获取原图
-            avatar_ctrl = profile.ButtonControl(
-                ClassName="mmui::ContactHeadView",
-                AutomationId="head_image_v_view.head_view_",
-            )
-            if avatar_ctrl.Exists(0, 0):
-                try:
-                    input_wx.click(avatar_ctrl)
-                    time.sleep(1)
-
-                    img_viewer = auto.WindowControl(
-                        ClassName="mmui::PreviewWindow",
-                        ProcessId=self.pid,
-                        searchDepth=1,
-                    )
-                    if img_viewer.Exists(maxSearchSeconds=3):
-                        save_btn = img_viewer.ButtonControl(
-                            ClassName="mmui::XButton",
-                            Name=i_("保存"),
-                        )
-                        if save_btn.Exists(maxSearchSeconds=2):
-                            tmp_dir = os.path.join(tempfile.gettempdir(), "pywxauto_avatar")
-                            os.makedirs(tmp_dir, exist_ok=True)
-                            tmp_path = os.path.join(tmp_dir, "avatar.png")
-                            if os.path.exists(tmp_path):
-                                os.remove(tmp_path)
-
-                            input_wx.click(save_btn)
-
-                            save_dlg = auto.WindowControl(ClassName="#32770", ProcessId=self.pid)
-                            if save_dlg.Exists(maxSearchSeconds=5):
-                                file_edit = save_dlg.EditControl(AutomationId="1001")
-                                if file_edit.Exists(maxSearchSeconds=2):
-                                    vp = file_edit.GetValuePattern()
-                                    if vp:
-                                        vp.SetValue(tmp_path)
-                                    else:
-                                        input_wx.send_keys(file_edit, "{Ctrl}a{Del}")
-                                        input_wx.paste_or_type(file_edit, tmp_path)
-                                    time.sleep(0.3)
-
-                                    dlg_save_btn = save_dlg.ButtonControl(AutomationId="1")
-                                    if dlg_save_btn.Exists(maxSearchSeconds=2):
-                                        input_wx.click(dlg_save_btn)
-                                    else:
-                                        input_wx.send_keys(save_dlg, "{Alt}S")
-                                    time.sleep(1)
-
-                                    if save_dlg.Exists(maxSearchSeconds=0.5):
-                                        input_wx.send_keys(save_dlg, "{Alt}Y")
-                                        time.sleep(0.5)
-
-                                    if os.path.exists(tmp_path):
-                                        with open(tmp_path, "rb") as f:
-                                            avatar_bytes = f.read()
-                                        result["avatar"] = base64.b64encode(avatar_bytes).decode("ascii")
-                                        os.remove(tmp_path)
-                                else:
-                                    input_wx.send_keys(save_dlg, "{Esc}")
-
-                        # 关闭图片浏览器
-                        time.sleep(0.3)
-                        close_btn = img_viewer.ButtonControl(
-                            ClassName="mmui::XButton", Name=i_("关闭"),
-                        )
-                        if close_btn.Exists(maxSearchSeconds=1):
-                            input_wx.click(close_btn)
-                        time.sleep(0.3)
-                except Exception:
-                    try:
-                        iv = auto.WindowControl(
-                            ClassName="mmui::PreviewWindow",
-                            ProcessId=self.pid,
-                            searchDepth=1,
-                        )
-                        if iv.Exists(maxSearchSeconds=0.5):
-                            cb = iv.ButtonControl(ClassName="mmui::XButton", Name=i_("关闭"))
-                            if cb.Exists(0, 0):
-                                input_wx.click(cb)
-                    except Exception:
-                        pass
-
-            return result
-        finally:
-            pass
-
-    # @PIM.guard
-    # def lock(self) -> None:
-    #     """通过点击菜单锁定微信（已弃用，改用快捷键）"""
-    #     self.activate()
-    #     more_btn = self.navigator._win.ButtonControl(Name=i_("更多"))
-    #     if not more_btn.Exists(maxSearchSeconds=2):
-    #         raise WxWindowNotFoundError("未找到更多按钮")
-    #     more_btn.Click(ratioX=rand_ratio(), ratioY=rand_ratio())
-    #     time.sleep(0.1)
-    #
-    #     lock_btn = self._win.ButtonControl(ClassName="mmui::XButton", Name="锁定")
-    #     if not lock_btn.Exists(maxSearchSeconds=2):
-    #         self._win.SendKeys("{Esc}")
-    #         raise WxWindowNotFoundError("弹出菜单中未找到锁定按钮")
-    #     lock_btn.Click(ratioX=rand_ratio(), ratioY=rand_ratio())
-
-    @PIM.guard
     def lock(self) -> None:
         """锁定微信（Ctrl+L）"""
-        self.activate()
-        self.shortcut("锁定")
+        return self.navigator.lock()
 
     @staticmethod
     def shortcut(name: str) -> None:
