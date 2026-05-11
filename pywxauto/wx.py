@@ -13825,10 +13825,17 @@ class Weixin(WeixinWindow):
                 self.wakeup() # 注意：快捷键显示微信窗口 仅第一个微信有效
                 # 2.可能是当前桌面没有微信窗口 -> 把微信窗口调到前台(自动切换到存在微信窗口的桌面)
                 wx_pid = self.pid if self.pid else weixin_process["pid"]
-                weixin_hwnd = wx_pid_to_hwnd(wx_pid)
-                win32gui.SetForegroundWindow(weixin_hwnd)
+                weixin_hwnd = None
+                deadline = time.monotonic() + 30
+                while time.monotonic() < deadline:
+                    weixin_hwnd = wx_pid_to_hwnd(wx_pid)
+                    if weixin_hwnd is not None:
+                        break
+                    time.sleep(0.1)
+                if weixin_hwnd is not None:
+                    win32gui.SetForegroundWindow(weixin_hwnd)
 
-        self._win: auto.WindowControl = auto.WindowControl(
+        self._win = auto.WindowControl(
             ClassName=self.WINDOW_CLASS,
             ProcessId=self.pid,
             searchDepth=1
