@@ -116,20 +116,7 @@ def cmd_get_moments(args):
     """获取朋友圈动态"""
     weixin = get_weixin()
     moments = weixin.get_moments(count=args.count, position=args.position)
-    results = []
-    for m in moments:
-        item = {}
-        if hasattr(m, 'nickname'):
-            item['nickname'] = m.nickname
-        if hasattr(m, 'content'):
-            item['content'] = m.content
-        if hasattr(m, 'time'):
-            item['time'] = str(m.time) if m.time else None
-        if hasattr(m, 'likes'):
-            item['likes'] = m.likes
-        if hasattr(m, 'comments'):
-            item['comments'] = m.comments
-        results.append(item)
+    results = [m.to_dict() for m in moments]
     print(json.dumps(results, ensure_ascii=False, indent=2))
 
 
