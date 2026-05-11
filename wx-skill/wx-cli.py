@@ -3,7 +3,7 @@
 """
 微信自动化命令行工具 (WeChat Automation CLI)
 
-通过命令行操作微信 4.x 客户端，支持发送消息、联系人管理、群聊操作、朋友圈功能。
+通过命令行操作微信 4.x 客户端，支持发送消息、朋友圈功能。
 
 用法:
     python wx-cli.py <command> --参数名 <参数值>
@@ -11,10 +11,10 @@
 示例:
     python wx-cli.py send-text --to "张三" --content "你好"
     python wx-cli.py send-file --to "张三" --file "C:\\docs\\report.pdf"
-    python wx-cli.py get-contact-profile --nickname "张三"
-    python wx-cli.py create-room --members "张三" "李四" "王五"
+    python wx-cli.py send-image --to "张三" --file "C:\\pics\\photo.jpg"
     python wx-cli.py send-at --to "测试群" --content "开会了" --members "张三" "李四"
     python wx-cli.py get-moments --count 5
+    python wx-cli.py publish-moment --text "今天天气真好" --images "C:\\pics\\1.jpg"
 """
 
 import argparse
@@ -109,183 +109,6 @@ def cmd_send_card(args):
 
 
 # ============================================================
-# 联系人操作命令
-# ============================================================
-
-def cmd_get_contact_profile(args):
-    """获取联系人资料"""
-    weixin = get_weixin()
-    profile = weixin.get_contact_profile(args.nickname)
-    print(json.dumps(profile, ensure_ascii=False, indent=2))
-
-
-def cmd_set_contact_remark(args):
-    """设置联系人备注"""
-    weixin = get_weixin()
-    weixin.set_contact_remark(args.nickname, args.remark)
-    print(f"已设置 {args.nickname} 的备注为: {args.remark}")
-
-
-def cmd_add_contact_label(args):
-    """添加联系人标签"""
-    weixin = get_weixin()
-    weixin.add_contact_label(args.nickname, args.labels)
-    print(f"已为 {args.nickname} 添加标签: {', '.join(args.labels)}")
-
-
-def cmd_remove_contact_label(args):
-    """移除联系人标签"""
-    weixin = get_weixin()
-    weixin.remove_contact_label(args.nickname, args.labels)
-    print(f"已移除 {args.nickname} 的标签: {', '.join(args.labels)}")
-
-
-def cmd_set_contact_star(args):
-    """设为星标朋友"""
-    weixin = get_weixin()
-    weixin.set_contact_star(args.nickname)
-    print(f"已将 {args.nickname} 设为星标朋友")
-
-
-def cmd_cancel_contact_star(args):
-    """取消星标朋友"""
-    weixin = get_weixin()
-    weixin.cancel_contact_star(args.nickname)
-    print(f"已取消 {args.nickname} 的星标")
-
-
-def cmd_black_contact(args):
-    """加入黑名单"""
-    weixin = get_weixin()
-    weixin.black_contact(args.nickname)
-    print(f"已将 {args.nickname} 加入黑名单")
-
-
-def cmd_unblack_contact(args):
-    """移出黑名单"""
-    weixin = get_weixin()
-    weixin.unblack_contact(args.nickname)
-    print(f"已将 {args.nickname} 移出黑名单")
-
-
-def cmd_delete_contact(args):
-    """删除联系人"""
-    weixin = get_weixin()
-    weixin.delete_contact(args.nickname)
-    print(f"已删除联系人: {args.nickname}")
-
-
-def cmd_add_friend(args):
-    """添加朋友"""
-    weixin = get_weixin()
-    weixin.add_friend(
-        keyword=args.keyword,
-        message=args.message,
-        remark=args.remark,
-        permission=args.permission,
-        hide_my_posts=args.hide_my_posts,
-        hide_their_posts=args.hide_their_posts,
-    )
-    print(f"已发送好友申请: {args.keyword}")
-
-
-def cmd_get_friend_permission(args):
-    """获取联系人朋友权限"""
-    weixin = get_weixin()
-    perm = weixin.get_friend_permission(args.nickname)
-    print(json.dumps(perm, ensure_ascii=False, indent=2))
-
-
-def cmd_set_friend_permission(args):
-    """设置联系人朋友权限"""
-    weixin = get_weixin()
-    weixin.set_friend_permission(
-        args.nickname,
-        permission=args.permission,
-        hide_my_posts=args.hide_my_posts,
-        hide_their_posts=args.hide_their_posts,
-    )
-    print(f"已设置 {args.nickname} 的朋友权限")
-
-
-# ============================================================
-# 群聊操作命令
-# ============================================================
-
-def cmd_create_room(args):
-    """发起群聊"""
-    if len(args.members) < 2:
-        print("错误: 发起群聊至少需要两个好友", file=sys.stderr)
-        sys.exit(1)
-    weixin = get_weixin()
-    weixin.create_room(args.members)
-    print(f"已发起群聊，成员: {', '.join(args.members)}")
-
-
-def cmd_set_room_name(args):
-    """设置群聊名称"""
-    weixin = get_weixin()
-    weixin.set_room_name(args.nickname, args.name)
-    print(f"已设置群聊 {args.nickname} 的名称为: {args.name}")
-
-
-def cmd_set_room_announcement(args):
-    """设置群公告"""
-    weixin = get_weixin()
-    weixin.set_room_announcement(args.nickname, args.content)
-    print(f"已设置群聊 {args.nickname} 的群公告")
-
-
-def cmd_add_room_members(args):
-    """添加群成员"""
-    weixin = get_weixin()
-    weixin.add_room_members(args.nickname, args.members)
-    print(f"已向群聊 {args.nickname} 添加成员: {', '.join(args.members)}")
-
-
-def cmd_remove_room_members(args):
-    """移除群成员"""
-    weixin = get_weixin()
-    weixin.remove_room_members(args.nickname, args.members)
-    print(f"已从群聊 {args.nickname} 移除成员: {', '.join(args.members)}")
-
-
-def cmd_exit_room(args):
-    """退出群聊"""
-    weixin = get_weixin()
-    weixin.exit_room(args.nickname)
-    print(f"已退出群聊: {args.nickname}")
-
-
-def cmd_pin_chat(args):
-    """置顶会话"""
-    weixin = get_weixin()
-    weixin.pin_chat(args.nickname)
-    print(f"已置顶会话: {args.nickname}")
-
-
-def cmd_unpin_chat(args):
-    """取消置顶"""
-    weixin = get_weixin()
-    weixin.unpin_chat(args.nickname)
-    print(f"已取消置顶: {args.nickname}")
-
-
-def cmd_mute_chat(args):
-    """消息免打扰"""
-    weixin = get_weixin()
-    weixin.mute_chat(args.nickname)
-    print(f"已开启 {args.nickname} 的消息免打扰")
-
-
-def cmd_unmute_chat(args):
-    """取消免打扰"""
-    weixin = get_weixin()
-    weixin.unmute_chat(args.nickname)
-    print(f"已关闭 {args.nickname} 的消息免打扰")
-
-
-# ============================================================
 # 朋友圈命令
 # ============================================================
 
@@ -332,30 +155,12 @@ def cmd_publish_moment(args):
 
 
 # ============================================================
-# 其他命令
-# ============================================================
-
-def cmd_create_note(args):
-    """创建笔记"""
-    weixin = get_weixin()
-    weixin.create_note(args.content)
-    print("笔记创建成功")
-
-
-def cmd_get_self_profile(args):
-    """获取当前登录账号资料"""
-    weixin = get_weixin()
-    profile = weixin.get_self_profile()
-    print(json.dumps(profile, ensure_ascii=False, indent=2))
-
-
-# ============================================================
 # 参数解析
 # ============================================================
 
 def build_parser():
     parser = argparse.ArgumentParser(
-        description="微信自动化命令行工具",
+        description="微信自动化命令行工具（消息发送 & 朋友圈）",
         formatter_class=argparse.RawDescriptionHelpFormatter,
     )
     subparsers = parser.add_subparsers(dest="command", help="可用命令")
@@ -419,135 +224,6 @@ def build_parser():
     p.add_argument("--share", required=True, help="要分享名片的联系人昵称")
     p.set_defaults(func=cmd_send_card)
 
-    # ---- 联系人操作 ----
-
-    # get-contact-profile
-    p = subparsers.add_parser("get-contact-profile", help="获取联系人资料")
-    p.add_argument("--nickname", required=True, help="联系人昵称")
-    p.set_defaults(func=cmd_get_contact_profile)
-
-    # set-contact-remark
-    p = subparsers.add_parser("set-contact-remark", help="设置联系人备注")
-    p.add_argument("--nickname", required=True, help="联系人昵称")
-    p.add_argument("--remark", required=True, help="新备注名")
-    p.set_defaults(func=cmd_set_contact_remark)
-
-    # add-contact-label
-    p = subparsers.add_parser("add-contact-label", help="添加联系人标签")
-    p.add_argument("--nickname", required=True, help="联系人昵称")
-    p.add_argument("--labels", required=True, nargs="+", help="标签名称，空格分隔如 \"朋友\" \"同事\"")
-    p.set_defaults(func=cmd_add_contact_label)
-
-    # remove-contact-label
-    p = subparsers.add_parser("remove-contact-label", help="移除联系人标签")
-    p.add_argument("--nickname", required=True, help="联系人昵称")
-    p.add_argument("--labels", required=True, nargs="+", help="标签名称，空格分隔如 \"朋友\" \"同事\"")
-    p.set_defaults(func=cmd_remove_contact_label)
-
-    # set-contact-star
-    p = subparsers.add_parser("set-contact-star", help="设为星标朋友")
-    p.add_argument("--nickname", required=True, help="联系人昵称")
-    p.set_defaults(func=cmd_set_contact_star)
-
-    # cancel-contact-star
-    p = subparsers.add_parser("cancel-contact-star", help="取消星标朋友")
-    p.add_argument("--nickname", required=True, help="联系人昵称")
-    p.set_defaults(func=cmd_cancel_contact_star)
-
-    # black-contact
-    p = subparsers.add_parser("black-contact", help="加入黑名单")
-    p.add_argument("--nickname", required=True, help="联系人昵称")
-    p.set_defaults(func=cmd_black_contact)
-
-    # unblack-contact
-    p = subparsers.add_parser("unblack-contact", help="移出黑名单")
-    p.add_argument("--nickname", required=True, help="联系人昵称")
-    p.set_defaults(func=cmd_unblack_contact)
-
-    # delete-contact
-    p = subparsers.add_parser("delete-contact", help="删除联系人")
-    p.add_argument("--nickname", required=True, help="联系人昵称")
-    p.set_defaults(func=cmd_delete_contact)
-
-    # add-friend
-    p = subparsers.add_parser("add-friend", help="添加朋友")
-    p.add_argument("--keyword", required=True, help="微信号或手机号")
-    p.add_argument("--message", default=None, help="申请消息")
-    p.add_argument("--remark", default=None, help="备注名")
-    p.add_argument("--permission", default=None, choices=["chatonly"], help="朋友权限: chatonly=仅聊天")
-    p.add_argument("--hide-my-posts", action="store_true", help="不让对方看我的朋友圈")
-    p.add_argument("--hide-their-posts", action="store_true", help="不看对方的朋友圈")
-    p.set_defaults(func=cmd_add_friend)
-
-    # get-friend-permission
-    p = subparsers.add_parser("get-friend-permission", help="获取联系人朋友权限设置")
-    p.add_argument("--nickname", required=True, help="联系人昵称")
-    p.set_defaults(func=cmd_get_friend_permission)
-
-    # set-friend-permission
-    p = subparsers.add_parser("set-friend-permission", help="设置联系人朋友权限")
-    p.add_argument("--nickname", required=True, help="联系人昵称")
-    p.add_argument("--permission", default="all", choices=["all", "chatonly"], help="权限: all=全部, chatonly=仅聊天")
-    p.add_argument("--hide-my-posts", action="store_true", help="不让对方看我的朋友圈")
-    p.add_argument("--hide-their-posts", action="store_true", help="不看对方的朋友圈")
-    p.set_defaults(func=cmd_set_friend_permission)
-
-    # ---- 群聊操作 ----
-
-    # create-room
-    p = subparsers.add_parser("create-room", help="发起群聊")
-    p.add_argument("--members", required=True, nargs="+", help="好友昵称列表，至少两个，空格分隔如 \"张三\" \"李四\" \"王五\"")
-    p.set_defaults(func=cmd_create_room)
-
-    # set-room-name
-    p = subparsers.add_parser("set-room-name", help="设置群聊名称")
-    p.add_argument("--nickname", required=True, help="群聊当前名称")
-    p.add_argument("--name", required=True, help="新群聊名称")
-    p.set_defaults(func=cmd_set_room_name)
-
-    # set-room-announcement
-    p = subparsers.add_parser("set-room-announcement", help="设置群公告")
-    p.add_argument("--nickname", required=True, help="群聊名称")
-    p.add_argument("--content", required=True, help="群公告内容")
-    p.set_defaults(func=cmd_set_room_announcement)
-
-    # add-room-members
-    p = subparsers.add_parser("add-room-members", help="添加群成员")
-    p.add_argument("--nickname", required=True, help="群聊名称")
-    p.add_argument("--members", required=True, nargs="+", help="要添加的成员昵称，空格分隔如 \"张三\" \"李四\"")
-    p.set_defaults(func=cmd_add_room_members)
-
-    # remove-room-members
-    p = subparsers.add_parser("remove-room-members", help="移除群成员")
-    p.add_argument("--nickname", required=True, help="群聊名称")
-    p.add_argument("--members", required=True, nargs="+", help="要移除的成员昵称，空格分隔如 \"张三\" \"李四\"")
-    p.set_defaults(func=cmd_remove_room_members)
-
-    # exit-room
-    p = subparsers.add_parser("exit-room", help="退出群聊")
-    p.add_argument("--nickname", required=True, help="群聊名称")
-    p.set_defaults(func=cmd_exit_room)
-
-    # pin-chat
-    p = subparsers.add_parser("pin-chat", help="置顶会话")
-    p.add_argument("--nickname", required=True, help="联系人或群聊名称")
-    p.set_defaults(func=cmd_pin_chat)
-
-    # unpin-chat
-    p = subparsers.add_parser("unpin-chat", help="取消置顶")
-    p.add_argument("--nickname", required=True, help="联系人或群聊名称")
-    p.set_defaults(func=cmd_unpin_chat)
-
-    # mute-chat
-    p = subparsers.add_parser("mute-chat", help="消息免打扰")
-    p.add_argument("--nickname", required=True, help="联系人或群聊名称")
-    p.set_defaults(func=cmd_mute_chat)
-
-    # unmute-chat
-    p = subparsers.add_parser("unmute-chat", help="取消免打扰")
-    p.add_argument("--nickname", required=True, help="联系人或群聊名称")
-    p.set_defaults(func=cmd_unmute_chat)
-
     # ---- 朋友圈 ----
 
     # get-moments
@@ -566,17 +242,6 @@ def build_parser():
     p.add_argument("--permission-contacts", nargs="+", default=None, help="隐私联系人列表")
     p.add_argument("--permission-labels", nargs="+", default=None, help="隐私标签列表")
     p.set_defaults(func=cmd_publish_moment)
-
-    # ---- 其他 ----
-
-    # create-note
-    p = subparsers.add_parser("create-note", help="创建笔记")
-    p.add_argument("--content", required=True, help="笔记内容")
-    p.set_defaults(func=cmd_create_note)
-
-    # get-self-profile
-    p = subparsers.add_parser("get-self-profile", help="获取当前登录账号资料")
-    p.set_defaults(func=cmd_get_self_profile)
 
     return parser
 
