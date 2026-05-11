@@ -8,6 +8,8 @@ inclusion: manual
 
 通过 `wx-cli.py` 命令行工具操作微信 4.x 客户端（Windows），实现消息发送、联系人管理、群聊操作、朋友圈功能。
 
+底层使用 `Weixin` 类直接连接微信客户端（自动查找第一个运行中的微信进程），无需手动指定 PID。
+
 ## 前置条件
 
 - Windows 系统
@@ -455,4 +457,5 @@ python wx-cli.py get-self-profile
 3. 文件路径建议使用绝对路径
 4. 发送文件/图片/视频时，文件必须存在且可读
 5. 命令执行期间不要手动操作微信窗口
-6. 工作目录必须是 `wx-skill/`，因为 `wx.cp38-win_amd64.pyd` 在该目录下
+6. 工作目录必须是 `wx-skill/`，因为 `wx.cpXX-win_amd64.pyd` 在该目录下
+7. CLI 使用 `Weixin` 直接连接微信，无需手动指定 PID

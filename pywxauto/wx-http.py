@@ -1,7 +1,7 @@
 """
 pywxauto HTTP 服务。
 
-基于 FastAPI 将 Weixin 类的接口封装为 HTTP API，支持设置消息回调地址。
+基于 FastAPI 将 WeixinManager 类的接口封装为 HTTP API，支持设置消息回调地址。
 
 用法:
     # 从项目根目录运行
@@ -29,7 +29,7 @@ from wx import (
     Message,
     MessageStatus,
     Weixin,
-    WeixinClient,
+    WeixinManager,
     WxAutoError,
 )
 
@@ -39,7 +39,7 @@ logger = logging.getLogger(__name__)
 
 
 # ---- 全局状态 ----
-wx: Optional[Weixin] = None
+wx: Optional[WeixinManager] = None
 _callback_url: Optional[str] = None
 _listen_thread: Optional[threading.Thread] = None
 _http_client: Optional[httpx.AsyncClient] = None
@@ -209,7 +209,7 @@ async def _dispatch_callback(message_data: dict):
         logger.warning(f"回调推送异常: {e}")
 
 
-def _on_message(client: WeixinClient, chat, message: Message):
+def _on_message(client: Weixin, chat, message: Message):
     """统一消息处理器，将消息推送到回调地址"""
     if not _callback_url:
         return
@@ -233,7 +233,7 @@ def _on_message(client: WeixinClient, chat, message: Message):
 async def lifespan(app: FastAPI):
     global wx, _http_client
     _http_client = httpx.AsyncClient()
-    wx = Weixin(resize=False)
+    wx = WeixinManager(resize=False)
     logger.info(f"微信管理器已初始化: {wx}")
 
     # 注册全局消息处理器

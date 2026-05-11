@@ -264,7 +264,7 @@ LANGUAGE = {
     "笔记": {"cn": "笔记", "cn_t": "", "en": "Note"},
 
     # ============================================================
-    # 设置/个人资料 (WeixinClient)
+    # 设置/个人资料 (Weixin)
     # ============================================================
     "设置": {"cn": "设置", "cn_t": "", "en": "Settings"},
     "账号与存储": {"cn": "账号与存储", "cn_t": "", "en": "My Account"},
@@ -362,7 +362,7 @@ LANGUAGE = {
     "打开(&O)": {"cn": "打开(&O)", "cn_t": "", "en": "Open(&O)"},
 }
 
-# 当前语言，由 WeixinClient.__init__ 根据实际检测设置
+# 当前语言，由 Weixin.__init__ 根据实际检测设置
 _current_lang: str = "cn"
 
 
@@ -4191,7 +4191,7 @@ class WeixinUpdate(WeixinWindow):
     WINDOW_CLASS = "mmui::UpdateWindow"
     WINDOW_ID = "UpdateWindow"
 
-    def __init__(self, wx: "WeixinClient"):
+    def __init__(self, wx: "Weixin"):
         """
         初始化更新窗口操作实例。
 
@@ -4435,12 +4435,12 @@ class NoteEditor(WeixinWindow):
     EDITOR_INPUT_ID = "xeditorInputId"
     MAIN_CONTAINER_ID = "mainContainer"
 
-    def __init__(self, wx: "WeixinClient"):
+    def __init__(self, wx: "Weixin"):
         """
         初始化笔记编辑窗口。
 
         Args:
-            wx: WeixinClient 实例，通过其 PID 精确查找并绑定笔记窗口。
+            wx: Weixin 实例，通过其 PID 精确查找并绑定笔记窗口。
 
         Raises:
             RuntimeError: 窗口未找到时抛出。
@@ -4799,7 +4799,7 @@ class Navigator:
             i_("更多"): i_("更多"),
         }
 
-    def __init__(self, wx: "WeixinClient"):
+    def __init__(self, wx: "Weixin"):
         """
         初始化导航栏。
 
@@ -4838,7 +4838,7 @@ class Session:
               AutomationId="session_item_{name}"
     """
 
-    def __init__(self, wx: "WeixinClient"):
+    def __init__(self, wx: "Weixin"):
         """
         初始化会话列表面板。
 
@@ -5934,7 +5934,7 @@ class FriendCircle(WeixinWindow):
     PRIVACY_BTN_CLASS = "mmui::PublishPrivacyView"
     PRIVACY_SELECTION_CLASS = "mmui::PublishPrivacySelection"
 
-    def __init__(self, wx: "WeixinClient"):
+    def __init__(self, wx: "Weixin"):
         """
         初始化朋友圈操作实例。
 
@@ -7106,7 +7106,7 @@ class FileManager(WeixinWindow):
     # 确认对话框的类名（微信 v4 使用 mmui::XDialog，浮动于桌面层级）
     CONFIRM_DIALOG_WIN_CLASS = "mmui::XDialog"
 
-    def __init__(self, wx: "WeixinClient"):
+    def __init__(self, wx: "Weixin"):
         """
         初始化聊天文件管理器。
 
@@ -7528,7 +7528,7 @@ class Chat:
     EMOJI_CUSTOM_GRID_CLASS = "mmui::EmoticonGridView"
     EMOJI_CUSTOM_ITEM_CLASS = "mmui::FavEmoticonItemView"
 
-    def __init__(self, wx: "WeixinClient"):
+    def __init__(self, wx: "Weixin"):
         """
         初始化聊天区域。
 
@@ -13294,12 +13294,12 @@ class SeparateChat(Chat, WeixinWindow):
 
     WINDOW_CLASS = "mmui::ChatSingleWindow"
 
-    def __init__(self, wx: "WeixinClient | None", contact_name: str):
+    def __init__(self, wx: "Weixin | None", contact_name: str):
         """
         初始化独立聊天窗口。
 
         Args:
-            wx: WeixinClient 实例，可为 None（仅用于独立操作时）。
+            wx: Weixin 实例，可为 None（仅用于独立操作时）。
             contact_name: 联系人或群聊名称（即窗口标题）。
 
         Raises:
@@ -13326,7 +13326,7 @@ class SeparateChat(Chat, WeixinWindow):
             else:
                 raise WxWindowNotFoundError(f"独立聊天窗口未找到: {contact_name}")
 
-        # 如果关联的 WeixinClient 启用了 resize，调整聊天窗口大小
+        # 如果关联的 Weixin 启用了 resize，调整聊天窗口大小
         if wx and wx.resize:
             hwnd = self._win.NativeWindowHandle
             if hwnd:
@@ -13428,7 +13428,7 @@ class SeparateChat(Chat, WeixinWindow):
 └──────────────────────────┘  └──────────────────────────────┘
 """
 
-class WeixinClient(WeixinWindow):
+class Weixin(WeixinWindow):
 
     WINDOW_CLASS = "mmui::MainWindow"
     WINDOW_REGEX = "微信|Weixin"
@@ -13633,7 +13633,7 @@ class WeixinClient(WeixinWindow):
         Args:
             install_path: 微信安装路径，None 时自动从注册表检测
             timeout:      等待微信进程启动的超时时间（秒），默认 30 秒
-            **kwargs:     覆盖默认的 WeixinClient 参数
+            **kwargs:     覆盖默认的 Weixin 参数
 
         Returns:
             新启动的微信进程 PID
@@ -14631,7 +14631,7 @@ class WeixinClient(WeixinWindow):
         """
         通过快捷键名称执行对应的键盘快捷键。
 
-        支持的快捷键名称（见 WeixinClient.SHORTCUTS）：
+        支持的快捷键名称（见 Weixin.SHORTCUTS）：
         - "发送消息":     Enter
         - "语音输入文字": Ctrl+Win
         - "截图":         Alt+A
@@ -14646,7 +14646,7 @@ class WeixinClient(WeixinWindow):
         Raises:
             ValueError: 名称未注册且无法解析为按键组合时抛出
         """
-        combo = WeixinClient.SHORTCUTS.get(name, name)
+        combo = Weixin.SHORTCUTS.get(name, name)
         # 将 "Ctrl+Alt+W" 格式转为 SendKeys 格式 "{Ctrl}{Alt}w"
         _MOD_KEYS = {"ctrl", "alt", "shift", "win"}
         _SPECIAL_KEYS = {
@@ -15214,18 +15214,18 @@ class WeixinClient(WeixinWindow):
             logger.info("监听已停止")
 
 
-class Weixin:
+class WeixinManager:
     """
     微信多客户端管理器。
 
-    管理多个 WeixinClient 实例，所有 API 第一个参数为 pid，
-    内部路由到对应的 WeixinClient 执行操作。
+    管理多个 Weixin 实例，所有 API 第一个参数为 pid，
+    内部路由到对应的 Weixin 执行操作。
 
     支持统一消息监听，回调中通过 pid 区分消息来源。
 
     用法::
 
-        wx = Weixin()
+        wx = WeixinManager()
 
         # 启动并连接微信
         pid1 = wx.open()
@@ -15258,7 +15258,7 @@ class Weixin:
         """
         初始化微信管理器。
 
-        这些参数作为默认值，在 open/connect 创建 WeixinClient 时使用。
+        这些参数作为默认值，在 open/connect 创建 Weixin 时使用。
 
         Args:
             background:  后台模式，通过 SendMessage 发送虚拟消息，不需要窗口在前台
@@ -15272,7 +15272,7 @@ class Weixin:
             wxocr_weixin_install_path: 微信 OCR 安装路径，None 时自动检测
             wxocr_plugin_path:         微信 OCR 插件路径，None 时自动检测
         """
-        self._clients: dict[int, WeixinClient] = {}
+        self._clients: dict[int, Weixin] = {}
         self._default_kwargs = {
             "background": background,
             "idle_wait": idle_wait,
@@ -15300,7 +15300,7 @@ class Weixin:
             on_login:     登录回调
             install_path: 微信安装路径，None 时自动从注册表检测
             timeout:      等待微信进程启动的超时时间（秒），默认 30 秒
-            **kwargs:     覆盖默认的 WeixinClient 参数
+            **kwargs:     覆盖默认的 Weixin 参数
 
         Returns:
             新启动的微信进程 PID
@@ -15352,7 +15352,7 @@ class Weixin:
         Args:
             pid:      微信进程 PID
             on_login: 登录回调
-            **kwargs: 覆盖默认的 WeixinClient 参数
+            **kwargs: 覆盖默认的 Weixin 参数
 
         Returns:
             连接成功的 PID
@@ -15367,7 +15367,7 @@ class Weixin:
 
         # 合并参数
         params = {**self._default_kwargs, **kwargs}
-        client = WeixinClient(pid=pid, on_login=on_login, **params)
+        client = Weixin(pid=pid, on_login=on_login, **params)
         self._clients[pid] = client
         return pid
 
@@ -15429,15 +15429,15 @@ class Weixin:
             except Exception:
                 pass
 
-    def get_client(self, pid: int) -> WeixinClient:
+    def get_client(self, pid: int) -> Weixin:
         """
-        获取指定 PID 的 WeixinClient 实例。
+        获取指定 PID 的 Weixin 实例。
 
         Args:
             pid: 微信进程 PID
 
         Returns:
-            WeixinClient 实例
+            Weixin 实例
 
         Raises:
             KeyError: PID 未连接
@@ -15452,8 +15452,8 @@ class Weixin:
         return list(self._clients.keys())
 
     @property
-    def clients(self) -> dict[int, WeixinClient]:
-        """所有已连接的 {pid: WeixinClient} 字典"""
+    def clients(self) -> dict[int, Weixin]:
+        """所有已连接的 {pid: Weixin} 字典"""
         return dict(self._clients)
 
     def __len__(self) -> int:
@@ -15462,7 +15462,7 @@ class Weixin:
     def __contains__(self, pid: int) -> bool:
         return pid in self._clients
 
-    def __getitem__(self, pid: int) -> WeixinClient:
+    def __getitem__(self, pid: int) -> Weixin:
         return self.get_client(pid)
 
     # ---- 消息发送 ----
@@ -15638,7 +15638,7 @@ class Weixin:
         """
         注册消息事件处理器（装饰器）。
 
-        回调签名: callback(client: WeixinClient, chat: SeparateChat, message: Message)
+        回调签名: callback(client: Weixin, chat: SeparateChat, message: Message)
         message.pid 可获取来源微信进程 PID。
 
         用法::
@@ -15667,7 +15667,7 @@ class Weixin:
         """
         注册一次性消息事件处理器（装饰器）。
 
-        回调签名: callback(client: WeixinClient, chat: SeparateChat, message: Message)
+        回调签名: callback(client: Weixin, chat: SeparateChat, message: Message)
         """
         def decorator(func):
             if not events:
@@ -15697,7 +15697,7 @@ class Weixin:
             else:
                 self._ee.remove_listener(event, func)
 
-    def _emit(self, pid: int, client: WeixinClient, chat: "SeparateChat", message: "Message") -> None:
+    def _emit(self, pid: int, client: Weixin, chat: "SeparateChat", message: "Message") -> None:
         """触发消息事件，回调签名: callback(client, chat, message)"""
         event_type = _MSG_CLASS_TO_EVENT.get(type(message), Event.OTHER)
         self._ee.emit(event_type, client, chat, message)
@@ -15769,7 +15769,7 @@ class Weixin:
             )
 
         # 收集所有有监听的客户端
-        listen_clients: dict[int, WeixinClient] = {}
+        listen_clients: dict[int, Weixin] = {}
         for pid, client in self._clients.items():
             if hasattr(client, '_chat_listeners') and client._chat_listeners:
                 listen_clients[pid] = client
@@ -15779,10 +15779,10 @@ class Weixin:
 
         self._stop_event = threading.Event()
         stop_event = self._stop_event
-        msg_queue: Queue[tuple[int, WeixinClient, SeparateChat, Message]] = Queue()
+        msg_queue: Queue[tuple[int, Weixin, SeparateChat, Message]] = Queue()
         threads: dict[str, threading.Thread] = {}
 
-        def _watch_chat(pid: int, client: WeixinClient, chat: "SeparateChat", name: str) -> None:
+        def _watch_chat(pid: int, client: Weixin, chat: "SeparateChat", name: str) -> None:
             known_rids: set[tuple] = set()
             sender_cache: dict[tuple, tuple] = {}
             first_scan = True
@@ -15921,7 +15921,7 @@ class Weixin:
 
     def __str__(self) -> str:
         pids = self.pids
-        return f"Weixin(clients={len(pids)}, pids={pids})"
+        return f"WeixinManager(clients={len(pids)}, pids={pids})"
 
     def __repr__(self) -> str:
         return self.__str__()

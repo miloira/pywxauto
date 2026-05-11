@@ -30,13 +30,13 @@ from wx import Weixin, WxAutoError, MessageStatus
 
 
 def get_client():
-    """获取第一个已连接的 WeixinClient 实例"""
-    wx = Weixin()
-    if not wx.pids:
-        print("错误: 未检测到运行中的微信客户端，请先登录微信", file=sys.stderr)
+    """获取 Weixin 实例（自动连接第一个微信客户端）"""
+    try:
+        client = Weixin()
+    except Exception as e:
+        print(f"错误: 未检测到运行中的微信客户端，请先登录微信 ({e})", file=sys.stderr)
         sys.exit(1)
-    pid = wx.pids[0]
-    return wx, pid
+    return client
 
 
 # ============================================================
@@ -45,8 +45,8 @@ def get_client():
 
 def cmd_send_text(args):
     """发送文本消息"""
-    wx, pid = get_client()
-    status = wx.send_text(pid, args.to, args.content, timeout=args.timeout)
+    client = get_client()
+    status = client.send_text(args.to, args.content, timeout=args.timeout)
     print(f"发送状态: {status}")
 
 
@@ -55,8 +55,8 @@ def cmd_send_file(args):
     if not os.path.exists(args.file):
         print(f"错误: 文件不存在: {args.file}", file=sys.stderr)
         sys.exit(1)
-    wx, pid = get_client()
-    status = wx.send_file(pid, args.to, args.file, timeout=args.timeout)
+    client = get_client()
+    status = client.send_file(args.to, args.file, timeout=args.timeout)
     print(f"发送状态: {status}")
 
 
@@ -65,8 +65,8 @@ def cmd_send_image(args):
     if not os.path.exists(args.file):
         print(f"错误: 文件不存在: {args.file}", file=sys.stderr)
         sys.exit(1)
-    wx, pid = get_client()
-    status = wx.send_image(pid, args.to, args.file, timeout=args.timeout)
+    client = get_client()
+    status = client.send_image(args.to, args.file, timeout=args.timeout)
     print(f"发送状态: {status}")
 
 
@@ -75,36 +75,36 @@ def cmd_send_video(args):
     if not os.path.exists(args.file):
         print(f"错误: 文件不存在: {args.file}", file=sys.stderr)
         sys.exit(1)
-    wx, pid = get_client()
-    status = wx.send_video(pid, args.to, args.file, timeout=args.timeout)
+    client = get_client()
+    status = client.send_video(args.to, args.file, timeout=args.timeout)
     print(f"发送状态: {status}")
 
 
 def cmd_send_at(args):
     """在群聊中 @成员发送消息"""
-    wx, pid = get_client()
-    status = wx.send_at(pid, args.to, args.content, args.members, timeout=args.timeout)
+    client = get_client()
+    status = client.send_at(args.to, args.content, args.members, timeout=args.timeout)
     print(f"发送状态: {status}")
 
 
 def cmd_send_emotion(args):
     """发送表情"""
-    wx, pid = get_client()
-    status = wx.send_emotion(pid, args.to, keyword=args.keyword, index=args.index, timeout=args.timeout)
+    client = get_client()
+    status = client.send_emotion(args.to, keyword=args.keyword, index=args.index, timeout=args.timeout)
     print(f"发送状态: {status}")
 
 
 def cmd_send_collection(args):
     """发送收藏内容"""
-    wx, pid = get_client()
-    status = wx.send_collection(pid, args.to, args.keyword, timeout=args.timeout)
+    client = get_client()
+    status = client.send_collection(args.to, args.keyword, timeout=args.timeout)
     print(f"发送状态: {status}")
 
 
 def cmd_send_card(args):
     """发送名片"""
-    wx, pid = get_client()
-    result = wx.send_card(pid, args.to, args.share)
+    client = get_client()
+    result = client.send_card(args.to, args.share)
     print(f"发送结果: {'成功' if result else '失败'}")
 
 
@@ -114,71 +114,70 @@ def cmd_send_card(args):
 
 def cmd_get_contact_profile(args):
     """获取联系人资料"""
-    wx, pid = get_client()
-    profile = wx.get_contact_profile(pid, args.nickname)
+    client = get_client()
+    profile = client.get_contact_profile(args.nickname)
     print(json.dumps(profile, ensure_ascii=False, indent=2))
 
 
 def cmd_set_contact_remark(args):
     """设置联系人备注"""
-    wx, pid = get_client()
-    wx.set_contact_remark(pid, args.nickname, args.remark)
+    client = get_client()
+    client.set_contact_remark(args.nickname, args.remark)
     print(f"已设置 {args.nickname} 的备注为: {args.remark}")
 
 
 def cmd_add_contact_label(args):
     """添加联系人标签"""
-    wx, pid = get_client()
-    wx.add_contact_label(pid, args.nickname, args.labels)
+    client = get_client()
+    client.add_contact_label(args.nickname, args.labels)
     print(f"已为 {args.nickname} 添加标签: {', '.join(args.labels)}")
 
 
 def cmd_remove_contact_label(args):
     """移除联系人标签"""
-    wx, pid = get_client()
-    wx.remove_contact_label(pid, args.nickname, args.labels)
+    client = get_client()
+    client.remove_contact_label(args.nickname, args.labels)
     print(f"已移除 {args.nickname} 的标签: {', '.join(args.labels)}")
 
 
 def cmd_set_contact_star(args):
     """设为星标朋友"""
-    wx, pid = get_client()
-    wx.set_contact_star(pid, args.nickname)
+    client = get_client()
+    client.set_contact_star(args.nickname)
     print(f"已将 {args.nickname} 设为星标朋友")
 
 
 def cmd_cancel_contact_star(args):
     """取消星标朋友"""
-    wx, pid = get_client()
-    wx.cancel_contact_star(pid, args.nickname)
+    client = get_client()
+    client.cancel_contact_star(args.nickname)
     print(f"已取消 {args.nickname} 的星标")
 
 
 def cmd_black_contact(args):
     """加入黑名单"""
-    wx, pid = get_client()
-    wx.black_contact(pid, args.nickname)
+    client = get_client()
+    client.black_contact(args.nickname)
     print(f"已将 {args.nickname} 加入黑名单")
 
 
 def cmd_unblack_contact(args):
     """移出黑名单"""
-    wx, pid = get_client()
-    wx.unblack_contact(pid, args.nickname)
+    client = get_client()
+    client.unblack_contact(args.nickname)
     print(f"已将 {args.nickname} 移出黑名单")
 
 
 def cmd_delete_contact(args):
     """删除联系人"""
-    wx, pid = get_client()
-    wx.delete_contact(pid, args.nickname)
+    client = get_client()
+    client.delete_contact(args.nickname)
     print(f"已删除联系人: {args.nickname}")
 
 
 def cmd_add_friend(args):
     """添加朋友"""
-    wx, pid = get_client()
-    client = wx.get_client(pid)
+    client = get_client()
     client.add_friend(
         keyword=args.keyword,
         message=args.message,
@@ -192,16 +191,14 @@ def cmd_add_friend(args):
 
 def cmd_get_friend_permission(args):
     """获取联系人朋友权限"""
-    wx, pid = get_client()
-    client = wx.get_client(pid)
+    client = get_client()
     perm = client.get_friend_permission(args.nickname)
     print(json.dumps(perm, ensure_ascii=False, indent=2))
 
 
 def cmd_set_friend_permission(args):
     """设置联系人朋友权限"""
-    wx, pid = get_client()
-    client = wx.get_client(pid)
+    client = get_client()
     client.set_friend_permission(
         args.nickname,
         permission=args.permission,
@@ -220,71 +217,71 @@ def cmd_create_room(args):
     if len(args.members) < 2:
         print("错误: 发起群聊至少需要两个好友", file=sys.stderr)
         sys.exit(1)
-    wx, pid = get_client()
-    wx.create_room(pid, args.members)
+    client = get_client()
+    client.create_room(args.members)
     print(f"已发起群聊，成员: {', '.join(args.members)}")
 
 
 def cmd_set_room_name(args):
     """设置群聊名称"""
-    wx, pid = get_client()
-    wx.set_room_name(pid, args.nickname, args.name)
+    client = get_client()
+    client.set_room_name(args.nickname, args.name)
     print(f"已设置群聊 {args.nickname} 的名称为: {args.name}")
 
 
 def cmd_set_room_announcement(args):
     """设置群公告"""
-    wx, pid = get_client()
-    wx.set_room_announcement(pid, args.nickname, args.content)
+    client = get_client()
+    client.set_room_announcement(args.nickname, args.content)
     print(f"已设置群聊 {args.nickname} 的群公告")
 
 
 def cmd_add_room_members(args):
     """添加群成员"""
-    wx, pid = get_client()
-    wx.add_room_members(pid, args.nickname, args.members)
+    client = get_client()
+    client.add_room_members(args.nickname, args.members)
     print(f"已向群聊 {args.nickname} 添加成员: {', '.join(args.members)}")
 
 
 def cmd_remove_room_members(args):
     """移除群成员"""
-    wx, pid = get_client()
-    wx.remove_room_members(pid, args.nickname, args.members)
+    client = get_client()
+    client.remove_room_members(args.nickname, args.members)
     print(f"已从群聊 {args.nickname} 移除成员: {', '.join(args.members)}")
 
 
 def cmd_exit_room(args):
     """退出群聊"""
-    wx, pid = get_client()
-    wx.exit_room(pid, args.nickname)
+    client = get_client()
+    client.exit_room(args.nickname)
     print(f"已退出群聊: {args.nickname}")
 
 
 def cmd_pin_chat(args):
     """置顶会话"""
-    wx, pid = get_client()
-    wx.pin_chat(pid, args.nickname)
+    client = get_client()
+    client.pin_chat(args.nickname)
     print(f"已置顶会话: {args.nickname}")
 
 
 def cmd_unpin_chat(args):
     """取消置顶"""
-    wx, pid = get_client()
-    wx.unpin_chat(pid, args.nickname)
+    client = get_client()
+    client.unpin_chat(args.nickname)
     print(f"已取消置顶: {args.nickname}")
 
 
 def cmd_mute_chat(args):
     """消息免打扰"""
-    wx, pid = get_client()
-    wx.mute_chat(pid, args.nickname)
+    client = get_client()
+    client.mute_chat(args.nickname)
     print(f"已开启 {args.nickname} 的消息免打扰")
 
 
 def cmd_unmute_chat(args):
     """取消免打扰"""
-    wx, pid = get_client()
-    wx.unmute_chat(pid, args.nickname)
+    client = get_client()
+    client.unmute_chat(args.nickname)
     print(f"已关闭 {args.nickname} 的消息免打扰")
 
 
@@ -294,8 +291,8 @@ def cmd_unmute_chat(args):
 
 def cmd_get_moments(args):
     """获取朋友圈动态"""
-    wx, pid = get_client()
-    moments = wx.get_moments(pid, count=args.count, position=args.position)
+    client = get_client()
+    moments = client.get_moments(count=args.count, position=args.position)
     results = []
     for m in moments:
         item = {}
@@ -315,15 +312,14 @@ def cmd_get_moments(args):
 
 def cmd_publish_moment(args):
     """发布朋友圈"""
-    wx, pid = get_client()
+    client = get_client()
     images = args.images if args.images else None
     video = args.video if args.video else None
     remind = args.remind if args.remind else None
     permission_contacts = args.permission_contacts if args.permission_contacts else None
     permission_labels = args.permission_labels if args.permission_labels else None
 
-    result = wx.publish(
-        pid,
+    result = client.friend_circle.publish(
         text=args.text,
         images=images,
         video=video,
@@ -341,15 +337,15 @@ def cmd_publish_moment(args):
 
 def cmd_create_note(args):
     """创建笔记"""
-    wx, pid = get_client()
-    wx.create_note(pid, args.content)
+    client = get_client()
+    client.create_note(args.content)
     print("笔记创建成功")
 
 
 def cmd_get_self_profile(args):
     """获取当前登录账号资料"""
-    wx, pid = get_client()
-    profile = wx.get_self_profile(pid)
+    client = get_client()
+    profile = client.get_self_profile()
     print(json.dumps(profile, ensure_ascii=False, indent=2))
 
 
