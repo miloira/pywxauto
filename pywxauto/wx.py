@@ -111,7 +111,7 @@ LANGUAGE = {
     "微信": {"cn": "微信", "cn_t": "", "en": "Weixin"},
     "通讯录": {"cn": "通讯录", "cn_t": "", "en": "Contacts"},
     "收藏": {"cn": "收藏", "cn_t": "", "en": "Favorites"},
-    "朋友圈": {"cn": "朋友圈", "cn_t": "", "en": "MomentItems"},
+    "朋友圈": {"cn": "朋友圈", "cn_t": "", "en": "Moments"},
     "视频号": {"cn": "视频号", "cn_t": "", "en": "Channels"},
     "搜一搜": {"cn": "搜一搜", "cn_t": "", "en": "Search"},
     "手机": {"cn": "手机", "cn_t": "", "en": "Mobile"},
