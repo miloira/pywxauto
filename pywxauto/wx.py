@@ -6586,6 +6586,134 @@ class Moment(WeixinWindow):
         """将指定动态滚动到可见区域"""
         return moment_item.scroll_to_visible()
 
+    @PIM.guard
+    def like_when(self, func: "callable",
+                  position: str = "top") -> list[MomentItem]:
+        """
+        条件批量点赞：遍历朋友圈，回调返回 True 时点赞。
+
+        Args:
+            func:     回调函数，签名 func(liked_count: int, item: MomentItem) -> bool。
+                      liked_count 为当前已点赞数（从 0 开始），item 为当前动态。
+                      返回 True 点赞，返回 False 跳过。
+            position: 起始位置，"top" 从顶部开始，"current" 从当前位置。
+
+        Returns:
+            成功点赞的 MomentItem 列表
+
+        用法::
+
+            # 全部点赞
+            wx.moment.like_when(lambda c, item: True)
+
+            # 只点赞包含"旅行"的动态
+            wx.moment.like_when(lambda c, item: "旅行" in item.content)
+
+            # 只点赞"张三"发的
+            wx.moment.like_when(lambda c, item: "张三" in item.sender)
+
+            # 点赞前 5 条后停止（通过 liked_count 控制）
+            wx.moment.like_when(lambda c, item: c < 5)
+
+            # 复杂条件
+            wx.moment.like_when(
+                lambda c, item: item.image_count > 0 and "美食" in item.content,
+            )
+        """
+        liked: list[MomentItem] = []
+
+        for item in self.iter_moments(count=500, position=position):
+            try:
+                should = func(len(liked), item)
+            except Exception as e:
+                logger.warning(f"回调异常: {item.sender} - {e}")
+                continue
+
+            if not should:
+                continue
+
+            try:
+                if item.like():
+                    liked.append(item)
+                    logger.info(
+                        f"点赞 [{len(liked)}]: "
+                        f"{item.sender} - {item.content[:30] if item.content else '(无文字)'}"
+                    )
+            except Exception as e:
+                logger.warning(f"点赞失败: {item.sender} - {e}")
+                continue
+
+            time.sleep(0.5)
+
+        logger.info(f"批量点赞完成: 成功 {len(liked)} 条")
+        return liked
+
+    @PIM.guard
+    def comment_when(self, func: "callable",
+                     position: str = "top") -> list[MomentItem]:
+        """
+        条件批量评论：遍历朋友圈，回调返回评论内容时评论。
+
+        Args:
+            func:     回调函数，签名 func(commented_count: int, item: MomentItem) -> str | None。
+                      commented_count 为当前已评论数（从 0 开始），item 为当前动态。
+                      返回非空字符串时评论该动态，返回 None 或空字符串跳过。
+            position: 起始位置，"top" 从顶部开始，"current" 从当前位置。
+
+        Returns:
+            成功评论的 MomentItem 列表
+
+        用法::
+
+            # 对所有动态评论"好棒"
+            wx.moment.comment_when(lambda c, item: "好棒")
+
+            # 评论前 3 条后停止
+            wx.moment.comment_when(lambda c, item: "不错" if c < 3 else None)
+
+            # 只评论"张三"发的
+            wx.moment.comment_when(
+                lambda c, item: "赞一个" if "张三" in item.sender else None
+            )
+
+            # 根据内容生成不同评论
+            def gen_comment(count, item):
+                if "旅行" in item.content:
+                    return "风景真美！"
+                if "美食" in item.content:
+                    return "看起来好好吃"
+                return None  # 其他跳过
+
+            wx.moment.comment_when(gen_comment)
+        """
+        commented: list[MomentItem] = []
+
+        for item in self.iter_moments(count=500, position=position):
+            try:
+                content = func(len(commented), item)
+            except Exception as e:
+                logger.warning(f"回调异常: {item.sender} - {e}")
+                continue
+
+            if not content:
+                continue
+
+            try:
+                if item.comment(content):
+                    commented.append(item)
+                    logger.info(
+                        f"评论 [{len(commented)}]: "
+                        f"{item.sender} - {content[:30]!r}"
+                    )
+            except Exception as e:
+                logger.warning(f"评论失败: {item.sender} - {e}")
+                continue
+
+            time.sleep(0.5)
+
+        logger.info(f"批量评论完成: 成功 {len(commented)} 条")
+        return commented
+
     # ---- 发布相关控件信息 ----
     # 发布面板: GroupControl, ClassName="mmui::SnsPublishPanel",
     #           AutomationId="SnsPublishPanel"
