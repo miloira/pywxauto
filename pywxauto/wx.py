@@ -7440,69 +7440,6 @@ class Chat:
     _EMOTION_CLASS_NAMES = {"mmui::ChatEmojiItemView", "mmui::ChatBubbleReferItemView"}
     _FILE_BUBBLE_CLASS_NAMES = {"mmui::ChatFileItemView", "mmui::ChatBubbleItemView"}
 
-    # ---- 消息 Name 正则匹配（动态构建，支持多语言） ----
-
-    @staticmethod
-    def _FILE_SENDING_RE():
-        file_kw = i_("文件")
-        progress_kw = i_("进度")
-        interrupted_kw = i_("发送中断")
-        return re.compile(rf"^{re.escape(file_kw)}\n{re.escape(progress_kw)}[:：]\s*\d+%\n.+\n(?!.*{re.escape(interrupted_kw)})", re.DOTALL)
-
-    @staticmethod
-    def _FILE_FAILED_RE():
-        file_kw = i_("文件")
-        progress_kw = i_("进度")
-        interrupted_kw = i_("发送中断")
-        return re.compile(rf"^{re.escape(file_kw)}\n{re.escape(progress_kw)}[:：]\s*\d+%\n.+\n{re.escape(interrupted_kw)}\n", re.DOTALL)
-
-    @staticmethod
-    def _FILE_SENT_RE():
-        file_kw = i_("文件")
-        progress_kw = i_("进度")
-        return re.compile(rf"^{re.escape(file_kw)}\n(?!{re.escape(progress_kw)}[:：])")
-
-    @staticmethod
-    def _IMAGE_NAME_RE():
-        failed_kw = i_("发送失败")
-        sending_kw = i_("发送中")
-        image_kw = i_("图片")
-        return re.compile(rf"^(?:{re.escape(failed_kw)}\s+|{re.escape(sending_kw)}\s+)?{re.escape(image_kw)}$")
-
-    @staticmethod
-    def _EMOTION_NAME_RE():
-        failed_kw = i_("发送失败")
-        sending_kw = i_("发送中")
-        emoji_kw = i_("动画表情")
-        return re.compile(rf"^(?:{re.escape(failed_kw)}\s+|{re.escape(sending_kw)}\s+)?{re.escape(emoji_kw)}")
-
-    @staticmethod
-    def _ANIMATED_EMOJI_RE():
-        emoji_kw = i_("动画表情")
-        return re.compile(rf"^{re.escape(emoji_kw)}(\s+\[.+\])?$")
-
-    @staticmethod
-    def _VIDEO_NAME_RE():
-        video_kw = i_("视频")
-        return re.compile(rf"^{re.escape(video_kw)}(?:\s|$)")
-
-    @staticmethod
-    def _VIDEO_SENDING_RE():
-        video_kw = i_("视频")
-        progress_kw = i_("进度")
-        return re.compile(rf"^{re.escape(video_kw)}\s+{re.escape(progress_kw)}[:：]\s*\d+%")
-
-    @staticmethod
-    def _VIDEO_FAILED_RE():
-        video_kw = i_("视频")
-        upload_kw = i_("上传中")
-        return re.compile(rf"^{re.escape(video_kw)}\s+{re.escape(upload_kw[:2])}\s*暂停")
-
-    @staticmethod
-    def _VIDEO_SENT_RE():
-        video_kw = i_("视频")
-        return re.compile(rf"^{re.escape(video_kw)}(?:\s+\d+:\d+)?$")
-
     # ---- 消息状态前缀映射 ----
     # 注意：状态前缀通过 _check_status_by_prefix 动态匹配，不再使用静态字典
 
@@ -7811,11 +7748,16 @@ class Chat:
 
             # ChatBubbleReferItemView — 图片/视频/表情
             if cls == "mmui::ChatBubbleReferItemView":
-                if self._IMAGE_NAME_RE().match(name):
+                failed_kw = i_("发送失败")
+                sending_kw = i_("发送中")
+                image_kw = i_("图片")
+                video_kw = i_("视频")
+                emoji_kw = i_("动画表情")
+                if re.match(rf"^(?:{re.escape(failed_kw)}\s+|{re.escape(sending_kw)}\s+)?{re.escape(image_kw)}$", name):
                     return self.check_image_message_status(timeout=timeout)
-                if self._VIDEO_NAME_RE().match(name):
+                if re.match(rf"^{re.escape(video_kw)}(?:\s|$)", name):
                     return self.check_video_message_status(timeout=timeout)
-                if self._EMOTION_NAME_RE().match(name):
+                if re.match(rf"^(?:{re.escape(failed_kw)}\s+|{re.escape(sending_kw)}\s+)?{re.escape(emoji_kw)}", name):
                     return self.check_emotion_message_status(timeout=timeout)
                 # 其他 refer 类型
                 return self._check_status_by_prefix(name, space_sep=True)
@@ -7941,11 +7883,14 @@ class Chat:
         """
         if not name:
             return MessageStatus.UNKNOWN
-        if Chat._FILE_FAILED_RE().match(name):
+        file_kw = i_("文件")
+        progress_kw = i_("进度")
+        interrupted_kw = i_("发送中断")
+        if re.match(rf"^{re.escape(file_kw)}\n{re.escape(progress_kw)}[:：]\s*\d+%\n.+\n{re.escape(interrupted_kw)}\n", name, re.DOTALL):
             return MessageStatus.FAILED
-        if Chat._FILE_SENDING_RE().match(name):
+        if re.match(rf"^{re.escape(file_kw)}\n{re.escape(progress_kw)}[:：]\s*\d+%\n.+\n(?!.*{re.escape(interrupted_kw)})", name, re.DOTALL):
             return MessageStatus.SENDING
-        if Chat._FILE_SENT_RE().match(name):
+        if re.match(rf"^{re.escape(file_kw)}\n(?!{re.escape(progress_kw)}[:：])", name):
             return MessageStatus.SENT
         return MessageStatus.UNKNOWN
 
@@ -8005,7 +7950,10 @@ class Chat:
                 continue
             # ChatBubbleReferItemView 是通用类型，需要通过 Name 过滤图片消息
             if cls == "mmui::ChatBubbleReferItemView":
-                if not self._IMAGE_NAME_RE().match(ctrl.Name):
+                failed_kw = i_("发送失败")
+                sending_kw = i_("发送中")
+                image_kw = i_("图片")
+                if not re.match(rf"^(?:{re.escape(failed_kw)}\s+|{re.escape(sending_kw)}\s+)?{re.escape(image_kw)}$", ctrl.Name):
                     continue
             candidates.append(ctrl)
 
@@ -8072,7 +8020,10 @@ class Chat:
                 continue
             # ChatBubbleReferItemView 是通用类型，需要通过 Name 过滤表情消息
             if cls == "mmui::ChatBubbleReferItemView":
-                if not self._EMOTION_NAME_RE().match(ctrl.Name):
+                failed_kw = i_("发送失败")
+                sending_kw = i_("发送中")
+                emoji_kw = i_("动画表情")
+                if not re.match(rf"^(?:{re.escape(failed_kw)}\s+|{re.escape(sending_kw)}\s+)?{re.escape(emoji_kw)}", ctrl.Name):
                     continue
             candidates.append(ctrl)
 
@@ -8140,7 +8091,8 @@ class Chat:
                 continue
             # ChatBubbleReferItemView 是通用类型，需要通过 Name 过滤视频消息
             if cls == "mmui::ChatBubbleReferItemView":
-                if not self._VIDEO_NAME_RE().match(ctrl.Name):
+                video_kw = i_("视频")
+                if not re.match(rf"^{re.escape(video_kw)}(?:\s|$)", ctrl.Name):
                     continue
             candidates.append(ctrl)
 
@@ -8164,11 +8116,14 @@ class Chat:
         """
         if not name:
             return MessageStatus.UNKNOWN
-        if Chat._VIDEO_FAILED_RE().match(name):
+        video_kw = i_("视频")
+        progress_kw = i_("进度")
+        upload_kw = i_("上传中")
+        if re.match(rf"^{re.escape(video_kw)}\s+{re.escape(upload_kw[:2])}\s*暂停", name):
             return MessageStatus.FAILED
-        if Chat._VIDEO_SENDING_RE().match(name):
+        if re.match(rf"^{re.escape(video_kw)}\s+{re.escape(progress_kw)}[:：]\s*\d+%", name):
             return MessageStatus.SENDING
-        if Chat._VIDEO_SENT_RE().match(name):
+        if re.match(rf"^{re.escape(video_kw)}(?:\s+\d+:\d+)?$", name):
             return MessageStatus.SENT
         return MessageStatus.UNKNOWN
 
@@ -9675,11 +9630,12 @@ class Chat:
         """
         image_kw = i_("图片")
         video_kw = i_("视频")
+        emoji_kw = i_("动画表情")
         if name == image_kw:
             return ImageMessage
         if name.startswith(video_kw):
             return VideoMessage
-        if Chat._ANIMATED_EMOJI_RE().match(name):
+        if re.match(rf"^{re.escape(emoji_kw)}(\s+\[.+\])?$", name):
             return EmotionMessage
         return QuoteMessage
 
