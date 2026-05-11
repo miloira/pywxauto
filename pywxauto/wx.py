@@ -10309,7 +10309,7 @@ class Chat:
         skip_px = 85   # 跳过头像区域的像素
 
         # 多个扫描高度
-        scan_ys = [38, h // 4, h // 2, h * 3 // 4]
+        scan_ys = [40, h // 4, h // 2, h * 3 // 4]
         # 去重并过滤无效值
         scan_ys = list(dict.fromkeys(y for y in scan_ys if 0 < y < h))
 
