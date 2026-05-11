@@ -6,6 +6,7 @@ import ctypes.wintypes
 import fnmatch
 import functools
 import glob
+import hashlib
 import io
 import json
 import logging
@@ -10023,10 +10024,9 @@ class Chat:
                 if sender_type == SenderType.FRIEND and self.chat_type == "群聊":
                     try:
                         ocr_sender = self._ocr_sender_name(hwnd, ctrl)
-                        if ocr_sender:
-                            sender = ocr_sender
+                        sender = ocr_sender if ocr_sender else None
                     except Exception:
-                        pass
+                        sender = None
                 # 写入缓存
                 if sender_cache is not None and rid:
                     sender_cache[rid] = (sender, sender_type, bubble_rect)
@@ -10106,12 +10106,14 @@ class Chat:
             return EmotionMessage
         return QuoteMessage
 
+    # 图片 hash → OCR 识别结果缓存（避免重复 OCR 相同头像/昵称区域）
+    _ocr_sender_cache: dict[str, str] = {}
+
     def _ocr_sender_name(self, hwnd: int, ctrl) -> str:
         """
         通过 OCR 识别消息控件顶部 0-38px 区域，提取群聊中的发送者昵称。
 
-        群聊消息在气泡上方会显示发送者昵称（约在控件顶部 0-38px 高度范围内）。
-        截取该区域后使用 OCR 识别文本，返回识别到的昵称。
+        使用图片 hash 缓存：相同的昵称截图区域直接返回缓存结果，避免重复 OCR。
 
         Args:
             hwnd: 窗口句柄
@@ -10122,7 +10124,6 @@ class Chat:
         """
         try:
             if hwnd:
-                # 截取控件完整区域
                 png_bytes = capture_control(hwnd, ctrl, offset_right=15, mode="print_window")
                 img = Image.open(io.BytesIO(png_bytes))
             else:
@@ -10142,20 +10143,29 @@ class Chat:
                 return ""
 
             # 裁剪顶部 0-38px 区域（昵称显示区域）
-            sender_area = img.crop((75, 0, w - 75, 38))  # 跳过左右头像区域
+            sender_area = img.crop((75, 0, w - 75, 38))
 
-            # 转为 bytes 进行 OCR
+            # 计算图片 hash
             buf = io.BytesIO()
             sender_area.save(buf, format="PNG")
-            ocr_result = self._get_image_text(buf.getvalue())
+            img_bytes = buf.getvalue()
+            img_hash = hashlib.md5(img_bytes).hexdigest()
+
+            # 命中缓存直接返回
+            if img_hash in Chat._ocr_sender_cache:
+                return Chat._ocr_sender_cache[img_hash]
+
+            # OCR 识别
+            ocr_result = self._get_image_text(img_bytes)
 
             if not ocr_result:
+                Chat._ocr_sender_cache[img_hash] = ""
                 return ""
 
             # 取第一个识别结果作为发送者昵称
-            # OCR 返回 {text: {center, ...}} 格式，取第一个 key
-            sender_name = next(iter(ocr_result), "")
-            return sender_name.strip()
+            sender_name = next(iter(ocr_result), "").strip()
+            Chat._ocr_sender_cache[img_hash] = sender_name
+            return sender_name
 
         except Exception:
             return ""
