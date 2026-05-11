@@ -10188,7 +10188,7 @@ class Chat:
             draw.text((5, 5), label, fill="red")
 
             # 保存到当前路径
-            debug_filename = f"_sender_debug.png"
+            debug_filename = f"{bubble_left}x{bubble_right}_sender_debug.png"
             debug_img.save(debug_filename)
         except Exception:
             pass
@@ -10230,7 +10230,7 @@ class Chat:
             return 0, 0
 
         threshold = 3  # 连续非白色像素数
-        skip_px = 75   # 跳过头像区域的像素
+        skip_px = 85   # 跳过头像区域的像素
 
         # 多个扫描高度
         scan_ys = [38, h // 4, h // 2, h * 3 // 4]
