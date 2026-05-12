@@ -2067,11 +2067,11 @@ class Event(str, Enum):
 
 
 # ---- 消息来源与状态 ----
-class SenderType(Enum):
+class Source(Enum):
     """消息来源类型"""
     SYSTEM = "system"
     SELF = "self"
-    FRIEND = "friend"
+    OTHERS = "others"
     UNKNOWN = "unknown"
 
 
@@ -2087,23 +2087,24 @@ class MessageStatus(Enum):
 class Message:
     """聊天消息基类"""
 
-    def __init__(self, *, sender: str = "", sender_type: SenderType = SenderType.UNKNOWN,
+    def __init__(self, *, sender: str = "", source: Source = Source.UNKNOWN,
                  content: str = "", raw_name: str = "",
                  status: MessageStatus = MessageStatus.UNKNOWN,
                  runtime_id: tuple = (), bubble_rect: tuple = (),
-                 room: Optional[str] = None):
+                 room: Optional[str] = None, chat: object = None,
+                 control: object = None, pid: int = 0):
         self.sender: str = sender
-        self.sender_type: SenderType = sender_type
+        self.source: Source = source
         self.content: str = content
         self.raw_name: str = raw_name
         self.status: MessageStatus = status
         self.runtime_id: tuple = runtime_id
         self.bubble_rect: tuple = bubble_rect
-        self.room: Optional[str] = room  # 群聊名称，私聊为 None
-        self.msg_id: int = 0  # 消息唯一标识，由 get_visible_messages 计算
-        self.control: object = None  # 消息控件引用（uiautomation Control）
-        self.chat: object = None
-        self.pid: int = 0  # 来源微信客户端的进程 PID
+        self.room: Optional[str] = room
+        self.control: object = control
+        self.chat: object = chat
+        self.pid: int = pid
+        self.msg_id: int = hash((runtime_id, self.__class__.__name__, raw_name, source, content))
 
     @property
     def type_label(self) -> str:
@@ -2115,14 +2116,15 @@ class Message:
             "type_label": self.type_label,
             "msg_id": self.msg_id,
             "sender": self.sender,
-            "sender_type": self.sender_type.value,
+            "source": self.source.value,
             "room": self.room,
             "content": self.content,
             "raw_name": self.raw_name,
             "status": self.status.value,
         }
-        _base_keys = {"sender", "sender_type", "content", "raw_name",
-                      "status", "runtime_id", "chat", "msg_id", "control", "room"}
+        _base_keys = {"sender", "source", "content", "raw_name",
+                      "status", "runtime_id", "bubble_rect", "chat",
+                      "msg_id", "control", "room", "pid"}
         for key, value in self.__dict__.items():
             if key.startswith("_") or key in _base_keys:
                 continue
@@ -2136,7 +2138,7 @@ class Message:
     def __repr__(self) -> str:
         cls = self.__class__.__name__
         status_tag = f", status={self.status.value}" if self.status != MessageStatus.UNKNOWN else ""
-        return (f"{cls}(msg_id={self.msg_id}, sender_type={self.sender_type.value}, "
+        return (f"{cls}(msg_id={self.msg_id}, source={self.source.value}, "
                 f"sender={self.sender!r}, content={self.content!r}{status_tag})")
 
     def __str__(self) -> str:
@@ -2312,9 +2314,9 @@ class Message:
             bl, bt, br, bb = self.bubble_rect
             # bubble_rect 的 x 坐标不变，y 坐标从控件实时位置重新计算
             cx = (bl + br) // 2
-        elif self.sender_type == SenderType.SELF:
+        elif self.source == Source.SELF:
             cx = rect.right - rect.width() // 4
-        elif self.sender_type == SenderType.FRIEND:
+        elif self.source == Source.OTHERS:
             cx = rect.left + rect.width() // 4
         else:
             cx = (rect.left + rect.right) // 2
@@ -3169,10 +3171,10 @@ class LocationMessage(Message):
 class LinkMessage(Message):
     """链接消息"""
 
-    def __init__(self, *, title="", source="", **kw):
+    def __init__(self, *, title="", link_source="", **kw):
         super().__init__(**kw)
         self.title: str = title
-        self.source: str = source
+        self.link_source: str = link_source
 
     @property
     def type_label(self) -> str:
@@ -3186,19 +3188,19 @@ class LinkMessage(Message):
             body = raw_name[len(bracket_prefix):]
             parts = [p.strip() for p in body.split("\n") if p.strip()]
             title = parts[0] if parts else body
-            source = parts[1] if len(parts) > 1 else ""
-            return title, title, source
+            link_source = parts[1] if len(parts) > 1 else ""
+            return title, title, link_source
 
         if raw_name.startswith(f"{link_kw}\n") or raw_name.startswith(f"{link_kw}\r"):
             parts = [p.strip() for p in raw_name.split("\n") if p.strip()]
             title = parts[1] if len(parts) > 1 else raw_name
-            source = parts[2] if len(parts) > 2 else ""
-            return title, title, source
+            link_source = parts[2] if len(parts) > 2 else ""
+            return title, title, link_source
 
         parts = [p.strip() for p in raw_name.split("\n") if p.strip()]
         title = parts[0] if parts else raw_name
-        source = parts[1] if len(parts) > 1 else ""
-        return title, title, source
+        link_source = parts[1] if len(parts) > 1 else ""
+        return title, title, link_source
 
 
 class EmotionMessage(Message):
@@ -3264,9 +3266,9 @@ class MusicMessage(Message):
         "虾米音乐", "咪咕音乐", "Apple Music", "Spotify",
     )
 
-    def __init__(self, *, source="", song_name="", artist="", **kw):
+    def __init__(self, *, music_source="", song_name="", artist="", **kw):
         super().__init__(**kw)
-        self.source: str = source
+        self.music_source: str = music_source
         self.song_name: str = song_name
         self.artist: str = artist
 
@@ -3280,14 +3282,14 @@ class MusicMessage(Message):
 
     @staticmethod
     def parse(raw_name: str) -> tuple[str, str, str, str]:
-        source = ""
+        music_source = ""
         rest = raw_name
         for src in MusicMessage._MUSIC_SOURCES:
             if raw_name.startswith(src):
-                source = src
+                music_source = src
                 rest = raw_name[len(src):]
                 break
-        return rest, source, rest, ""
+        return rest, music_source, rest, ""
 
 
 class CardMessage(Message):
@@ -3315,7 +3317,7 @@ class SystemMessage(Message):
     """系统消息"""
 
     def __init__(self, *, timestamp="", **kw):
-        kw.setdefault("sender_type", SenderType.SYSTEM)
+        kw.setdefault("source", Source.SYSTEM)
         kw.setdefault("sender", "系统")
         super().__init__(**kw)
         self.timestamp: str = timestamp
@@ -8118,10 +8120,10 @@ class Chat:
 
         # 倒序查找自己发的
         for ctrl in reversed(candidates):
-            sender, sender_type, _ = self._detect_sender(
+            sender, source, _ = self._detect_sender(
                 hwnd, ctrl, self.chat_name or "对方",
             )
-            if sender_type == SenderType.SELF:
+            if source == Source.SELF:
                 return ctrl
         return None
 
@@ -8177,10 +8179,10 @@ class Chat:
 
         # 倒序查找最后一条自己发的消息
         for ctrl in reversed(candidates):
-            sender, sender_type, _ = self._detect_sender(
+            sender, source, _ = self._detect_sender(
                 hwnd, ctrl, self.chat_name or "对方",
             )
-            if sender_type != SenderType.SELF:
+            if source != Source.SELF:
                 continue
 
             cls = ctrl.ClassName or ""
@@ -8323,10 +8325,10 @@ class Chat:
             candidates.append(ctrl)
 
         for ctrl in reversed(candidates):
-            sender, sender_type, _ = self._detect_sender(
+            sender, source, _ = self._detect_sender(
                 hwnd, ctrl, self.chat_name or "对方",
             )
-            if sender_type == SenderType.SELF:
+            if source == Source.SELF:
                 return ctrl
         return None
 
@@ -8417,10 +8419,10 @@ class Chat:
             candidates.append(ctrl)
 
         for ctrl in reversed(candidates):
-            sender, sender_type, _ = self._detect_sender(
+            sender, source, _ = self._detect_sender(
                 hwnd, ctrl, self.chat_name or "对方",
             )
-            if sender_type == SenderType.SELF:
+            if source == Source.SELF:
                 return ctrl
         return None
 
@@ -8487,10 +8489,10 @@ class Chat:
             candidates.append(ctrl)
 
         for ctrl in reversed(candidates):
-            sender, sender_type, _ = self._detect_sender(
+            sender, source, _ = self._detect_sender(
                 hwnd, ctrl, self.chat_name or "对方",
             )
-            if sender_type == SenderType.SELF:
+            if source == Source.SELF:
                 return ctrl
         return None
 
@@ -8556,10 +8558,10 @@ class Chat:
             candidates.append(ctrl)
 
         for ctrl in reversed(candidates):
-            sender, sender_type, _ = self._detect_sender(
+            sender, source, _ = self._detect_sender(
                 hwnd, ctrl, self.chat_name or "对方",
             )
-            if sender_type == SenderType.SELF:
+            if source == Source.SELF:
                 return ctrl
         return None
 
@@ -9933,13 +9935,13 @@ class Chat:
         获取当前可见的消息列表，返回具体消息子类实例。
 
         消息项为 ListItemControl，通过 ClassName 区分类型，
-        通过头像控件位置判断 SenderType。
+        通过头像控件位置判断 Source。
         每条消息携带 runtime_id（UI Automation RuntimeId），
         作为控件的唯一标识，用于消息监听时的精确去重。
 
         Args:
             sender_cache: 可选的发送者缓存字典，格式为
-                {runtime_id: (sender, sender_type)}。
+                {runtime_id: (sender, source)}。
                 传入后，已缓存的消息跳过截图检测直接使用缓存结果，
                 新消息检测后自动写入缓存。
                 用于监听场景下避免对已知消息重复截图导致窗口闪烁。
@@ -10009,20 +10011,22 @@ class Chat:
                     timestamp=raw_name,
                     raw_name=raw_name,
                     runtime_id=rid,
+                    room=chat_name if is_room else None,
+                    chat=self,
+                    control=ctrl,
                 )
-                sys_msg.chat = self
                 messages.append(sys_msg)
                 continue
 
             # 判断发送者：优先从缓存读取，避免重复截图
             if sender_cache is not None and rid and rid in sender_cache:
-                sender, sender_type, bubble_rect = sender_cache[rid]
+                sender, source, bubble_rect = sender_cache[rid]
             else:
-                sender, sender_type, bubble_rect = self._detect_sender(
+                sender, source, bubble_rect = self._detect_sender(
                     hwnd, ctrl, chat_name,
                 )
                 # 群聊中对方发的消息，OCR 识别控件顶部 0-38px 区域提取真实发送者昵称
-                if sender_type == SenderType.FRIEND and is_room:
+                if source == Source.OTHERS and is_room:
                     try:
                         ocr_sender = self._ocr_sender_name(hwnd, ctrl)
                         sender = ocr_sender if ocr_sender else None
@@ -10030,16 +10034,15 @@ class Chat:
                         sender = None
                 # 写入缓存
                 if sender_cache is not None and rid:
-                    sender_cache[rid] = (sender, sender_type, bubble_rect)
+                    sender_cache[rid] = (sender, source, bubble_rect)
 
             # 构造具体消息对象
-            msg = self._build_message(msg_cls, raw_name, sender, sender_type,
-                                      runtime_id=rid)
-            msg.bubble_rect = bubble_rect
-            msg.room = chat_name if is_room else None
-            msg.chat = self
-            msg.control = ctrl
-            msg.msg_id = hash((rid, msg.__class__.__name__, raw_name, sender_type, msg.content))
+            msg = self._build_message(
+                msg_cls, raw_name, sender, source,
+                runtime_id=rid, bubble_rect=bubble_rect,
+                room=chat_name if is_room else None,
+                chat=self, control=ctrl,
+            )
             messages.append(msg)
         return messages
 
@@ -10174,7 +10177,7 @@ class Chat:
     @staticmethod
     def _detect_sender(
         hwnd: int, ctrl, chat_name: str,
-    ) -> tuple[str, SenderType, tuple]:
+    ) -> tuple[str, Source, tuple]:
         """
         判断消息发送者、来源类型，并检测气泡区域坐标。
 
@@ -10186,7 +10189,7 @@ class Chat:
             chat_name: 当前聊天对象名称（用于标记对方消息的 sender）
 
         Returns:
-            (sender, sender_type, bubble_rect)
+            (sender, source, bubble_rect)
             bubble_rect 为气泡区域屏幕坐标 (left, top, right, bottom)，空元组表示未检测到
         """
         return Chat._detect_sender_by_pixel(ctrl, chat_name, hwnd)
@@ -10194,12 +10197,12 @@ class Chat:
     @staticmethod
     def _detect_sender_by_pixel(
         ctrl, chat_name: str, hwnd: int = 0,
-    ) -> tuple[str, SenderType, tuple]:
+    ) -> tuple[str, Source, tuple]:
         """
         通过截图像素分析判断消息发送者，并检测气泡区域。
 
         Returns:
-            (sender, sender_type, bubble_rect)
+            (sender, source, bubble_rect)
             bubble_rect 为气泡区域屏幕坐标 (left, top, right, bottom)，空元组表示未检测到
         """
         try:
@@ -10218,7 +10221,7 @@ class Chat:
                     except OSError:
                         pass
         except Exception:
-            return "", SenderType.UNKNOWN, ()
+            return "", Source.UNKNOWN, ()
 
         w, h = img.size
 
@@ -10226,12 +10229,12 @@ class Chat:
         edge_result = Chat._detect_sender_by_edge_scan(img, w, h, chat_name)
         edge_scan_y, edge_left_x, edge_right_x = -1, -1, -1
         if edge_result is not None:
-            sender, sender_type, edge_scan_y, edge_left_x, edge_right_x = edge_result
+            sender, source, edge_scan_y, edge_left_x, edge_right_x = edge_result
         else:
-            sender, sender_type = "", SenderType.UNKNOWN
+            sender, source = "", Source.UNKNOWN
 
         # ---- 检测气泡区域 ----
-        bubble_left, bubble_right = Chat._detect_bubble_rect(img, w, h, sender_type)
+        bubble_left, bubble_right = Chat._detect_bubble_rect(img, w, h, source)
 
         # ---- 保存标记点截图到当前路径（调试用） ----
         try:
@@ -10261,7 +10264,7 @@ class Chat:
             if bubble_right > 0:
                 draw.line([(bubble_right, 0), (bubble_right, h - 1)], fill="green", width=1)
             # 标注识别结果
-            label = f"{sender}({sender_type.value})"
+            label = f"{sender}({source.value})"
             draw.text((5, 5), label, fill="red")
 
             # 保存到当前路径
@@ -10284,12 +10287,12 @@ class Chat:
             except Exception:
                 pass
 
-        return sender, sender_type, bubble_rect
+        return sender, source, bubble_rect
 
     @staticmethod
     def _detect_bubble_rect(
         img: "Image.Image", w: int, h: int,
-        sender_type: "SenderType",
+        source: "Source",
     ) -> tuple[int, int]:
         """
         检测气泡的左边缘和右边缘 x 坐标（相对于控件截图）。
@@ -10297,7 +10300,7 @@ class Chat:
         在 y=38、h*1/4、h*2/4、h*3/4 四个高度分别扫描，
         取左右距离最大的结果（气泡最宽处）。
 
-        - 对方消息（FRIEND）：先从左侧扫描找气泡左边缘，再从右侧扫描找气泡右边缘
+        - 对方消息（OTHERS）：先从左侧扫描找气泡左边缘，再从右侧扫描找气泡右边缘
         - 自己消息（SELF）：先从右侧扫描找气泡右边缘，再从左侧扫描找气泡左边缘
 
         Returns:
@@ -10343,10 +10346,10 @@ class Chat:
                         count = 0
                 return 0
 
-            if sender_type == SenderType.FRIEND:
+            if source == Source.OTHERS:
                 bubble_left = _scan_left_to_right(skip_px, w)
                 bubble_right = _scan_right_to_left(w - 1 - skip_px, -1)
-            elif sender_type == SenderType.SELF:
+            elif source == Source.SELF:
                 bubble_right = _scan_right_to_left(w - 1 - skip_px, -1)
                 bubble_left = _scan_left_to_right(skip_px, w)
             else:
@@ -10370,12 +10373,12 @@ class Chat:
     @staticmethod
     def _detect_sender_by_edge_scan(
         img: "Image.Image", w: int, h: int, chat_name: str,
-    ) -> tuple[str, SenderType, int, int, int] | None:
+    ) -> tuple[str, Source, int, int, int] | None:
         """
         从左右两侧同时向中间扫描，先找到非白色像素的一侧即为头像侧。
 
         Returns:
-            (sender, sender_type, scan_y, left_x, right_x) 或 None
+            (sender, source, scan_y, left_x, right_x) 或 None
             left_x/right_x 为扫描到的 x 坐标，-1 表示未找到
         """
         scan_y = 38
@@ -10411,21 +10414,21 @@ class Chat:
 
         if found_left and found_right:
             if left < (w - 1 - right):
-                return chat_name, SenderType.FRIEND, scan_y, left_x, right_x
+                return chat_name, Source.OTHERS, scan_y, left_x, right_x
             elif (w - 1 - right) < left:
-                return "我", SenderType.SELF, scan_y, left_x, right_x
+                return "我", Source.SELF, scan_y, left_x, right_x
             else:
                 return None
 
         if found_left:
-            return chat_name, SenderType.FRIEND, scan_y, left_x, right_x
-        return "我", SenderType.SELF, scan_y, left_x, right_x
+            return chat_name, Source.OTHERS, scan_y, left_x, right_x
+        return "我", Source.SELF, scan_y, left_x, right_x
 
     @staticmethod
     def _detect_message_status(
         msg_cls: type[Message],
         raw_name: str,
-        sender_type: SenderType,
+        source: Source,
     ) -> tuple[MessageStatus, str]:
         """
         检测消息发送状态，返回 (状态, 去掉前缀后的实际内容)。
@@ -10462,9 +10465,9 @@ class Chat:
                 return status, raw_name[len(prefix):]
 
         # 无前缀，根据发送者推断
-        if sender_type == SenderType.SELF:
+        if source == Source.SELF:
             return MessageStatus.SENT, raw_name
-        if sender_type == SenderType.FRIEND:
+        if source == Source.OTHERS:
             return MessageStatus.RECEIVED, raw_name
         return MessageStatus.UNKNOWN, raw_name
 
@@ -10473,17 +10476,22 @@ class Chat:
         msg_cls: type[Message],
         raw_name: str,
         sender: str,
-        sender_type: SenderType,
+        source: Source,
         runtime_id: tuple = (),
+        bubble_rect: tuple = (),
+        room: Optional[str] = None,
+        chat: object = None,
+        control: object = None,
     ) -> Message:
         """根据消息子类构造具体消息对象，调用各子类的 parse 方法提取字段"""
         msg_status, actual_name = Chat._detect_message_status(
-            msg_cls, raw_name, sender_type,
+            msg_cls, raw_name, source,
         )
 
-        base = dict(sender=sender, sender_type=sender_type,
+        base = dict(sender=sender, source=source,
                     raw_name=raw_name, status=msg_status,
-                    runtime_id=runtime_id)
+                    runtime_id=runtime_id, bubble_rect=bubble_rect,
+                    room=room, chat=chat, control=control)
 
         if msg_cls is VoiceMessage:
             content, duration, played = VoiceMessage.parse(actual_name)
@@ -10499,8 +10507,8 @@ class Chat:
             return LocationMessage(**base, content=content, address=address)
 
         if msg_cls is LinkMessage:
-            content, title, source = LinkMessage.parse(actual_name)
-            return LinkMessage(**base, content=content, title=title, source=source)
+            content, title, link_source = LinkMessage.parse(actual_name)
+            return LinkMessage(**base, content=content, title=title, link_source=link_source)
 
         if msg_cls is PersonalCardMessage:
             content, card_name = PersonalCardMessage.parse(actual_name)
@@ -10515,8 +10523,8 @@ class Chat:
             return CardMessage(**base, content=content, title=title, description=description)
 
         if msg_cls is MusicMessage:
-            content, source, song_name, artist = MusicMessage.parse(actual_name)
-            return MusicMessage(**base, content=content, source=source,
+            content, music_source, song_name, artist = MusicMessage.parse(actual_name)
+            return MusicMessage(**base, content=content, music_source=music_source,
                                 song_name=song_name, artist=artist)
 
         if msg_cls is RedPacketMessage:
@@ -15181,7 +15189,7 @@ class Weixin(WeixinWindow):
         def _watch_chat(chat: SeparateChat, name: str) -> None:
             # 已知消息的 RuntimeId 集合（仅保留当前可见的）
             known_rids: set[tuple] = set()
-            # 发送者缓存：{runtime_id: (sender, sender_type, bubble_rect)}
+            # 发送者缓存：{runtime_id: (sender, source, bubble_rect)}
             sender_cache: dict[tuple, tuple] = {}
             first_scan = True
 
