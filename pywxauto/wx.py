@@ -521,6 +521,118 @@ class RegistryError(Exception):
     pass
 
 
+import io
+import sys
+
+from PIL import Image, ImageFilter, ImageDraw
+
+
+def _is_touching_border(x1: int, y1: int, x2: int, y2: int, w: int, h: int, margin: int) -> bool:
+    """判断矩形是否触碰图片边缘"""
+    return x1 <= margin or y1 <= margin or x2 >= w - 1 - margin or y2 >= h - 1 - margin
+
+
+def _is_contained(inner: tuple, outer: tuple) -> bool:
+    """判断 inner 矩形是否被 outer 矩形完全包含"""
+    return (outer[0] <= inner[0] and outer[1] <= inner[1] and
+            outer[2] >= inner[2] and outer[3] >= inner[3])
+
+
+def _remove_contained(rects: list[tuple]) -> list[tuple]:
+    """去除被其他矩形完全包含的矩形，只保留最外层"""
+    result = []
+    for i, rect_a in enumerate(rects):
+        contained = False
+        for j, rect_b in enumerate(rects):
+            if i == j:
+                continue
+            if _is_contained(rect_a, rect_b):
+                if rect_a == rect_b and i < j:
+                    continue
+                contained = True
+                break
+        if not contained:
+            result.append(rect_a)
+    return result
+
+
+def find_contour_rects(
+    image_bytes: bytes,
+    threshold: int = 1,
+    min_area: int = 100,
+    border_margin: int = 2,
+) -> tuple[bytes, list[tuple[int, int, int, int]]]:
+    """
+    检测图片中的轮廓区域，用红色矩形框出并返回标注图和坐标。
+
+    规则：
+    - 触碰图片边缘的区域视为图片边框，排除
+    - 被其他矩形完全包含的矩形排除，只保留最外层
+
+    Args:
+        image_bytes: 输入图片的字节数据（PNG/JPG 等）
+        threshold: 边缘二值化阈值（0-255），值越小检测到的边缘越多
+        min_area: 最小区域面积（像素数），过滤噪点
+        border_margin: 边缘容差像素，触碰图片边缘 margin 内的区域视为边框排除
+
+    Returns:
+        (标注后的 PNG 图片字节数据, 矩形坐标列表 [(x1, y1, x2, y2), ...])
+    """
+    img = Image.open(io.BytesIO(image_bytes)).convert("RGB")
+    gray = img.convert("L")
+    w, h = img.size
+
+    # 边缘检测 + 二值化
+    edges = gray.filter(ImageFilter.FIND_EDGES)
+    binary = edges.point(lambda p: 1 if p > threshold else 0, mode="1")
+
+    # 连通区域标记（flood fill）
+    pixels = binary.load()
+    visited = [[False] * h for _ in range(w)]
+    raw_rects: list[tuple[int, int, int, int]] = []
+
+    for y in range(h):
+        for x in range(w):
+            if pixels[x, y] == 0 or visited[x][y]:
+                continue
+            # BFS 找连通区域
+            min_x, min_y, max_x, max_y = x, y, x, y
+            stack = [(x, y)]
+            area = 0
+            while stack:
+                cx, cy = stack.pop()
+                if cx < 0 or cx >= w or cy < 0 or cy >= h:
+                    continue
+                if visited[cx][cy] or pixels[cx, cy] == 0:
+                    continue
+                visited[cx][cy] = True
+                area += 1
+                min_x = min(min_x, cx)
+                min_y = min(min_y, cy)
+                max_x = max(max_x, cx)
+                max_y = max(max_y, cy)
+                stack.extend([(cx + 1, cy), (cx - 1, cy), (cx, cy + 1), (cx, cy - 1)])
+
+            if area >= min_area:
+                raw_rects.append((min_x, min_y, max_x, max_y))
+
+    # 过滤触碰图片边缘的区域（图片边框不算）
+    rects = [r for r in raw_rects if not _is_touching_border(*r, w, h, border_margin)]
+
+    # 去除被其他矩形完全包含的（只保留最外层）
+    rects = _remove_contained(rects)
+
+    # 在原图上画红色矩形框
+    draw = ImageDraw.Draw(img)
+    for rect in rects:
+        draw.rectangle(rect, outline="red", width=2)
+
+    # 输出为 PNG 字节
+    buf = io.BytesIO()
+    img.save(buf, format="PNG")
+    return buf.getvalue(), rects
+
+
 # ---- 底层钩子常量与结构体 ----
 _LLKHF_INJECTED = 0x00000010
 _LLMHF_INJECTED = 0x00000001
@@ -1633,6 +1745,224 @@ def rand_ratio() -> float:
     """返回 0.2~0.6 之间的随机比例，用于模拟人类点击偏移"""
     return random.uniform(0.2, 0.6)
 
+
+def _find_contour_rects(
+    image_bytes: bytes,
+    threshold: int = 1,
+    min_area: int = 100,
+    border_margin: int = 2,
+) -> tuple[bytes, list[tuple[int, int, int, int]]]:
+    """
+    检测图片中的轮廓区域，用红色矩形框出并返回标注图和坐标。
+
+    规则：
+    - 触碰图片边缘的区域视为图片边框，排除
+    - 被其他矩形完全包含的矩形排除，只保留最外层
+
+    Args:
+        image_bytes: 输入图片的字节数据（PNG/JPG 等）
+        threshold: 边缘二值化阈值（0-255）
+        min_area: 最小区域面积（像素数），过滤噪点
+        border_margin: 边缘容差像素
+
+    Returns:
+        (标注后的 PNG 图片字节数据, 矩形坐标列表 [(x1, y1, x2, y2), ...])
+    """
+    from PIL import ImageFilter, ImageDraw
+
+    img = Image.open(io.BytesIO(image_bytes)).convert("RGB")
+    gray = img.convert("L")
+    w, h = img.size
+
+    edges = gray.filter(ImageFilter.FIND_EDGES)
+    binary = edges.point(lambda p: 1 if p > threshold else 0, mode="1")
+
+    pixels = binary.load()
+    visited = [[False] * h for _ in range(w)]
+    raw_rects: list[tuple[int, int, int, int]] = []
+
+    for y in range(h):
+        for x in range(w):
+            if pixels[x, y] == 0 or visited[x][y]:
+                continue
+            min_x, min_y, max_x, max_y = x, y, x, y
+            stack = [(x, y)]
+            area = 0
+            while stack:
+                cx, cy = stack.pop()
+                if cx < 0 or cx >= w or cy < 0 or cy >= h:
+                    continue
+                if visited[cx][cy] or pixels[cx, cy] == 0:
+                    continue
+                visited[cx][cy] = True
+                area += 1
+                min_x = min(min_x, cx)
+                min_y = min(min_y, cy)
+                max_x = max(max_x, cx)
+                max_y = max(max_y, cy)
+                stack.extend([(cx + 1, cy), (cx - 1, cy), (cx, cy + 1), (cx, cy - 1)])
+            if area >= min_area:
+                raw_rects.append((min_x, min_y, max_x, max_y))
+
+    # 过滤触碰图片边缘的区域
+    rects = [r for r in raw_rects
+             if not (r[0] <= border_margin or r[1] <= border_margin
+                     or r[2] >= w - 1 - border_margin or r[3] >= h - 1 - border_margin)]
+
+    # 去除被其他矩形完全包含的
+    result_rects = []
+    for i, a in enumerate(rects):
+        contained = False
+        for j, b in enumerate(rects):
+            if i == j:
+                continue
+            if b[0] <= a[0] and b[1] <= a[1] and b[2] >= a[2] and b[3] >= a[3]:
+                if a == b and i < j:
+                    continue
+                contained = True
+                break
+        if not contained:
+            result_rects.append(a)
+
+    draw = ImageDraw.Draw(img)
+    for rect in result_rects:
+        draw.rectangle(rect, outline="red", width=2)
+
+    buf = io.BytesIO()
+    img.save(buf, format="PNG")
+    return buf.getvalue(), result_rects
+
+
+def _classify_contour_rects(
+    rects: list[tuple[int, int, int, int]],
+    image_bytes: bytes = None,
+) -> tuple[tuple, tuple, tuple]:
+    """
+    将轮廓矩形分类为头像、昵称、消息内容。
+
+    规则：
+    - 头像：宽高比接近 1:1（差异 < 20%）的矩形，且最靠近图片左边或右边
+    - 剩余矩形：y1 较小的是昵称（上方），y1 较大的是消息内容（下方）
+
+    分类完成后保存标注图到当前路径 classify_debug.png，
+    用不同颜色标注：绿色=头像，蓝色=昵称，红色=消息内容。
+
+    Args:
+        rects: 矩形列表 [(x1, y1, x2, y2), ...]
+        image_bytes: 原始图片字节数据，用于保存调试图
+
+    Returns:
+        (headimg_rect, nickname_rect, content_rect)
+        每个为 (x1, y1, x2, y2) 或空元组 ()
+    """
+    from PIL import ImageDraw
+
+    headimg_rect = ()
+    nickname_rect = ()
+    content_rect = ()
+
+    if not rects:
+        return headimg_rect, nickname_rect, content_rect
+
+    # 获取图片宽度（用于判断靠近左边还是右边）
+    img_width = 0
+    if image_bytes:
+        try:
+            img_tmp = Image.open(io.BytesIO(image_bytes))
+            img_width = img_tmp.size[0]
+        except Exception:
+            pass
+
+    # 筛选正方形（宽高比接近 1:1）
+    squares = []
+    others = []
+    for rect in rects:
+        x1, y1, x2, y2 = rect
+        w = x2 - x1
+        h = y2 - y1
+        if w <= 0 or h <= 0:
+            continue
+        ratio = min(w, h) / max(w, h)
+        if ratio > 0.8:
+            squares.append(rect)
+        else:
+            others.append(rect)
+
+    # 头像：正方形中最靠近图片左边或右边的
+    if squares and img_width > 0:
+        def edge_distance(r):
+            """矩形到图片左边或右边的最小距离"""
+            return min(r[0], img_width - r[2])
+        headimg_rect = min(squares, key=edge_distance)
+    elif squares:
+        headimg_rect = squares[0]
+
+    # 剩余矩形（排除已选为头像的）
+    remaining = [r for r in others]
+    # 如果有多个正方形，非头像的正方形也加入剩余
+    for sq in squares:
+        if sq != headimg_rect:
+            remaining.append(sq)
+
+    # 分类昵称和消息内容
+    # 昵称条件：top >= 头像top，bottom <= 头像中线（top + height/2）
+    # 矩形top在头像bottom下面的忽略
+    # 不满足昵称条件的归为消息内容
+    if headimg_rect and remaining:
+        head_top = headimg_rect[1]
+        head_bottom = headimg_rect[3]
+        head_mid = head_top + (head_bottom - head_top) // 2
+        nickname_candidates = []
+        content_candidates = []
+        top_tolerance = 5  # content的top允许比头像top高几个像素（几乎平齐）
+        for r in remaining:
+            r_top, r_bottom = r[1], r[3]
+            # 矩形top在头像bottom下面的忽略
+            if r_top > head_bottom:
+                continue
+            if r_top >= head_top and r_bottom <= head_mid:
+                nickname_candidates.append(r)
+            elif r_top >= head_top - top_tolerance:
+                content_candidates.append(r)
+        # 昵称取第一个（应该只有一个）
+        if nickname_candidates:
+            nickname_rect = nickname_candidates[0]
+        # 消息内容取 y1 最大的（最下方的）
+        if content_candidates:
+            content_rect = max(content_candidates, key=lambda r: r[1])
+        # 验证：没有nickname时，content的top应和头像top几乎平齐
+        # 如果差距过大，说明识别有误，丢弃content
+        if not nickname_rect and content_rect:
+            if abs(content_rect[1] - head_top) > top_tolerance:
+                content_rect = ()
+    elif len(remaining) >= 2:
+        remaining.sort(key=lambda r: r[1])
+        nickname_rect = remaining[0]
+        content_rect = remaining[1]
+    elif len(remaining) == 1:
+        content_rect = remaining[0]
+
+    # 保存分类调试图
+    if image_bytes:
+        try:
+            img = Image.open(io.BytesIO(image_bytes)).convert("RGB")
+            draw = ImageDraw.Draw(img)
+            if headimg_rect:
+                draw.rectangle(headimg_rect, outline="green", width=2)
+                draw.text((headimg_rect[0], headimg_rect[1] - 12), "headimg", fill="green")
+            if nickname_rect:
+                draw.rectangle(nickname_rect, outline="blue", width=2)
+                draw.text((nickname_rect[0], nickname_rect[1] - 12), "nickname", fill="blue")
+            if content_rect:
+                draw.rectangle(content_rect, outline="red", width=2)
+                draw.text((content_rect[0], content_rect[1] - 12), "content", fill="red")
+            img.save("classify_debug.png")
+        except Exception:
+            pass
+
+    return headimg_rect, nickname_rect, content_rect
+
+
 def _get_hwnd(control) -> int:
     """从 uiautomation 控件获取所属窗口句柄，向上遍历父控件查找。"""
     hwnd = control.NativeWindowHandle
@@ -2092,7 +2422,9 @@ class Message:
                  status: MessageStatus = MessageStatus.UNKNOWN,
                  runtime_id: tuple = (), bubble_rect: tuple = (),
                  room: Optional[str] = None, chat: object = None,
-                 control: object = None, pid: int = 0):
+                 control: object = None, pid: int = 0,
+                 headimg_rect: tuple = (), nickname_rect: tuple = (),
+                 content_rect: tuple = ()):
         self.sender: str = sender
         self.source: Source = source
         self.content: str = content
@@ -2103,8 +2435,11 @@ class Message:
         self.room: Optional[str] = room
         self.control: object = control
         self.chat: object = chat
-        self.chat_type: str = self.chat.chat_type
+        self.chat_type: str = self.chat.chat_type if self.chat else "未知"
         self.pid: int = pid
+        self.headimg_rect: tuple = headimg_rect
+        self.nickname_rect: tuple = nickname_rect
+        self.content_rect: tuple = content_rect
         self.msg_id: int = hash((runtime_id, self.__class__.__name__, raw_name, source, content))
 
     @property
@@ -2125,7 +2460,8 @@ class Message:
         }
         _base_keys = {"sender", "source", "content", "raw_name",
                       "status", "runtime_id", "bubble_rect", "chat",
-                      "msg_id", "control", "room", "pid"}
+                      "msg_id", "control", "room", "pid", "chat_type",
+                      "headimg_rect", "nickname_rect", "content_rect"}
         for key, value in self.__dict__.items():
             if key.startswith("_") or key in _base_keys:
                 continue
@@ -8066,7 +8402,7 @@ class Chat:
 
         # 倒序查找自己发的
         for ctrl in reversed(candidates):
-            sender, source, _ = self._detect_sender(
+            sender, source, *_ = self._detect_sender(
                 hwnd, ctrl, self.chat_name or "对方",
             )
             if source == Source.SELF:
@@ -8125,7 +8461,7 @@ class Chat:
 
         # 倒序查找最后一条自己发的消息
         for ctrl in reversed(candidates):
-            sender, source, _ = self._detect_sender(
+            sender, source, *_ = self._detect_sender(
                 hwnd, ctrl, self.chat_name or "对方",
             )
             if source != Source.SELF:
@@ -8271,7 +8607,7 @@ class Chat:
             candidates.append(ctrl)
 
         for ctrl in reversed(candidates):
-            sender, source, _ = self._detect_sender(
+            sender, source, *_ = self._detect_sender(
                 hwnd, ctrl, self.chat_name or "对方",
             )
             if source == Source.SELF:
@@ -8365,7 +8701,7 @@ class Chat:
             candidates.append(ctrl)
 
         for ctrl in reversed(candidates):
-            sender, source, _ = self._detect_sender(
+            sender, source, *_ = self._detect_sender(
                 hwnd, ctrl, self.chat_name or "对方",
             )
             if source == Source.SELF:
@@ -8435,7 +8771,7 @@ class Chat:
             candidates.append(ctrl)
 
         for ctrl in reversed(candidates):
-            sender, source, _ = self._detect_sender(
+            sender, source, *_ = self._detect_sender(
                 hwnd, ctrl, self.chat_name or "对方",
             )
             if source == Source.SELF:
@@ -8504,7 +8840,7 @@ class Chat:
             candidates.append(ctrl)
 
         for ctrl in reversed(candidates):
-            sender, source, _ = self._detect_sender(
+            sender, source, *_ = self._detect_sender(
                 hwnd, ctrl, self.chat_name or "对方",
             )
             if source == Source.SELF:
@@ -9966,9 +10302,9 @@ class Chat:
 
             # 判断发送者：优先从缓存读取，避免重复截图
             if sender_cache is not None and rid and rid in sender_cache:
-                sender, source, bubble_rect = sender_cache[rid]
+                sender, source, bubble_rect, headimg_rect, nickname_rect, content_rect = sender_cache[rid]
             else:
-                sender, source, bubble_rect = self._detect_sender(
+                sender, source, bubble_rect, headimg_rect, nickname_rect, content_rect = self._detect_sender(
                     hwnd, ctrl, chat_name,
                 )
                 # 群聊中对方发的消息，OCR 识别控件顶部 0-38px 区域提取真实发送者昵称
@@ -9980,7 +10316,7 @@ class Chat:
                         sender = None
                 # 写入缓存
                 if sender_cache is not None and rid:
-                    sender_cache[rid] = (sender, source, bubble_rect)
+                    sender_cache[rid] = (sender, source, bubble_rect, headimg_rect, nickname_rect, content_rect)
 
             # 构造具体消息对象
             msg = self._build_message(
@@ -9988,6 +10324,8 @@ class Chat:
                 runtime_id=rid, bubble_rect=bubble_rect,
                 room=chat_name if is_room else None,
                 chat=self, control=ctrl,
+                headimg_rect=headimg_rect, nickname_rect=nickname_rect,
+                content_rect=content_rect,
             )
             messages.append(msg)
         return messages
@@ -10123,9 +10461,9 @@ class Chat:
     @staticmethod
     def _detect_sender(
         hwnd: int, ctrl, chat_name: str,
-    ) -> tuple[str, Source, tuple]:
+    ) -> tuple[str, Source, tuple, tuple, tuple, tuple]:
         """
-        判断消息发送者、来源类型，并检测气泡区域坐标。
+        判断消息发送者、来源类型，并检测气泡区域坐标和轮廓区域。
 
         通过截图后从左右两侧向内扫描非白色像素，判断头像在哪侧。
 
@@ -10135,7 +10473,7 @@ class Chat:
             chat_name: 当前聊天对象名称（用于标记对方消息的 sender）
 
         Returns:
-            (sender, source, bubble_rect)
+            (sender, source, bubble_rect, headimg_rect, nickname_rect, content_rect)
             bubble_rect 为气泡区域屏幕坐标 (left, top, right, bottom)，空元组表示未检测到
         """
         return Chat._detect_sender_by_pixel(ctrl, chat_name, hwnd)
@@ -10143,7 +10481,7 @@ class Chat:
     @staticmethod
     def _detect_sender_by_pixel(
         ctrl, chat_name: str, hwnd: int = 0,
-    ) -> tuple[str, Source, tuple]:
+    ) -> tuple[str, Source, tuple, tuple, tuple, tuple]:
         """
         通过截图像素分析判断消息发送者，并检测气泡区域。
 
@@ -10167,7 +10505,7 @@ class Chat:
                     except OSError:
                         pass
         except Exception:
-            return "", Source.UNKNOWN, ()
+            return "", Source.UNKNOWN, (), (), (), ()
 
         w, h = img.size
 
@@ -10233,7 +10571,27 @@ class Chat:
             except Exception:
                 pass
 
-        return sender, source, bubble_rect
+        # ---- 轮廓检测：识别头像、昵称、消息内容区域 ----
+        headimg_rect = ()
+        nickname_rect = ()
+        content_rect = ()
+        try:
+            buf = io.BytesIO()
+            img.save(buf, format="PNG")
+            img_bytes = buf.getvalue()
+            contour_img_bytes, contour_rects = _find_contour_rects(
+                img_bytes, threshold=5, min_area=100, border_margin=2,
+            )
+            headimg_rect, nickname_rect, content_rect = _classify_contour_rects(
+                contour_rects, image_bytes=img_bytes,
+            )
+            # 保存轮廓识别结果图到当前路径
+            with open("contour_debug.png", "wb") as f:
+                f.write(contour_img_bytes)
+        except Exception:
+            pass
+
+        return sender, source, bubble_rect, headimg_rect, nickname_rect, content_rect
 
     @staticmethod
     def _detect_bubble_rect(
@@ -10428,6 +10786,9 @@ class Chat:
         room: Optional[str] = None,
         chat: object = None,
         control: object = None,
+        headimg_rect: tuple = (),
+        nickname_rect: tuple = (),
+        content_rect: tuple = (),
     ) -> Message:
         """根据消息子类构造具体消息对象，调用各子类的 parse 方法提取字段"""
         msg_status, actual_name = Chat._detect_message_status(
@@ -10437,7 +10798,9 @@ class Chat:
         base = dict(sender=sender, source=source,
                     raw_name=raw_name, status=msg_status,
                     runtime_id=runtime_id, bubble_rect=bubble_rect,
-                    room=room, chat=chat, control=control)
+                    room=room, chat=chat, control=control,
+                    headimg_rect=headimg_rect, nickname_rect=nickname_rect,
+                    content_rect=content_rect)
 
         if msg_cls is VoiceMessage:
             content, duration, played = VoiceMessage.parse(actual_name)
