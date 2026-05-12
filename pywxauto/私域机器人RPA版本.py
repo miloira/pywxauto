@@ -1627,10 +1627,10 @@ def run():
     global _api_task_mgr
     _api_task_mgr = task_mgr
     api_thread = threading.Thread(
-        target=_start_api_server, kwargs={"host": "0.0.0.0", "port": 8000}, daemon=True,
+        target=_start_api_server, kwargs={"host": "127.0.0.1", "port": 8000}, daemon=True,
     )
     api_thread.start()
-    print("🌐 API 回调服务: http://0.0.0.0:8000")
+    print("🌐 API 回调服务: http://127.0.0.1:8000")
 
     # 启动文件监听线程
     watch_dir = get_current_month_dir()
