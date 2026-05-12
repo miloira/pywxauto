@@ -2103,6 +2103,7 @@ class Message:
         self.room: Optional[str] = room
         self.control: object = control
         self.chat: object = chat
+        self.chat_type: str = self.chat.chat_type
         self.pid: int = pid
         self.msg_id: int = hash((runtime_id, self.__class__.__name__, raw_name, source, content))
 
@@ -2137,22 +2138,15 @@ class Message:
 
     def __repr__(self) -> str:
         cls = self.__class__.__name__
-        status_tag = f", status={self.status.value}" if self.status != MessageStatus.UNKNOWN else ""
-        return (f"{cls}(msg_id={self.msg_id}, source={self.source.value}, "
-                f"sender={self.sender!r}, content={self.content!r}{status_tag})")
+        return (f"{cls}(msg_id={self.msg_id}, chat_type={self.chat_type!r}, "
+                f"room={self.room!r}, sender={self.sender!r}, "
+                f"source={self.source.value}, content={self.content!r}, pid={self.pid})")
 
     def __str__(self) -> str:
         cls = self.__class__.__name__
-        _skip = {"chat", "runtime_id", "raw_name", "bubble_rect", "control"}
-        parts = [f"msg_id={self.msg_id}"]
-        for key, value in self.__dict__.items():
-            if key.startswith("_") or key in _skip or key == "msg_id":
-                continue
-            if isinstance(value, Enum):
-                parts.append(f"{key}={value.value}")
-            else:
-                parts.append(f"{key}={value!r}")
-        return f"{cls}({', '.join(parts)})"
+        return (f"{cls}(msg_id={self.msg_id}, chat_type={self.chat_type!r}, "
+                f"room={self.room!r}, sender={self.sender!r}, "
+                f"source={self.source.value}, content={self.content!r}, pid={self.pid})")
 
     def _find_ctrl(self) -> "auto.Control | None":
         """
