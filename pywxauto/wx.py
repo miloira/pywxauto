@@ -7327,7 +7327,6 @@ class ChatFile:
         """右键点击文件项并返回弹出的菜单控件"""
         self.file_manager.activate()
         input_wx.click(self._cell, button="right")
-        time.sleep(0.5)
         menu = self.file_manager._find_context_menu_by_point()
         if not menu:
             raise WxControlNotFoundError("未找到右键菜单")
@@ -7355,7 +7354,6 @@ class ChatFile:
         self._ensure_ready()
         menu = self._right_click_and_find_menu()
         self._click_menu_item(menu, menu_name)
-        time.sleep(0.5)
 
     def _handle_save_dialog(self, file_path: str) -> bool:
         """处理 Windows 文件保存对话框：填入路径并保存"""
@@ -7401,8 +7399,6 @@ class ChatFile:
             os.makedirs(dir_path, exist_ok=True)
 
         self._context_action("另存为...")
-        time.sleep(0.5)
-
         return self._handle_save_dialog(file_path)
 
     @PIM.guard
@@ -7426,8 +7422,6 @@ class ChatFile:
             os.makedirs(dir_path, exist_ok=True)
 
         self._context_action("下载到...")
-        time.sleep(0.5)
-
         return self._handle_save_dialog(file_path)
 
     @PIM.guard
@@ -7466,7 +7460,6 @@ class ChatFile:
         )
         if delete_btn.Exists(maxSearchSeconds=2):
             input_wx.click(delete_btn)
-            time.sleep(0.5)
             return True
         return False
 
