@@ -470,7 +470,7 @@ last_task_time: float = 0
 # 空闲多少秒后自动扫描聊天文件
 IDLE_FILE_SCAN_SECONDS = 120
 # 是否启用定时检查文件功能
-ENABLE_IDLE_FILE_SCAN = False
+ENABLE_IDLE_FILE_SCAN = True
 # 上次自动扫描聊天文件的时间戳
 last_file_scan_time: float = 0
 # 微信文件根目录
@@ -814,6 +814,29 @@ class ExcelFileHandler(FileSystemEventHandler):
                 #     except Exception as e:
                 #         print(f"  ⚠️ 文件校验异常（继续处理）: {f.file_name} - {e}")
 
+                # 未下载的文件先触发下载，尝试右键复制验证下载完成（最长30秒）
+                if f.file_status == "未下载":
+                    print(f"  📥 [{i}/{len(today_files)}] 下载中: {f.file_name}")
+                    try:
+                        f.download()
+                        time.sleep(3)
+                        # 尝试右键复制验证下载是否完成，最多重试10次，每次等3秒
+                        downloaded = False
+                        for attempt in range(10):
+                            try:
+                                f.copy()
+                                downloaded = True
+                                break
+                            except Exception:
+                                time.sleep(3)
+                        if not downloaded:
+                            print(f"  ❌ 下载超时: {f.file_name}")
+                            continue
+                        print(f"  ✅ 下载完成: {f.file_name}")
+                    except Exception as e:
+                        print(f"  ❌ 下载异常: {f.file_name} - {e}")
+                        continue
+
                 # 群聊文件：复制 → 定位到聊天位置 → 引用回复确认消息
                 print(f"  📋 [{i}/{len(today_files)}] 复制并定位: {f.file_name}")
                 try:
@@ -1122,13 +1145,13 @@ def run():
     # 初始化微信
     wx = Weixin()
     print("✅ 微信已连接")
-    self_info = wx.get_self_info()
-    bot_nickname_local = self_info.get("nickname", "")
-    print(f"当前账号: {bot_nickname_local} (微信号: {self_info.get('account', '')})")
+    # self_info = wx.get_self_info()
+    # bot_nickname_local = self_info.get("nickname", "")
+    # print(f"当前账号: {bot_nickname_local} (微信号: {self_info.get('account', '')})")
 
     # 更新全局 bot_nickname
-    global bot_nickname
-    bot_nickname = bot_nickname_local
+    # global bot_nickname
+    # bot_nickname = bot_nickname_local
 
     # 连接私域服务端
     siyu = Siyu(
@@ -1149,9 +1172,9 @@ def run():
     print("💓 心跳线程已启动")
 
     # 在文件传输助手发送启动通知
-    startup_time = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
-    wx.send_text("文件传输助手", f"[{startup_time}] 机器人启动成功！")
-    print("📨 已发送启动通知到文件传输助手")
+    # startup_time = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+    # wx.send_text("文件传输助手", f"[{startup_time}] 机器人启动成功！")
+    # print("📨 已发送启动通知到文件传输助手")
 
     # 初始化任务管理器
     task_mgr = SiYuTask()
