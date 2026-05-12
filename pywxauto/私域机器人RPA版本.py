@@ -469,6 +469,8 @@ wx_lock = threading.Lock()
 last_task_time: float = 0
 # 空闲多少秒后自动扫描聊天文件
 IDLE_FILE_SCAN_SECONDS = 120
+# 是否启用定时检查文件功能
+ENABLE_IDLE_FILE_SCAN = False
 # 上次自动扫描聊天文件的时间戳
 last_file_scan_time: float = 0
 # 微信文件根目录
@@ -1046,6 +1048,9 @@ def _mark_task_done():
 
 def _try_idle_file_scan(wx: Weixin, siyu: Optional[Siyu] = None):
     """空闲超过 IDLE_FILE_SCAN_SECONDS 且距上次扫描也超过该时间，自动扫描聊天文件"""
+    if not ENABLE_IDLE_FILE_SCAN:
+        return
+
     global last_file_scan_time
     now = time.time()
 
