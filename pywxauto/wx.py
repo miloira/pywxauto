@@ -2524,6 +2524,31 @@ class Message:
 
         return None
 
+    @property
+    def is_visible(self) -> bool:
+        """
+        判断消息是否在聊天可见区域内。
+
+        通过消息控件的 BoundingRectangle 与 chat.message_view_rect 比较，
+        消息控件的顶部和底部都在可见区域内则视为可见。
+
+        Returns:
+            True 消息在可见区域内，False 不在或无法判断
+        """
+        if not self.chat:
+            return False
+        view_rect = self.chat.message_view_rect
+        if not view_rect:
+            return False
+        ctrl = self._find_ctrl()
+        if not ctrl:
+            return False
+        try:
+            rect = ctrl.BoundingRectangle
+            return rect.top >= view_rect[1] and rect.bottom <= view_rect[3]
+        except Exception:
+            return False
+
     @PIM.guard
     def scroll_to_visible(self, max_scroll: int = 30) -> bool:
         """
@@ -10194,6 +10219,22 @@ class Chat:
             ClassName="mmui::RecyclerListView",
             AutomationId="chat_message_list",
         )
+
+    @property
+    def message_view_rect(self) -> tuple[int, int, int, int]:
+        """
+        获取聊天消息可见区域的坐标 (left, top, right, bottom)。
+
+        通过查找 mmui::MessageView 控件的 BoundingRectangle 获取。
+
+        Returns:
+            (left, top, right, bottom) 屏幕坐标，未找到时返回空元组
+        """
+        view = self._win.GroupControl(ClassName="mmui::MessageView")
+        if not view.Exists(0, 0):
+            return ()
+        rect = view.BoundingRectangle
+        return (rect.left, rect.top, rect.right, rect.bottom)
 
     @PIM.guard
     def page_end(self) -> None:
