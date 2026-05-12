@@ -101,7 +101,8 @@ class Siyu:
     - v2_distributor_from_list: 获取收单群列表
     - v2_provider_from_list: 获取发货群列表
     - v2_text_order_report: 文本订单上报
-    - v2_file_upload_report: 文件订单上报
+    - v2_file_upload_report: 文件订单上报（客户端解析后上报）
+    - v2_file_upload_raw: 文件订单直传（原始文件上传，服务端解析）
     - v2_file_validate: 文件名校验
     - v2_message_precheck: 消息预校验
     - v2_nickname_mapping: 昵称映射表
@@ -373,6 +374,53 @@ class Siyu:
             dict: {"rooms": {...}, "contacts": {...}, "room_members": {...}}
         """
         return self._post("/siyu/v2_nickname_mapping", {})
+
+    def file_upload_raw(
+        self,
+        file_path: str,
+        room_nickname: str,
+        sender_nickname: str = "",
+        file_type: str = "order",
+    ) -> dict:
+        """
+        文件订单直传（v2_file_upload_raw）。
+
+        将原始 Excel 文件直接上传给服务端，服务端完成所有解析工作
+        （智能表头检测、手机号过滤、订单处理）。
+
+        Args:
+            file_path: 本地文件路径（.xlsx / .xls，最大 10MB）
+            room_nickname: 消息来源群的昵称
+            sender_nickname: 发送者昵称（可选）
+            file_type: 文件类型，固定 "order"
+
+        Returns:
+            dict: {"file_id": str, "row_count": int, "valid_row_count": int}
+
+        Raises:
+            SiyuError: 上传失败（格式不支持、文件过大、群不存在、无有效订单等）
+        """
+        headers = {}
+        if self.robot_id:
+            headers["droplet-robot-id"] = self.robot_id
+
+        file_name = os.path.basename(file_path)
+        with open(file_path, "rb") as fp:
+            files = {"file": (file_name, fp)}
+            data = {
+                "room_nickname": room_nickname,
+                "sender_nickname": sender_nickname,
+                "file_type": file_type,
+            }
+            # multipart/form-data 请求不能带 Content-Type: application/json
+            resp = self._session.post(
+                self._url("/siyu/v2_file_upload_raw"),
+                files=files,
+                data=data,
+                headers=headers,
+                timeout=max(self.timeout, 30),  # 上传文件给更长超时
+            )
+        return self._handle_response(resp)
 
     # ========================= 心跳管理 =========================
 
@@ -837,83 +885,84 @@ class ExcelFileHandler(FileSystemEventHandler):
                         print(f"  ❌ 下载异常: {f.file_name} - {e}")
                         continue
 
-                # 群聊文件：复制 → 定位到聊天位置 → 引用回复确认消息
-                print(f"  📋 [{i}/{len(today_files)}] 复制并定位: {f.file_name}")
+                # 群聊文件：另存为到本地 → 上传服务端 → 定位回复 → 删除
+                # 构造本地保存路径
+                save_path = os.path.join(SAVE_DIR, f.file_name)
+                if os.path.exists(save_path):
+                    name, ext = os.path.splitext(f.file_name)
+                    timestamp = datetime.now().strftime("%H%M%S")
+                    save_path = os.path.join(SAVE_DIR, f"{name}_{timestamp}{ext}")
+
+                # 另存为到本地
+                print(f"  📥 [{i}/{len(today_files)}] 另存为: {f.file_name}")
                 try:
-                    # 复制文件到剪贴板
-                    f.copy()
-                    time.sleep(0.5)
-
-                    # 定位到聊天位置（跳转到该文件消息所在的聊天会话）
-                    f.switch_to_message()
-                    time.sleep(1)
-
-                    # 获取当前聊天窗口，找到该文件消息并引用回复
-                    chat = self._wx.chat
-                    if chat:
-                        # 获取可见消息列表，找到该文件对应的消息
-                        messages = chat.get_visible_messages()
-                        target_msg = None
-                        for msg in reversed(messages):
-                            # 通过文件名匹配文件消息
-                            if hasattr(msg, 'file_name') and msg.file_name == f.file_name:
-                                target_msg = msg
-                                break
-                        if target_msg:
-                            chat.send_text("已收到文件，正在处理中，请耐心等待。", reply_to=target_msg)
-                            print(f"  ✅ 已引用回复: {f.file_name}")
-                        else:
-                            # 未找到匹配消息，直接发送（不引用）
-                            chat.send_text("已收到文件，正在处理中，请耐心等待。")
-                            print(f"  ✅ 已回复（未匹配到消息引用）: {f.file_name}")
-                    else:
-                        print(f"  ⚠️ 定位后未找到聊天窗口: {f.file_name}")
-
+                    ok = self._wx.file_manager.save_file_as(f, save_path)
+                    if not ok:
+                        print(f"  ❌ 另存为失败: {f.file_name}")
+                        continue
+                    print(f"  ✅ 已保存到本地: {save_path}")
                 except Exception as e:
-                    print(f"  ❌ 复制/定位/回复异常: {f.file_name} - {e}")
-                    traceback.print_exc()
+                    print(f"  ❌ 另存为异常: {f.file_name} - {e}")
                     continue
 
-                # # 群聊文件：根据状态选择"另存为"或"下载到" + 删除
-                # # 构造保存路径
-                # save_path = os.path.join(SAVE_DIR, f.file_name)
-                # if os.path.exists(save_path):
-                #     name, ext = os.path.splitext(f.file_name)
-                #     timestamp = datetime.now().strftime("%H%M%S")
-                #     save_path = os.path.join(SAVE_DIR, f"{name}_{timestamp}{ext}")
-                #
-                # # 根据文件状态选择操作：已下载用"另存为"，未下载用"下载到"
-                # if not f.file_status:
-                #     # 已下载 → 另存为
-                #     print(f"  📥 [{i}/{len(today_files)}] 另存为(已下载): {f.file_name}")
-                #     try:
-                #         ok = self._wx.file_manager.save_file_as(f, save_path)
-                #         if not ok:
-                #             print(f"  ❌ 另存为失败: {f.file_name}")
-                #             continue
-                #         print(f"  ✅ 已保存: {save_path}")
-                #     except Exception as e:
-                #         print(f"  ❌ 另存为异常: {f.file_name} - {e}")
-                #         continue
-                # else:
-                #     if f.file_status == "未下载":
-                #         # 未下载 → 下载到
-                #         print(f"  📥 [{i}/{len(today_files)}] 下载到(未下载): {f.file_name}")
-                #         try:
-                #             ok = self._wx.file_manager.download_to(f, save_path)
-                #             if not ok:
-                #                 print(f"  ❌ 下载到失败: {f.file_name}")
-                #                 continue
-                #             print(f"  ✅ 已保存: {save_path}")
-                #         except Exception as e:
-                #             print(f"  ❌ 下载到异常: {f.file_name} - {e}")
-                #             continue
+                # 上传文件到服务端 v2_file_upload_raw
+                upload_success = False
+                if self._siyu:
+                    print(f"  📤 [{i}/{len(today_files)}] 上传服务端: {f.file_name}")
+                    try:
+                        result = self._siyu.file_upload_raw(
+                            file_path=save_path,
+                            room_nickname=f.source_name,
+                            sender_nickname=f.sender_name or "",
+                        )
+                        file_id = result.get("file_id", "")
+                        row_count = result.get("row_count", 0)
+                        valid_row_count = result.get("valid_row_count", 0)
+                        print(f"  ✅ 上传成功: file_id={file_id}, 总行数={row_count}, 有效行数={valid_row_count}")
+                        upload_success = True
+                    except SiyuError as e:
+                        print(f"  ❌ 上传失败: {f.file_name} - {e}")
+                    except Exception as e:
+                        print(f"  ❌ 上传异常: {f.file_name} - {e}")
+                        traceback.print_exc()
 
-                # 直接删除
+                # 清理本地临时文件
+                try:
+                    if os.path.exists(save_path):
+                        os.remove(save_path)
+                except Exception:
+                    pass
+
+                # 上传成功后，定位到聊天位置并引用回复确认消息
+                if upload_success:
+                    try:
+                        f.switch_to_message()
+                        time.sleep(1)
+
+                        chat = self._wx.chat
+                        if chat:
+                            messages = chat.get_visible_messages()
+                            target_msg = None
+                            for msg in reversed(messages):
+                                if hasattr(msg, 'file_name') and msg.file_name == f.file_name:
+                                    target_msg = msg
+                                    break
+                            if target_msg:
+                                chat.send_text("已收到文件，正在处理中，请耐心等待。", reply_to=target_msg)
+                                print(f"  ✅ 已引用回复: {f.file_name}")
+                            else:
+                                chat.send_text("已收到文件，正在处理中，请耐心等待。")
+                                print(f"  ✅ 已回复（未匹配到消息引用）: {f.file_name}")
+                        else:
+                            print(f"  ⚠️ 定位后未找到聊天窗口: {f.file_name}")
+                    except Exception as e:
+                        print(f"  ⚠️ 回复异常（不影响删除）: {f.file_name} - {e}")
+
+                # 删除聊天文件管理器中的文件项
                 try:
                     time.sleep(0.5)
                     self._wx.file_manager.delete_file(f)
-                    print(f"  �️ 已删除: {f.file_name}")
+                    print(f"  🗑️ 已删除: {f.file_name}")
                 except Exception as e:
                     print(f"  ⚠️ 删除异常: {f.file_name} - {e}")
 
@@ -991,11 +1040,259 @@ def _handle_send_image(wx: Weixin, task: JxySiyuTask, task_mgr: SiYuTask):
         time.sleep(0.5)
 
 
+def _handle_send_room_at(wx: Weixin, task: JxySiyuTask, task_mgr: SiYuTask):
+    """
+    处理 /msg/send_room_at — 发送群文本消息（带 @）
+
+    metadata 中包含:
+      - at_nickname_list: {wxid: nickname} 映射
+    task.to: 目标群昵称 (to_nickname)
+    task.content: 消息文本
+    task.at_members: at_nickname_list 中的 nickname 列表
+    """
+    chat = wx.open_session_by_search(task.to)
+
+    if task.at_members:
+        members = json.loads(task.at_members)
+        status = chat.send_at(task.content or "", members)
+    else:
+        status = chat.send_text(task.content or "")
+
+    if status == MessageStatus.FAILED:
+        raise RuntimeError("群消息发送失败")
+
+
+def _generate_excel_file(excel_name: str, datas: list) -> str:
+    """
+    根据 excel_msg 数据生成 Excel 文件到临时目录，返回文件路径。
+
+    Args:
+        excel_name: 文件名（如 "回单_20260512.xlsx"）
+        datas: 二维数组，第一行为表头
+
+    Returns:
+        生成的 Excel 文件路径
+    """
+    import openpyxl
+
+    wb = openpyxl.Workbook()
+    ws = wb.active
+    for row in datas:
+        ws.append(row)
+
+    # 保存到临时目录
+    temp_dir = os.path.join(SAVE_DIR, "_temp_excel")
+    os.makedirs(temp_dir, exist_ok=True)
+    file_path = os.path.join(temp_dir, excel_name)
+    # 避免重名
+    if os.path.exists(file_path):
+        name, ext = os.path.splitext(excel_name)
+        timestamp = datetime.now().strftime("%H%M%S")
+        file_path = os.path.join(temp_dir, f"{name}_{timestamp}{ext}")
+
+    wb.save(file_path)
+    return file_path
+
+
+def _handle_send_excel(wx: Weixin, task: JxySiyuTask, task_mgr: SiYuTask):
+    """
+    处理 /msg/send_file_msg, /msg/send_file_gys, /msg/send_file_gys_bill
+    — 生成 Excel 文件并发送到群
+
+    metadata 中包含:
+      - excel_msg: {"excel_name": str, "datas": [[...]]}
+      - at_nickname_list: {wxid: nickname}
+    task.to: 目标群昵称
+    task.content: 附带的文本消息
+    task.at_members: @ 的成员昵称列表
+    """
+    metadata = json.loads(task.task_metadata) if task.task_metadata else {}
+    excel_msg = metadata.get("excel_msg")
+    if not excel_msg:
+        raise RuntimeError("缺少 excel_msg 数据")
+
+    excel_name = excel_msg.get("excel_name", "output.xlsx")
+    datas = excel_msg.get("datas", [])
+    if not datas:
+        raise RuntimeError("excel_msg.datas 为空")
+
+    # 生成 Excel 文件
+    file_path = _generate_excel_file(excel_name, datas)
+
+    try:
+        chat = wx.open_session_by_search(task.to)
+
+        # 先发文本内容（带 @ 或不带）
+        if task.content:
+            if task.at_members:
+                members = json.loads(task.at_members)
+                chat.send_at(task.content, members)
+            else:
+                chat.send_text(task.content)
+            time.sleep(0.5)
+
+        # 发送 Excel 文件
+        status = chat.send_file(file_path)
+        if status == MessageStatus.FAILED:
+            raise RuntimeError(f"Excel 文件发送失败: {excel_name}")
+    finally:
+        # 清理临时文件
+        try:
+            if os.path.exists(file_path):
+                os.remove(file_path)
+        except Exception:
+            pass
+
+
+def _handle_send_binary_file(wx: Weixin, task: JxySiyuTask, task_mgr: SiYuTask):
+    """
+    处理 /msg/send_file — 发送文件（支持 b64 / url / file_path）
+
+    metadata 中包含:
+      - b64: base64 编码的文件内容
+      - url: 文件下载 URL
+      - file_path: 本地文件路径
+      - file_name: 文件名（用于 b64/url 场景）
+    task.to: 目标群/好友昵称
+    """
+    import base64
+
+    metadata = json.loads(task.task_metadata) if task.task_metadata else {}
+    b64_data = metadata.get("b64", "")
+    url = metadata.get("url", "")
+    file_path = metadata.get("file_path", "")
+    file_name = metadata.get("file_name", "file")
+
+    local_path = None
+    temp_file = False
+
+    if file_path and os.path.exists(file_path):
+        # 直接使用本地文件
+        local_path = file_path
+    elif b64_data:
+        # base64 解码保存到临时文件
+        temp_dir = os.path.join(SAVE_DIR, "_temp_files")
+        os.makedirs(temp_dir, exist_ok=True)
+        local_path = os.path.join(temp_dir, file_name)
+        with open(local_path, "wb") as fp:
+            fp.write(base64.b64decode(b64_data))
+        temp_file = True
+    elif url:
+        # 从 URL 下载
+        temp_dir = os.path.join(SAVE_DIR, "_temp_files")
+        os.makedirs(temp_dir, exist_ok=True)
+        local_path = os.path.join(temp_dir, file_name)
+        resp = requests.get(url, timeout=30)
+        resp.raise_for_status()
+        with open(local_path, "wb") as fp:
+            fp.write(resp.content)
+        temp_file = True
+    else:
+        raise RuntimeError("send_file: 缺少 b64/url/file_path，无法获取文件")
+
+    try:
+        chat = wx.open_session_by_search(task.to)
+        status = chat.send_file(local_path)
+        if status == MessageStatus.FAILED:
+            raise RuntimeError(f"文件发送失败: {file_name}")
+    finally:
+        if temp_file and local_path and os.path.exists(local_path):
+            try:
+                os.remove(local_path)
+            except Exception:
+                pass
+
+
+def _handle_send_message_with_type(wx: Weixin, task: JxySiyuTask, task_mgr: SiYuTask):
+    """
+    处理 /msg/send_message_with_type — 发送多类型消息
+
+    metadata 中包含:
+      - type: "text" / "image" / "file" / "video"
+      - url: 文件/图片 URL
+      - file_name: 文件名
+      - at_nickname_list: @ 成员映射
+    task.to: 目标群/好友昵称
+    task.content: 文本内容
+    task.at_members: @ 的成员昵称列表
+    """
+    import base64
+
+    metadata = json.loads(task.task_metadata) if task.task_metadata else {}
+    msg_type = metadata.get("type", "text")
+    url = metadata.get("url", "")
+    file_name = metadata.get("file_name", "file")
+
+    chat = wx.open_session_by_search(task.to)
+
+    if msg_type == "text":
+        # 纯文本消息
+        if task.at_members:
+            members = json.loads(task.at_members)
+            status = chat.send_at(task.content or "", members)
+        else:
+            status = chat.send_text(task.content or "")
+        if status == MessageStatus.FAILED:
+            raise RuntimeError("文本消息发送失败")
+
+    elif msg_type in ("image", "file", "video"):
+        # 先发文本（如果有）
+        if task.content:
+            if task.at_members:
+                members = json.loads(task.at_members)
+                chat.send_at(task.content, members)
+            else:
+                chat.send_text(task.content)
+            time.sleep(0.5)
+
+        # 下载文件并发送
+        if not url:
+            raise RuntimeError(f"send_message_with_type({msg_type}): 缺少 url")
+
+        temp_dir = os.path.join(SAVE_DIR, "_temp_files")
+        os.makedirs(temp_dir, exist_ok=True)
+        local_path = os.path.join(temp_dir, file_name)
+
+        try:
+            resp = requests.get(url, timeout=30)
+            resp.raise_for_status()
+            with open(local_path, "wb") as fp:
+                fp.write(resp.content)
+
+            status = chat.send_file(local_path)
+            if status == MessageStatus.FAILED:
+                raise RuntimeError(f"{msg_type} 发送失败: {file_name}")
+        finally:
+            try:
+                if os.path.exists(local_path):
+                    os.remove(local_path)
+            except Exception:
+                pass
+    else:
+        raise RuntimeError(f"不支持的消息类型: {msg_type}")
+
+
+def _handle_refresh_rooms(wx: Weixin, task: JxySiyuTask, task_mgr: SiYuTask):
+    """
+    处理 /contact/update_rooms_contacts — 刷新群列表
+
+    此任务不需要操作微信 UI，仅标记为成功。
+    实际刷新逻辑由主循环中的 siyu 客户端完成。
+    """
+    # 标记需要刷新（通过 metadata 传递信号给主循环）
+    print("  📋 收到刷新群列表通知")
+
+
 # 任务类型 → 处理函数映射
 TASK_HANDLERS = {
     "send_text": _handle_send_text,
     "send_file": _handle_send_file,
     "send_image": _handle_send_image,
+    "send_room_at": _handle_send_room_at,
+    "send_excel": _handle_send_excel,
+    "send_binary_file": _handle_send_binary_file,
+    "send_message_with_type": _handle_send_message_with_type,
+    "refresh_rooms": _handle_refresh_rooms,
 }
 
 
@@ -1032,6 +1329,152 @@ def send_text_callback(req: SendTextRequest):
         "msg": "任务已创建",
         "data": {
             "task_id": task.id,
+            "status": task.status.value,
+            "created_at": task.created_at.isoformat(),
+        },
+    }
+
+
+# ========================= WxService 统一回调接口 =========================
+
+# api_path → task_type 映射
+_API_PATH_TO_TASK_TYPE = {
+    "/msg/send_room_at": "send_room_at",
+    "/msg/send_file_msg": "send_excel",
+    "/msg/send_file_gys": "send_excel",
+    "/msg/send_file_gys_bill": "send_excel",
+    "/msg/send_file": "send_binary_file",
+    "/msg/send_message_with_type": "send_message_with_type",
+    "/contact/update_rooms_contacts": "refresh_rooms",
+}
+
+# 桌面自动化模式下应忽略的命令
+_IGNORED_API_PATHS = {
+    "/contact/get_contacts",
+    "/contacts/refresh_and_upload_full_contacts_and_rooms",
+    "/room/get_rooms",
+    "/room/refresh_room_contacts_by_room_id",
+}
+
+
+class SiyuCmdRequest(BaseModel):
+    """WxService gRPC 推送的统一命令格式"""
+    type: str = Field(default="siyu_cmd")
+    data: dict = Field(..., description="命令数据")
+
+
+@api.post("/siyu/wxrpa/cmd")
+def siyu_cmd_callback(req: SiyuCmdRequest):
+    """
+    接收 WxService 服务端推送的统一命令，解析后生成对应任务。
+
+    请求格式:
+    {
+      "type": "siyu_cmd",
+      "data": {
+        "api_path": "/msg/send_room_at",
+        "param": { ... },
+        "request_id": "uuid-xxx",
+        "robot_type": "wx",
+        "ts": "2026-05-12 10:30:00",
+        "robot_id": "651249037923681e9c985192"
+      }
+    }
+    """
+    cmd_data = req.data
+    api_path = cmd_data.get("api_path", "")
+    param = cmd_data.get("param") or {}
+    request_id = cmd_data.get("request_id", "")
+    robot_id = cmd_data.get("robot_id", "")
+
+    # 忽略桌面自动化模式不需要处理的命令
+    if api_path in _IGNORED_API_PATHS:
+        return {
+            "code": 0,
+            "msg": f"命令已忽略（桌面自动化模式不适用）: {api_path}",
+            "data": {"ignored": True},
+        }
+
+    # 查找对应的任务类型
+    task_type = _API_PATH_TO_TASK_TYPE.get(api_path)
+    if not task_type:
+        raise HTTPException(
+            status_code=400,
+            detail=f"不支持的 api_path: {api_path}",
+        )
+
+    # 提取通用字段
+    to_nickname = param.get("to_nickname", "")
+    content = param.get("content", "")
+    at_nickname_list = param.get("at_nickname_list") or {}
+    # 将 at_nickname_list 的 values 作为 at_members（昵称列表）
+    at_members = list(at_nickname_list.values()) if at_nickname_list else None
+
+    # 构建 metadata（保存原始 param 中的扩展信息）
+    metadata = {}
+
+    if task_type == "send_room_at":
+        # 纯文本 + @
+        metadata["at_nickname_list"] = at_nickname_list
+
+    elif task_type == "send_excel":
+        # Excel 生成 + 发送
+        metadata["excel_msg"] = param.get("excel_msg") or {}
+        metadata["at_nickname_list"] = at_nickname_list
+        metadata["order_info"] = param.get("order_info") or {}
+        metadata["enable_reply_new_shipment"] = param.get("enable_reply_new_shipment", False)
+        metadata["new_shipment_order_indexs"] = param.get("new_shipment_order_indexs") or []
+
+    elif task_type == "send_binary_file":
+        # 文件发送（b64/url/file_path）
+        metadata["b64"] = param.get("b64", "")
+        metadata["url"] = param.get("url", "")
+        metadata["file_path"] = param.get("file_path", "")
+        metadata["file_name"] = param.get("file_name", "file")
+
+    elif task_type == "send_message_with_type":
+        # 多类型消息
+        metadata["type"] = param.get("type", "text")
+        metadata["url"] = param.get("url", "")
+        metadata["file_name"] = param.get("file_name", "file")
+        metadata["file_size"] = param.get("file_size", 0)
+        metadata["at_nickname_list"] = at_nickname_list
+        metadata["msg_id"] = param.get("msg_id", "")
+
+    elif task_type == "refresh_rooms":
+        # 刷新群列表（无需额外参数）
+        pass
+
+    # 生成任务名称
+    task_name_map = {
+        "send_room_at": f"群消息(@) → {to_nickname}",
+        "send_excel": f"发送Excel → {to_nickname}",
+        "send_binary_file": f"发送文件 → {to_nickname}",
+        "send_message_with_type": f"发送{param.get('type', '?')}消息 → {to_nickname}",
+        "refresh_rooms": "刷新群列表",
+    }
+    task_name = task_name_map.get(task_type, f"{api_path} → {to_nickname}")
+
+    # 创建任务
+    task = _api_task_mgr.create(
+        task_type=task_type,
+        task_name=task_name,
+        to=to_nickname,
+        content=content,
+        at_members=at_members,
+        msg_id=request_id,
+        metadata=metadata,
+        wxid=robot_id,
+    )
+
+    print(f"  📨 收到命令 [{api_path}] → 任务 [{task.id}] {task_name}")
+
+    return {
+        "code": 0,
+        "msg": "任务已创建",
+        "data": {
+            "task_id": task.id,
+            "task_type": task_type,
             "status": task.status.value,
             "created_at": task.created_at.isoformat(),
         },
