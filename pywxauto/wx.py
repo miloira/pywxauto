@@ -1927,9 +1927,9 @@ def _classify_contour_rects(
         # 昵称取第一个（应该只有一个）
         if nickname_candidates:
             nickname_rect = nickname_candidates[0]
-        # 消息内容取 y1 最大的（最下方的）
+        # 消息内容：取 top 和头像 top 最接近的（最平齐的）
         if content_candidates:
-            content_rect = max(content_candidates, key=lambda r: r[1])
+            content_rect = min(content_candidates, key=lambda r: abs(r[1] - head_top))
         # 验证：没有nickname时，content的top应和头像top几乎平齐
         # 如果差距过大，说明识别有误，丢弃content
         if not nickname_rect and content_rect:
@@ -2549,15 +2549,52 @@ class Message:
         except Exception:
             return False
 
+    @property
+    def center(self) -> tuple[int, int] | None:
+        """
+        获取消息内容区域的屏幕中心点坐标。
+
+        x 使用 content_rect（相对于控件截图的坐标）计算，
+        y 使用控件实时的 BoundingRectangle 中心并向上偏移 10px，
+        因为消息滚动时 y 会变动，content_rect 的 y 是截图时的静态值。
+
+        Returns:
+            (x, y) 屏幕坐标，无法计算时返回 None
+        """
+        ctrl = self._find_ctrl()
+        if not ctrl:
+            return None
+        try:
+            rect = ctrl.BoundingRectangle
+            x1, _, x2, _ = self.content_rect
+            cx = rect.left + (x1 + x2) // 2
+            cy = (rect.top + rect.bottom) // 2 - 8
+            return (cx, cy)
+        except Exception:
+            rect = ctrl.BoundingRectangle
+            cy = (rect.top + rect.bottom) // 2 - 8 # 向上偏移10px保证引用消息悬浮位置正确
+            if self.bubble_rect:
+                bl, bt, br, bb = self.bubble_rect
+                # bubble_rect 的 x 坐标不变，y 坐标从控件实时位置重新计算
+                cx = (bl + br) // 2
+            elif self.source == Source.SELF:
+                cx = rect.right - rect.width() // 4
+            elif self.source == Source.OTHERS:
+                cx = rect.left + rect.width() // 4
+            else:
+                cx = (rect.left + rect.right) // 2
+            return (cx, cy)
+
     @PIM.guard
     def scroll_to_visible(self, max_scroll: int = 30) -> bool:
         """
         将消息滚动到可见区域。
 
         智能策略：
-        1. 先检查消息是否已在可见区域，是则直接返回（不触发任何滚动）
+        1. 通过 is_visible 检查消息是否已在可见区域，是则直接返回
         2. 不在可见区域时，向上平滑滚动查找，最多滚动 max_scroll 次
-        3. 超过最大滚动次数仍未找到，调用 page_end 回到最新消息位置，返回 False
+        3. 每次滚动后用 message_view_rect 判断是否进入可见区域
+        4. 超过最大滚动次数仍未找到，调用 page_end 回到最新消息位置，返回 False
 
         Args:
             max_scroll: 最大滚动次数，默认 30 次。超过后放弃查找并回到底部。
@@ -2568,51 +2605,49 @@ class Message:
         if not self.chat:
             return False
 
-        lc = self.chat._message_list
-        if not lc.Exists(maxSearchSeconds=2):
-            return False
-
         # 1. 先检查消息是否已在可见区域
-        ctrl = self._find_ctrl()
-        if ctrl:
-            return self._ensure_visible(lc, ctrl)
+        if self.is_visible:
+            return True
+
+        view_rect = self.chat.message_view_rect
+        if not view_rect:
+            return False
 
         # 2. 不在可见区域，向上平滑滚动查找
         self.chat._scan_paused = True
         try:
-            rect = lc.BoundingRectangle
-            cx = (rect.left + rect.right) // 2
-            cy = (rect.top + rect.bottom) // 2
+            cx = (view_rect[0] + view_rect[2]) // 2
+            cy = (view_rect[1] + view_rect[3]) // 2
 
             for _ in range(max_scroll):
-                scroll_at(cx, cy, 120 * 1)  # 向上滚动（每次 3 格，更平滑）
+                scroll_at(cx, cy, 120)  # 向上滚动 1 格
                 ctrl = self._find_ctrl()
-                if ctrl:
-                    return self._ensure_visible(lc, ctrl)
+                if not ctrl:
+                    continue
+                # 找到控件后微调确保完全可见
+                try:
+                    ctrl_rect = ctrl.BoundingRectangle
+                    if ctrl_rect.top >= view_rect[1] and ctrl_rect.bottom <= view_rect[3]:
+                        return True
+                    # 微调滚动
+                    for _ in range(10):
+                        ctrl_rect = ctrl.BoundingRectangle
+                        if ctrl_rect.top >= view_rect[1] and ctrl_rect.bottom <= view_rect[3] - 10:
+                            return True
+                        if ctrl_rect.top < view_rect[1]:
+                            scroll_at(cx, cy, 120)
+                        else:
+                            scroll_at(cx, cy, -120)
+                        time.sleep(0.1)
+                    return True
+                except Exception:
+                    return True
 
             # 3. 超过最大滚动次数，回到底部
             self.chat.page_end()
             return False
         finally:
             self.chat._scan_paused = False
-
-    @staticmethod
-    def _ensure_visible(lc, ctrl) -> bool:
-        """确保控件完全在列表可见区域内，必要时微调滚动。"""
-        list_rect = lc.BoundingRectangle
-        cx = (list_rect.left + list_rect.right) // 2
-        cy = (list_rect.top + list_rect.bottom) // 2
-
-        for _ in range(10):
-            ctrl_rect = ctrl.BoundingRectangle
-            if ctrl_rect.top >= list_rect.top and ctrl_rect.bottom <= list_rect.bottom - 10:
-                return True
-            if ctrl_rect.top < list_rect.top:
-                scroll_at(cx, cy, 120)  # 向上微调 1 格
-            else:
-                scroll_at(cx, cy, -120)  # 向下微调 1 格
-            time.sleep(0.1)
-        return True
 
     @PIM.guard
     def view(self) -> None:
@@ -2658,35 +2693,12 @@ class Message:
         if not self.scroll_to_visible():
             return False
 
-        target = self._find_ctrl()
-        if not target:
-            return False
-
-        rect = target.BoundingRectangle
-        cy = (rect.top + rect.bottom) // 2 - 10 # 向上偏移10px保证引用消息悬浮位置正确
-
-        if self.bubble_rect:
-            bl, bt, br, bb = self.bubble_rect
-            # bubble_rect 的 x 坐标不变，y 坐标从控件实时位置重新计算
-            cx = (bl + br) // 2
-        elif self.source == Source.SELF:
-            cx = rect.right - rect.width() // 4
-        elif self.source == Source.OTHERS:
-            cx = rect.left + rect.width() // 4
-        else:
-            cx = (rect.left + rect.right) // 2
+        cx, cy = self.center
 
         if not background:
             auto.SetCursorPos(cx, cy)
         else:
-            hwnd = target.NativeWindowHandle
-            if not hwnd:
-                parent = target
-                while parent:
-                    hwnd = parent.NativeWindowHandle
-                    if hwnd:
-                        break
-                    parent = parent.GetParentControl()
+            hwnd = self.chat._win.NativeWindowHandle
             if hwnd:
                 client_x, client_y = win32gui.ScreenToClient(hwnd, (cx, cy))
                 input_wm.move_window(hwnd, client_x, client_y)
@@ -10361,11 +10373,15 @@ class Chat:
 
             # 构造具体消息对象
             msg = self._build_message(
-                msg_cls, raw_name, sender, source,
-                runtime_id=rid, bubble_rect=bubble_rect,
+                msg_cls, 
+                raw_name, 
+                sender, source,
+                runtime_id=rid, 
+                bubble_rect=bubble_rect,
                 room=chat_name if is_room else None,
                 chat=self, control=ctrl,
-                headimg_rect=headimg_rect, nickname_rect=nickname_rect,
+                headimg_rect=headimg_rect, 
+                nickname_rect=nickname_rect,
                 content_rect=content_rect,
             )
             messages.append(msg)
@@ -10562,41 +10578,41 @@ class Chat:
         bubble_left, bubble_right = Chat._detect_bubble_rect(img, w, h, source)
 
         # ---- 保存标记点截图到当前路径（调试用） ----
-        try:
-            from PIL import ImageDraw
-            debug_img = img.copy()
-            draw = ImageDraw.Draw(debug_img)
-            scan_y = 40
-            # 标记边缘扫描点
-            if edge_scan_y >= 0:
-                # 画扫描线
-                draw.line([(0, edge_scan_y), (w - 1, edge_scan_y)], fill="yellow", width=1)
-                # 标记左侧扫描到的点
-                if edge_left_x >= 0:
-                    draw.ellipse(
-                        [(edge_left_x - 4, edge_scan_y - 4), (edge_left_x + 4, edge_scan_y + 4)],
-                        fill="red", outline="red",
-                    )
-                # 标记右侧扫描到的点
-                if edge_right_x >= 0:
-                    draw.ellipse(
-                        [(edge_right_x - 4, edge_scan_y - 4), (edge_right_x + 4, edge_scan_y + 4)],
-                        fill="blue", outline="blue",
-                    )
-            # 标记气泡边缘
-            if bubble_left > 0:
-                draw.line([(bubble_left, 0), (bubble_left, h - 1)], fill="green", width=1)
-            if bubble_right > 0:
-                draw.line([(bubble_right, 0), (bubble_right, h - 1)], fill="green", width=1)
-            # 标注识别结果
-            label = f"{sender}({source.value})"
-            draw.text((5, 5), label, fill="red")
+        # try:
+        #     from PIL import ImageDraw
+        #     debug_img = img.copy()
+        #     draw = ImageDraw.Draw(debug_img)
+        #     scan_y = 40
+        #     # 标记边缘扫描点
+        #     if edge_scan_y >= 0:
+        #         # 画扫描线
+        #         draw.line([(0, edge_scan_y), (w - 1, edge_scan_y)], fill="yellow", width=1)
+        #         # 标记左侧扫描到的点
+        #         if edge_left_x >= 0:
+        #             draw.ellipse(
+        #                 [(edge_left_x - 4, edge_scan_y - 4), (edge_left_x + 4, edge_scan_y + 4)],
+        #                 fill="red", outline="red",
+        #             )
+        #         # 标记右侧扫描到的点
+        #         if edge_right_x >= 0:
+        #             draw.ellipse(
+        #                 [(edge_right_x - 4, edge_scan_y - 4), (edge_right_x + 4, edge_scan_y + 4)],
+        #                 fill="blue", outline="blue",
+        #             )
+        #     # 标记气泡边缘
+        #     if bubble_left > 0:
+        #         draw.line([(bubble_left, 0), (bubble_left, h - 1)], fill="green", width=1)
+        #     if bubble_right > 0:
+        #         draw.line([(bubble_right, 0), (bubble_right, h - 1)], fill="green", width=1)
+        #     # 标注识别结果
+        #     label = f"{sender}({source.value})"
+        #     draw.text((5, 5), label, fill="red")
 
-            # 保存到当前路径
-            debug_filename = f"sender_debug.png"
-            debug_img.save(debug_filename)
-        except Exception:
-            pass
+        #     # 保存到当前路径
+        #     debug_filename = f"sender_debug.png"
+        #     debug_img.save(debug_filename)
+        # except Exception:
+        #     pass
 
         # 转换为屏幕坐标
         bubble_rect = ()
@@ -10616,6 +10632,7 @@ class Chat:
         headimg_rect = ()
         nickname_rect = ()
         content_rect = ()
+
         try:
             buf = io.BytesIO()
             img.save(buf, format="PNG")
@@ -10626,9 +10643,9 @@ class Chat:
             headimg_rect, nickname_rect, content_rect = _classify_contour_rects(
                 contour_rects, image_bytes=img_bytes,
             )
-            # 保存轮廓识别结果图到当前路径
-            with open("contour_debug.png", "wb") as f:
-                f.write(contour_img_bytes)
+            # # 保存轮廓识别结果图到当前路径
+            # with open("contour_debug.png", "wb") as f:
+            #     f.write(contour_img_bytes)
         except Exception:
             pass
 
@@ -15553,19 +15570,21 @@ class Weixin(WeixinWindow):
                 if not chat.exists:
                     break
 
-                # 消息操作（如 refer/delete）期间暂停扫描，避免滚动时误判
-                if chat._scan_paused:
-                    if stop_event.wait(interval):
-                        break
-                    continue
+                # # 消息操作（如 refer/delete）期间暂停扫描，避免滚动时误判
+                # if chat._scan_paused:
+                #     if stop_event.wait(interval):
+                #         break
+                #     continue
 
                 try:
                     visible = chat.get_visible_messages(sender_cache=sender_cache)
-                except Exception:
+                except Exception as e:
+                    print(e)
                     if stop_event.wait(interval):
                         break
                     continue
-
+                
+                print(visible)
                 # 当前可见消息的 RuntimeId 集合
                 curr_rids = {msg.runtime_id for msg in visible if msg.runtime_id}
 
@@ -16268,11 +16287,11 @@ class WeixinManager:
                 if not chat.exists:
                     break
 
-                # 消息操作期间暂停扫描
-                if chat._scan_paused:
-                    if stop_event.wait(interval):
-                        break
-                    continue
+                # # 消息操作期间暂停扫描
+                # if chat._scan_paused:
+                #     if stop_event.wait(interval):
+                #         break
+                #     continue
 
                 try:
                     visible = chat.get_visible_messages(sender_cache=sender_cache)
