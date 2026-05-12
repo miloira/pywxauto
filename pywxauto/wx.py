@@ -9967,6 +9967,7 @@ class Chat:
         }
 
         chat_name = self.chat_name or "对方"
+        is_room = self.chat_type == "群聊"
 
         messages: list[Message] = []
         for ctrl, _ in auto.WalkControl(lc):
@@ -10021,7 +10022,7 @@ class Chat:
                     hwnd, ctrl, chat_name,
                 )
                 # 群聊中对方发的消息，OCR 识别控件顶部 0-38px 区域提取真实发送者昵称
-                if sender_type == SenderType.FRIEND and self.chat_type == "群聊":
+                if sender_type == SenderType.FRIEND and is_room:
                     try:
                         ocr_sender = self._ocr_sender_name(hwnd, ctrl)
                         sender = ocr_sender if ocr_sender else None
@@ -10035,7 +10036,7 @@ class Chat:
             msg = self._build_message(msg_cls, raw_name, sender, sender_type,
                                       runtime_id=rid)
             msg.bubble_rect = bubble_rect
-            msg.room = chat_name if self.chat_type == "群聊" else None
+            msg.room = chat_name if is_room else None
             msg.chat = self
             msg.control = ctrl
             msg.msg_id = hash((rid, msg.__class__.__name__, raw_name, sender_type, msg.content))
