@@ -459,9 +459,9 @@ def get_data_dir_by_pid(pid: int) -> str:
 # ==============================
 # 当前登录微信号数据目录
 bot_nickname = None
-_wx_processes = find_process("Weixin.exe")
-if not _wx_processes:
-    raise RuntimeError("未找到运行中的微信进程 (Weixin.exe)")
+# _wx_processes = find_process("Weixin.exe")
+# if not _wx_processes:
+#     raise RuntimeError("未找到运行中的微信进程 (Weixin.exe)")
 WECHAT_DATA_DIR = r"C:\Users\张明明\xwechat_files\wxid_g7leryvu7kqm22_a246" or get_data_dir_by_pid(_wx_processes[0]["pid"])
 # 全局微信操作锁（下载文件和发送消息共用，避免 UI 操作冲突）
 wx_lock = threading.Lock()
