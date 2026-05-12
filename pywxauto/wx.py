@@ -5390,7 +5390,6 @@ class Session:
             input_wx.send_keys(self._win, "{Esc}")
             raise WxControlNotFoundError(f"菜单中未找到: {menu_name}")
         input_wx.click(menu_item)
-        time.sleep(0.3)
 
     def _session_context_action(self, name: str, menu_name: str) -> None:
         """对指定会话执行右键菜单操作"""
@@ -7432,7 +7431,7 @@ class ChatFile:
         return self._handle_save_dialog(file_path)
 
     @PIM.guard
-    def download(self, timeout: int = 60) -> bool:
+    def download(self) -> bool:
         """
         下载文件（下载到微信默认路径）。
 
