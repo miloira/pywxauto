@@ -7437,55 +7437,14 @@ class ChatFile:
         下载文件（下载到微信默认路径）。
 
         流程:
-        1. 右键点击文件项 → 弹出微信右键菜单
-        2. 点击"下载"菜单项 → 开始下载
-        3. 轮询：对文件管理器窗口执行 Refind() 刷新 COM 引用，
-           重新枚举子控件获取新的 IUIAutomationElement，
-           通过文件名匹配检查状态
-
-        注意：uiautomation 库缓存了 IUIAutomationElement COM 指针，
-        旧指针在控件重建后会返回过时的属性值。
-        必须通过重新搜索（GetChildren/FindAll）获取新的 COM 对象，
-        才能读到最新的 Name 属性——这也是 Inspect.exe 能实时看到变化的原因。
-
-        Args:
-            timeout: 等待下载完成的超时时间（秒），默认 60 秒
+        1. 获取当前文件控件的 RuntimeId 作为唯一标识
+        2. 右键点击文件项 → 弹出微信右键菜单
+        3. 点击"下载"菜单项 → 开始下载
 
         Returns:
             True 下载成功（状态变为已下载），False 下载超时
         """
-        file_name = self.file_name
-
         self._context_action(i_("下载"))
-
-        # 轮询：刷新窗口 COM 引用，重新枚举文件列表控件
-        deadline = time.monotonic() + timeout
-        while time.monotonic() < deadline:
-            time.sleep(1)
-
-            try:
-                # Refind 强制重新搜索窗口，获取新的 IUIAutomationElement
-                self.file_manager._win.Refind(maxSearchSeconds=3)
-
-                # 重新枚举所有文件 cell（每个都是新的 COM 对象）
-                cells = self.file_manager._find_all_file_cells(self.file_manager._win)
-                for cell in cells:
-                    cell_text = cell.Name
-                    if not cell_text:
-                        continue
-                    chat_file = self.file_manager.parse_file_cell_text(cell_text)
-                    if chat_file and chat_file.file_name == file_name:
-                        if not chat_file.file_status:
-                            # 下载完成，更新自身状态和 cell 引用
-                            self.file_status = ""
-                            self._cell = cell
-                            return True
-                        # 还在下载中，继续等待
-                        break
-            except Exception:
-                pass
-
-        return False
 
     @PIM.guard
     def delete(self) -> bool:
