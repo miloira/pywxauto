@@ -3319,6 +3319,7 @@ class SystemMessage(Message):
     def __init__(self, *, timestamp="", **kw):
         kw.setdefault("source", Source.SYSTEM)
         kw.setdefault("sender", "系统")
+        kw.setdefault("status", MessageStatus.RECEIVED)
         super().__init__(**kw)
         self.timestamp: str = timestamp
 
@@ -10147,7 +10148,7 @@ class Chat:
                 return ""
 
             # 裁剪顶部 0-38px 区域（昵称显示区域）
-            sender_area = img.crop((75, 0, w - 75, 38))
+            sender_area = img.crop((60, 0, w - 60, 38))
 
             # 计算图片 hash
             buf = io.BytesIO()
