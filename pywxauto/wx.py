@@ -10073,7 +10073,7 @@ class Chat:
         if not at_members:
             return
         if i_("所有人") in at_members:
-            at_members = ["所有人"]
+            at_members = [i_("所有人")]
 
         for member in at_members:
             if not member:
@@ -10089,9 +10089,8 @@ class Chat:
                 if member == i_("所有人"):
                     input_wx.paste_or_type(chat_input, "@")
                 else:
-                    input_wx.paste_or_type(chat_input, f"@{member}")
-
-                time.sleep(0.3)
+                    input_wx.paste_or_type(chat_input, "@")
+                    input_wx.paste_or_type(chat_input, member)
 
                 menu = self._win.ListControl(
                     AutomationId="chat_mention_list", searchDepth=4,
@@ -10124,8 +10123,8 @@ class Chat:
                 if not chat_input.HasKeyboardFocus:
                     input_wx.click(chat_input)
 
-                input_wx.paste_or_type(chat_input, f"@{member_keyword}")
-                time.sleep(0.3)
+                input_wx.paste_or_type(chat_input, "@")
+                input_wx.paste_or_type(chat_input, member_keyword)
 
                 menu = self._win.ListControl(
                     AutomationId="chat_mention_list", searchDepth=4,
