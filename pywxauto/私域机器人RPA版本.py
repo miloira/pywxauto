@@ -365,7 +365,7 @@ def run(droplet_token, device_id, send_offline_msg):
         finished_at = Column(DateTime, nullable=True, comment="完成时间")
         fail_reason = Column(Text, nullable=True, comment="失败原因")
         extra = Column(Text, nullable=True, comment="扩展数据(JSON)")
-        wxid = Column(String(100), nullable=True, comment="机器人微信号")
+        bot_id = Column(String(100), nullable=True, comment="机器人ID")
 
         def __repr__(self):
             return (f"<JxySiyuTask(id={self.id}, type={self.task_type!r}, "
@@ -394,7 +394,7 @@ def run(droplet_token, device_id, send_offline_msg):
             at_members: Optional[list[str]] = None,
             msg_id: Optional[str] = None,
             metadata: Optional[dict] = None,
-            wxid: str = "",
+            bot_id: str = "",
         ) -> JxySiyuTask:
             with self._get_session() as session:
                 task = JxySiyuTask(
@@ -407,7 +407,7 @@ def run(droplet_token, device_id, send_offline_msg):
                     content=content,
                     files=json.dumps(files, ensure_ascii=False) if files else None,
                     status=TaskStatus.PENDING,
-                    wxid=wxid,
+                    bot_id=bot_id,
                 )
                 session.add(task)
                 session.commit()
@@ -447,9 +447,9 @@ def run(droplet_token, device_id, send_offline_msg):
                 session.commit()
                 return True
 
-        def get_by_wxid(self, wxid: str) -> list[JxySiyuTask]:
+        def get_by_bot_id(self, bot_id: str) -> list[JxySiyuTask]:
             with self._get_session() as session:
-                return session.query(JxySiyuTask).filter_by(wxid=wxid).all()
+                return session.query(JxySiyuTask).filter_by(bot_id=bot_id).all()
 
         def get_by_type(self, task_type: str) -> list[JxySiyuTask]:
             with self._get_session() as session:
@@ -945,7 +945,6 @@ def run(droplet_token, device_id, send_offline_msg):
 
     def _handle_send_binary_file(wx: Weixin, task: JxySiyuTask, task_mgr: SiYuTask):
         """处理 /msg/send_file — 发送文件（支持 b64 / url / file_path）"""
-        import base64
 
         metadata = json.loads(task.task_metadata) if task.task_metadata else {}
         b64_data = metadata.get("b64", "")
@@ -953,45 +952,34 @@ def run(droplet_token, device_id, send_offline_msg):
         file_path = metadata.get("file_path", "")
         file_name = metadata.get("file_name", "file")
 
-        local_path = None
-        temp_file = False
+        chat = wx.open_session_by_search(task.to)
 
         if file_path and os.path.exists(file_path):
-            local_path = file_path
+            status = chat.send_file(file_path)
+        elif url:
+            status = chat.send_file(url)
         elif b64_data:
+            # base64 需要先解码保存为临时文件
             temp_dir = os.path.join(TEMP_DIR, "_temp_files")
             os.makedirs(temp_dir, exist_ok=True)
             local_path = os.path.join(temp_dir, file_name)
             with open(local_path, "wb") as fp:
                 fp.write(base64.b64decode(b64_data))
-            temp_file = True
-        elif url:
-            temp_dir = os.path.join(TEMP_DIR, "_temp_files")
-            os.makedirs(temp_dir, exist_ok=True)
-            local_path = os.path.join(temp_dir, file_name)
-            resp = requests.get(url, timeout=30)
-            resp.raise_for_status()
-            with open(local_path, "wb") as fp:
-                fp.write(resp.content)
-            temp_file = True
-        else:
-            raise RuntimeError("send_file: 缺少 b64/url/file_path，无法获取文件")
-
-        try:
-            chat = wx.open_session_by_search(task.to)
-            status = chat.send_file(local_path)
-            if status == MessageStatus.FAILED:
-                raise RuntimeError(f"文件发送失败: {file_name}")
-        finally:
-            if temp_file and local_path and os.path.exists(local_path):
+            try:
+                status = chat.send_file(local_path)
+            finally:
                 try:
                     os.remove(local_path)
                 except Exception:
                     pass
+        else:
+            raise RuntimeError("send_file: 缺少 b64/url/file_path，无法获取文件")
+
+        if status == MessageStatus.FAILED:
+            raise RuntimeError(f"文件发送失败: {file_name}")
 
     def _handle_send_message_with_type(wx: Weixin, task: JxySiyuTask, task_mgr: SiYuTask):
         """处理 /msg/send_message_with_type — 发送多类型消息"""
-        import base64
 
         metadata = json.loads(task.task_metadata) if task.task_metadata else {}
         msg_type = metadata.get("type", "text")
@@ -1021,24 +1009,9 @@ def run(droplet_token, device_id, send_offline_msg):
             if not url:
                 raise RuntimeError(f"send_message_with_type({msg_type}): 缺少 url")
 
-            temp_dir = os.path.join(TEMP_DIR, "_temp_files")
-            os.makedirs(temp_dir, exist_ok=True)
-            local_path = os.path.join(temp_dir, file_name)
-
-            try:
-                resp = requests.get(url, timeout=30)
-                resp.raise_for_status()
-                with open(local_path, "wb") as fp:
-                    fp.write(resp.content)
-                status = chat.send_file(local_path)
-                if status == MessageStatus.FAILED:
-                    raise RuntimeError(f"{msg_type} 发送失败: {file_name}")
-            finally:
-                try:
-                    if os.path.exists(local_path):
-                        os.remove(local_path)
-                except Exception:
-                    pass
+            status = chat.send_file(url)
+            if status == MessageStatus.FAILED:
+                raise RuntimeError(f"{msg_type} 发送失败: {file_name}")
         else:
             raise RuntimeError(f"不支持的消息类型: {msg_type}")
 
@@ -1063,7 +1036,7 @@ def run(droplet_token, device_id, send_offline_msg):
     # FastAPI 回调服务
     # ==============================
 
-    api = FastAPI(title="私域机器人回调服务", version="0.1.0")
+    api = FastAPI(title="聚协云智能私域机器人RPA版本", version="0.0.1")
 
     class SendTextRequest(BaseModel):
         """发送文本消息的回调请求体"""
@@ -1071,7 +1044,7 @@ def run(droplet_token, device_id, send_offline_msg):
         content: str = Field(..., description="消息内容")
         at_members: Optional[list[str]] = Field(default=None, description="需要@的成员列表")
         msg_id: Optional[str] = Field(default=None, description="外部消息ID，用于去重/追踪")
-        wxid: Optional[str] = Field(default=None, description="机器人微信号")
+        bot_id: Optional[str] = Field(default=None, description="机器人ID")
 
     class SiyuCmdRequest(BaseModel):
         """WxService gRPC 推送的统一命令格式"""
@@ -1110,7 +1083,7 @@ def run(droplet_token, device_id, send_offline_msg):
             content=req.content,
             at_members=req.at_members,
             msg_id=req.msg_id,
-            wxid=req.wxid or "",
+            bot_id=req.bot_id or "",
         )
         return {
             "code": 0,
@@ -1194,7 +1167,7 @@ def run(droplet_token, device_id, send_offline_msg):
             at_members=at_members,
             msg_id=request_id,
             metadata=metadata,
-            wxid=robot_id,
+            bot_id=robot_id,
         )
 
         print(f"  📨 收到命令 [{api_path}] → 任务 [{task.id}] {task_name}")
@@ -1302,7 +1275,7 @@ def run(droplet_token, device_id, send_offline_msg):
     os.makedirs(TEMP_DIR, exist_ok=True)
 
     print("=" * 55)
-    print("  聚协云私域机器人RPA版本")
+    print("  聚协云智能私域机器人RPA版本")
     print("=" * 55)
 
     # 初始化微信
