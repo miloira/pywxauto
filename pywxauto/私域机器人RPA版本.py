@@ -1556,7 +1556,14 @@ def do_task(wx: Weixin, task_mgr: SiYuTask):
         _mark_task_done()
 
 
-def run():
+def run(droplet_token, device_id):
+    """
+    HEADER START
+
+    :param !droplet_token: {string} 客户端TOKEN
+    :param !device_id: {string} 客户端设备ID
+    HEADER END
+    """
     os.makedirs(SAVE_DIR, exist_ok=True)
 
     print("=" * 55)
@@ -1577,9 +1584,8 @@ def run():
     # 连接私域服务端
     siyu = Siyu(
         base_url="https://sy.jushuitan.com/WebApi/v1",
-        token="eyJ0eXAiOiJKV1QiLCJhbGciOiJIUzI1NiJ9.eyJpc3MiOiJKc3QiLCJhdWQiOiJKeHkiLCJzdWIiOiJKd3QiLCJpYXQiOjE3NzgwNTc4MDgsImV4cCI6MTc3ODY2MjYwOCwiY29faWQiOjEwMDAwMDMwMzgsImNvX25hbWUiOiLogZrljY_kupEiLCJ1X2lkIjo0MDA1NSwidV9uYW1lIjoi6IGa5Y2P5LqRMTEiLCJwZXJtaXNzaW9uIjpbMTAwMDAwMDVdLCJ0aW1lb3V0IjoxNzc4NjYyNjA4LCJlX2NvaWQiOjEzMjAwMjYzLCJlX3VpZCI6MTc0MjYxMTN9.r-PTyKwri61cYkebeRII7l-UnJzVyjsOgR7fln4VSSs",
+        token=droplet_token
     )
-    device_id = f"rpa_{os.environ.get('COMPUTERNAME', 'unknown')}_{wx.pid}"
     siyu.connect(
         nickname=bot_nickname_local,
         device_id=device_id,
@@ -1652,4 +1658,7 @@ def run():
 
 
 if __name__ == "__main__":
-    run()
+    run(
+        droplet_token="eyJ0eXAiOiJKV1QiLCJhbGciOiJIUzI1NiJ9.eyJpc3MiOiJKc3QiLCJhdWQiOiJKeHkiLCJzdWIiOiJKd3QiLCJpYXQiOjE3Nzg2MzY1NTMsImV4cCI6MTc3OTI0MTM1MywiY29faWQiOjEwMDAwMDMwMzgsImNvX25hbWUiOiLogZrljY_kupEiLCJ1X2lkIjo0MDA1NSwidV9uYW1lIjoi6IGa5Y2P5LqRMTEiLCJwZXJtaXNzaW9uIjpbMTAwMDAwMDVdLCJ0aW1lb3V0IjoxNzc5MjQxMzUzLCJlX2NvaWQiOjEzMjAwMjYzLCJlX3VpZCI6MTc0MjYxMTN9.yP-aO9IB1aC1u_1bHnXRxFS511FY4LYbCdULupbM6qc",
+        device_id="rpa_DESKTOP-6512490_10111",
+    )
