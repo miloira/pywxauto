@@ -1,9 +1,10 @@
-def run(droplet_token, device_id):
+def run(droplet_token, device_id, send_offline_msg):
     """
     HEADER START
 
     :param !droplet_token: {string} 客户端TOKEN
     :param !device_id: {string} 客户端设备ID
+    :param send_offline_msg: {dict} 是否发送离线消息
     HEADER END
     """
     
@@ -23,6 +24,8 @@ def run(droplet_token, device_id):
     import time
     import threading
     import traceback
+    import base64
+    import urllib.parse
     from datetime import datetime
     from enum import Enum
     from typing import Optional
@@ -477,6 +480,8 @@ def run(droplet_token, device_id):
     API_HOST = "127.0.0.1"
     API_PORT = 8000
     HEARTBEAT_INTERVAL = 10
+    OFFLINE_MSG_CHECK_INTERVAL = 300  # 离线消息检查间隔（秒）
+    ENABLE_OFFLINE_MSG = False if send_offline_msg is None else bool(send_offline_msg.get("value", False) if isinstance(send_offline_msg, dict) else send_offline_msg)
 
     # ==============================
     # 运行时状态
@@ -484,6 +489,7 @@ def run(droplet_token, device_id):
     wx_lock = threading.Lock()
     last_task_time: float = 0
     last_file_scan_time: float = 0
+    last_offline_msg_check_time: float = 0
     bot_nickname = None
 
     # ==============================
@@ -533,6 +539,86 @@ def run(droplet_token, device_id):
         """标记任务完成时间，用于空闲计时"""
         nonlocal last_task_time
         last_task_time = time.time()
+
+    # ==============================
+    # 离线消息处理
+    # ==============================
+
+    def _get_offline_grpc_paths() -> list[str]:
+        """获取离线消息文件路径列表"""
+        current_path = os.path.dirname(os.path.abspath(__file__))
+        droplet_client = os.path.dirname(os.path.dirname(os.path.dirname(current_path)))
+        old_grpc_file_path = os.path.join(
+            droplet_client,
+            "pluginPackages",
+            "64d45e76b4574ad2ee651930",
+            "64d45e76b4574ad2ee651930",
+            "grpc.msg",
+        )
+        grpc_file_path = os.path.join(droplet_client, "GrpcMsg", "siyu.msg")
+        return [old_grpc_file_path, grpc_file_path]
+
+    def _read_grpc(grpc_path: str) -> list[dict]:
+        """读取离线消息文件，返回命令列表"""
+        with open(grpc_path, "r", encoding="utf-8") as f:
+            lines = f.readlines()
+
+        msg_list = []
+        for line in lines:
+            line = line.strip()
+            if not line:
+                continue
+            try:
+                decoded = base64.b64decode(line)
+                url_decoded = urllib.parse.unquote(decoded.decode())
+                data = json.loads(url_decoded)
+                msg_list.append(data)
+            except Exception as e:
+                print(f"  ⚠️ 解析离线消息行失败: {e}")
+        return msg_list
+
+    def _send_grpc_message(file_path: str):
+        """读取离线消息文件并逐条发送到本地 API"""
+        try:
+            grpc_data = _read_grpc(file_path)
+            for data in grpc_data:
+                api_path = data.get("api_path", "")
+                # 跳过不需要处理的命令
+                if api_path in [
+                    "/contacts/refresh_and_upload_full_contacts_and_rooms",
+                    "/room/refresh_room_contacts_by_room_id",
+                    "/contact/get_contacts",
+                    "/room/get_rooms",
+                ]:
+                    continue
+                print(f"  📨 重放离线消息: {api_path}")
+                requests.post(
+                    f"http://{API_HOST}:{API_PORT}/droplet/call",
+                    json={"type": "siyu_cmd", "data": data},
+                    timeout=10,
+                )
+            os.remove(file_path)
+            print(f"  ✅ 离线消息文件已处理并删除: {file_path}")
+        except Exception as e:
+            print(f"  ❌ 处理离线消息失败: {file_path} - {e}")
+            traceback.print_exc()
+
+    def _process_offline_grpc_msg():
+        """检查并处理所有离线消息文件"""
+        for path in _get_offline_grpc_paths():
+            if os.path.exists(path):
+                print(f"  📬 发现离线消息文件: {path}")
+                _send_grpc_message(path)
+
+    def _delete_offline_grpc_msg():
+        """删除所有离线消息文件（不处理）"""
+        for path in _get_offline_grpc_paths():
+            if os.path.exists(path):
+                try:
+                    os.remove(path)
+                    print(f"  🗑️ 已删除离线消息文件: {path}")
+                except Exception as e:
+                    print(f"  ⚠️ 删除离线消息文件失败: {path} - {e}")
 
     # ==============================
     # ExcelFileHandler
@@ -1036,7 +1122,7 @@ def run(droplet_token, device_id):
             },
         }
 
-    @api.post("/siyu/wxrpa/cmd")
+    @api.post("/droplet/call")
     def siyu_cmd_callback(req: SiyuCmdRequest):
         """接收 WxService 服务端推送的统一命令，解析后生成对应任务。"""
         cmd_data = req.data
@@ -1263,6 +1349,14 @@ def run(droplet_token, device_id):
     api_thread.start()
     print(f"🌐 API 回调服务: http://{API_HOST}:{API_PORT}")
 
+    # 处理离线消息
+    time.sleep(1)  # 等待 API 服务就绪
+    if ENABLE_OFFLINE_MSG:
+        print("📬 处理离线消息...")
+        _process_offline_grpc_msg()
+    else:
+        _delete_offline_grpc_msg()
+
     # 启动文件监听线程
     watch_dir = get_current_month_dir()
     os.makedirs(watch_dir, exist_ok=True)
@@ -1294,6 +1388,13 @@ def run(droplet_token, device_id):
 
             _try_idle_file_scan(wx, siyu=siyu)
 
+            # 定期检查离线消息
+            if ENABLE_OFFLINE_MSG:
+                now = time.time()
+                if now - last_offline_msg_check_time >= OFFLINE_MSG_CHECK_INTERVAL:
+                    last_offline_msg_check_time = now
+                    _process_offline_grpc_msg()
+
             time.sleep(2)
     except KeyboardInterrupt:
         observer.stop()
@@ -1305,4 +1406,5 @@ if __name__ == "__main__":
     run(
         droplet_token="eyJ0eXAiOiJKV1QiLCJhbGciOiJIUzI1NiJ9.eyJpc3MiOiJKc3QiLCJhdWQiOiJKeHkiLCJzdWIiOiJKd3QiLCJpYXQiOjE3Nzg2MzY1NTMsImV4cCI6MTc3OTI0MTM1MywiY29faWQiOjEwMDAwMDMwMzgsImNvX25hbWUiOiLogZrljY_kupEiLCJ1X2lkIjo0MDA1NSwidV9uYW1lIjoi6IGa5Y2P5LqRMTEiLCJwZXJtaXNzaW9uIjpbMTAwMDAwMDVdLCJ0aW1lb3V0IjoxNzc5MjQxMzUzLCJlX2NvaWQiOjEzMjAwMjYzLCJlX3VpZCI6MTc0MjYxMTN9.yP-aO9IB1aC1u_1bHnXRxFS511FY4LYbCdULupbM6qc",
         device_id="rpa_DESKTOP-6512490_10111",
+        send_offline_msg=None,
     )
