@@ -26,7 +26,7 @@ from pywxauto.wx import (
 # ============================================================
 # 配置区域 - 根据实际环境修改
 # ============================================================
-TEST_CONTACT = "文件传输助手"  # 测试聊天对象（建议用文件传输助手，不打扰他人）
+TEST_CONTACT = "文件"  # 测试聊天对象（建议用文件传输助手，不打扰他人）
 TEST_GROUP = None  # 测试群聊名称，None 则跳过群聊相关测试
 TEST_IMAGE_PATH = None  # 测试图片路径，None 则自动生成临时图片
 TEST_FILE_PATH = None  # 测试文件路径，None 则自动生成临时文件
@@ -331,7 +331,7 @@ def test_send_text_with_reply(chat: Chat, result: TestResult):
         for msg in reversed(messages):
             if not isinstance(msg, Message):
                 continue
-            if msg.sender_type.value != "system":
+            if msg.source.value != "system":
                 target_msg = msg
                 break
 
