@@ -1404,9 +1404,20 @@ def ensure_narrator_registry() -> bool:
         raise RegistryError(f"注册表访问失败: {e}")
 
 # ---- 剪贴板操作 ----
+def _open_clipboard_with_retry(max_retries: int = 10, interval: float = 0.1) -> None:
+    """带重试的 OpenClipboard，避免剪贴板被其他进程短暂占用时直接失败。"""
+    for i in range(max_retries):
+        try:
+            win32clipboard.OpenClipboard()
+            return
+        except Exception:
+            if i == max_retries - 1:
+                raise
+            time.sleep(interval)
+
 def get_clipboard_all():
     result = {}
-    win32clipboard.OpenClipboard()
+    _open_clipboard_with_retry()
     try:
         fmt = 0
         while True:
@@ -1421,7 +1432,7 @@ def get_clipboard_all():
         win32clipboard.CloseClipboard()
 
 def get_clipboard(fmt):
-    win32clipboard.OpenClipboard()
+    _open_clipboard_with_retry()
     try:
         if win32clipboard.IsClipboardFormatAvailable(fmt):
             data = win32clipboard.GetClipboardData(fmt)
@@ -1443,7 +1454,7 @@ def save_clipboard() -> Optional[tuple[int, object]]:
     Returns:
         (format, data) 元组，剪贴板为空时返回 None
     """
-    win32clipboard.OpenClipboard()
+    _open_clipboard_with_retry()
     try:
         for fmt in CLIPBOARD_SAVE_FORMATS:
             if win32clipboard.IsClipboardFormatAvailable(fmt):
@@ -1463,7 +1474,7 @@ def restore_clipboard(saved: Optional[tuple[int, object]]) -> None:
     Args:
         saved: save_clipboard 返回的 (format, data)，None 则清空剪贴板
     """
-    win32clipboard.OpenClipboard()
+    _open_clipboard_with_retry()
     try:
         win32clipboard.EmptyClipboard()
         if saved:
@@ -1476,7 +1487,7 @@ def restore_clipboard(saved: Optional[tuple[int, object]]) -> None:
         win32clipboard.CloseClipboard()
 
 def set_clipboard(fmt, data) -> None:
-    win32clipboard.OpenClipboard()
+    _open_clipboard_with_retry()
     try:
         win32clipboard.EmptyClipboard()
         win32clipboard.SetClipboardData(fmt, data)
@@ -2333,7 +2344,6 @@ def paste(content) -> None:
     Args:
         content: str 粘贴文本，list[str] 粘贴文件路径列表
     """
-
     saved = save_clipboard()
     try:
         if isinstance(content, str):
