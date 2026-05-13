@@ -13,7 +13,7 @@ def run(droplet_token, device_id):
     流程:
     1. watchdog 监听微信本月文件夹，仅检测是否有新表格文件创建
     2. 检测到后，打开聊天文件窗口获取今天的表格文件列表
-    3. 逐个另存为到 SAVE_DIR，保存后直接删除该文件项
+    3. 逐个另存为到临时目录，保存后直接删除该文件项
     4. 全部处理完后关闭聊天文件窗口
     """
 
@@ -470,10 +470,13 @@ def run(droplet_token, device_id):
     IDLE_FILE_SCAN_SECONDS = 120
     ENABLE_IDLE_FILE_SCAN = True
     WECHAT_FILE_ROOT = rf"{WECHAT_DATA_DIR}\msg\file"
-    SAVE_DIR = r"C:\Users\张明明\Desktop\待上传表格"
+    TEMP_DIR = os.path.join(os.environ.get("TEMP", r"C:\Temp"), "jxysy")
     EXCEL_EXTS = {".xls", ".xlsx", ".csv"}
     STABLE_CHECK_INTERVAL = 1
     STABLE_CHECK_COUNT = 3
+    API_HOST = "127.0.0.1"
+    API_PORT = 8000
+    HEARTBEAT_INTERVAL = 10
 
     # ==============================
     # 运行时状态
@@ -810,7 +813,7 @@ def run(droplet_token, device_id):
         for row in datas:
             ws.append(row)
 
-        temp_dir = os.path.join(SAVE_DIR, "_temp_excel")
+        temp_dir = os.path.join(TEMP_DIR, "_temp_excel")
         os.makedirs(temp_dir, exist_ok=True)
         file_path = os.path.join(temp_dir, excel_name)
         if os.path.exists(file_path):
@@ -870,14 +873,14 @@ def run(droplet_token, device_id):
         if file_path and os.path.exists(file_path):
             local_path = file_path
         elif b64_data:
-            temp_dir = os.path.join(SAVE_DIR, "_temp_files")
+            temp_dir = os.path.join(TEMP_DIR, "_temp_files")
             os.makedirs(temp_dir, exist_ok=True)
             local_path = os.path.join(temp_dir, file_name)
             with open(local_path, "wb") as fp:
                 fp.write(base64.b64decode(b64_data))
             temp_file = True
         elif url:
-            temp_dir = os.path.join(SAVE_DIR, "_temp_files")
+            temp_dir = os.path.join(TEMP_DIR, "_temp_files")
             os.makedirs(temp_dir, exist_ok=True)
             local_path = os.path.join(temp_dir, file_name)
             resp = requests.get(url, timeout=30)
@@ -932,7 +935,7 @@ def run(droplet_token, device_id):
             if not url:
                 raise RuntimeError(f"send_message_with_type({msg_type}): 缺少 url")
 
-            temp_dir = os.path.join(SAVE_DIR, "_temp_files")
+            temp_dir = os.path.join(TEMP_DIR, "_temp_files")
             os.makedirs(temp_dir, exist_ok=True)
             local_path = os.path.join(temp_dir, file_name)
 
@@ -1140,9 +1143,9 @@ def run(droplet_token, device_id):
             },
         }
 
-    def _start_api_server(host: str = "0.0.0.0", port: int = 8000):
+    def _start_api_server():
         """在后台线程中启动 FastAPI 服务"""
-        uvicorn.run(api, host=host, port=port, log_level="info")
+        uvicorn.run(api, host=API_HOST, port=API_PORT, log_level="info")
 
 
     # ==============================
@@ -1210,7 +1213,7 @@ def run(droplet_token, device_id):
     # 主流程开始
     # ==============================
 
-    os.makedirs(SAVE_DIR, exist_ok=True)
+    os.makedirs(TEMP_DIR, exist_ok=True)
 
     print("=" * 55)
     print("  聚协云私域机器人RPA版本")
@@ -1240,7 +1243,7 @@ def run(droplet_token, device_id):
     print(f"✅ 私域服务端已连接: robot_id={siyu.robot_id}")
 
     # 启动心跳线程
-    siyu.start_heartbeat(interval=10)
+    siyu.start_heartbeat(interval=HEARTBEAT_INTERVAL)
     print("💓 心跳线程已启动")
 
     # 在文件传输助手发送启动通知
@@ -1255,10 +1258,10 @@ def run(droplet_token, device_id):
     # 启动 FastAPI 回调服务（后台线程）
     _api_task_mgr_ref[0] = task_mgr
     api_thread = threading.Thread(
-        target=_start_api_server, kwargs={"host": "127.0.0.1", "port": 8000}, daemon=True,
+        target=_start_api_server, daemon=True,
     )
     api_thread.start()
-    print("🌐 API 回调服务: http://127.0.0.1:8000")
+    print(f"🌐 API 回调服务: http://{API_HOST}:{API_PORT}")
 
     # 启动文件监听线程
     watch_dir = get_current_month_dir()
