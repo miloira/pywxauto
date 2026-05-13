@@ -43,7 +43,7 @@ def run(droplet_token, device_id, send_offline_msg):
     from watchdog.observers import Observer
     from watchdog.events import FileSystemEventHandler
 
-    from wx import Weixin, MessageStatus
+    from pywxauto.wx import Weixin, MessageStatus
 
     logger = logging.getLogger(__name__)
 
