@@ -19,6 +19,7 @@ import tempfile
 import threading
 import time
 import urllib
+from collections import deque
 from datetime import date
 from enum import Enum
 from queue import Empty, Queue
@@ -15634,8 +15635,9 @@ class Weixin(WeixinWindow):
         threads: dict[str, threading.Thread] = {}
 
         def _watch_chat(chat: SeparateChat, name: str) -> None:
-            # 已知消息的 RuntimeId 集合（仅保留当前可见的）
-            known_rids: set[tuple] = set()
+            # 滑动窗口：保留最近 N 条消息的 msg_id，N = 当前可见消息数量
+            known_msg_ids: deque[int] = deque()
+            known_msg_id_set: set[int] = set()
             # 发送者缓存：{runtime_id: (sender, source, bubble_rect)}
             sender_cache: dict[tuple, tuple] = {}
             first_scan = True
@@ -15664,38 +15666,36 @@ class Weixin(WeixinWindow):
                         break
                     continue
 
-                # 当前可见消息的 RuntimeId 集合
-                curr_rids = {msg.runtime_id for msg in visible if msg.runtime_id}
+                window_size = max(len(visible), 1)
 
                 if first_scan:
-                    known_rids = curr_rids
+                    for msg in visible:
+                        known_msg_ids.append(msg.msg_id)
+                        known_msg_id_set.add(msg.msg_id)
                     first_scan = False
                     if stop_event.wait(interval):
                         break
                     continue
 
-                # 新增的 RuntimeId
-                new_rids = curr_rids - known_rids
+                # 检测新消息（msg_id 不在已知集合中）
+                new_messages = [msg for msg in visible if msg.msg_id not in known_msg_id_set]
 
-                if not new_rids:
-                    # 移除已滚出可见区域的，只保留当前可见的
-                    known_rids = curr_rids
-                    # sender_cache 同步清理
-                    for rid in list(sender_cache):
-                        if rid not in curr_rids:
-                            del sender_cache[rid]
+                if not new_messages:
                     if stop_event.wait(idle_interval):
                         break
                     continue
 
                 # 按消息在列表中的原始顺序推送新消息
-                for msg in visible:
-                    if msg.runtime_id and msg.runtime_id in new_rids:
-                        msg.pid = self.pid or 0
-                        msg_queue.put((chat, msg))
+                for msg in new_messages:
+                    msg.pid = self.pid or 0
+                    known_msg_ids.append(msg.msg_id)
+                    known_msg_id_set.add(msg.msg_id)
+                    msg_queue.put((chat, msg))
 
-                # 只保留当前可见的 + 新增的
-                known_rids = curr_rids
+                # 滑动窗口：保留最近 window_size 条
+                while len(known_msg_ids) > window_size:
+                    old_id = known_msg_ids.popleft()
+                    known_msg_id_set.discard(old_id)
 
                 if stop_event.wait(interval):
                     break
@@ -16351,7 +16351,10 @@ class WeixinManager:
         threads: dict[str, threading.Thread] = {}
 
         def _watch_chat(pid: int, weixin: Weixin, chat: "SeparateChat", name: str) -> None:
-            known_rids: set[tuple] = set()
+            from collections import deque
+            # 滑动窗口：保留最近 N 条消息的 msg_id，N = 当前可见消息数量
+            known_msg_ids: deque[int] = deque()
+            known_msg_id_set: set[int] = set()
             sender_cache: dict[tuple, tuple] = {}
             first_scan = True
             offscreen = weixin.background
@@ -16379,32 +16382,36 @@ class WeixinManager:
                         break
                     continue
 
-                curr_rids = {msg.runtime_id for msg in visible if msg.runtime_id}
+                window_size = max(len(visible), 1)
 
                 if first_scan:
-                    known_rids = curr_rids
+                    for msg in visible:
+                        known_msg_ids.append(msg.msg_id)
+                        known_msg_id_set.add(msg.msg_id)
                     first_scan = False
                     if stop_event.wait(interval):
                         break
                     continue
 
-                new_rids = curr_rids - known_rids
+                # 检测新消息（msg_id 不在已知集合中）
+                new_messages = [msg for msg in visible if msg.msg_id not in known_msg_id_set]
 
-                if not new_rids:
-                    known_rids = curr_rids
-                    for rid in list(sender_cache):
-                        if rid not in curr_rids:
-                            del sender_cache[rid]
+                if not new_messages:
                     if stop_event.wait(idle_interval):
                         break
                     continue
 
-                for msg in visible:
-                    if msg.runtime_id and msg.runtime_id in new_rids:
-                        msg.pid = pid
-                        msg_queue.put((pid, weixin, chat, msg))
+                # 按消息在列表中的原始顺序推送新消息
+                for msg in new_messages:
+                    msg.pid = pid
+                    known_msg_ids.append(msg.msg_id)
+                    known_msg_id_set.add(msg.msg_id)
+                    msg_queue.put((pid, weixin, chat, msg))
 
-                known_rids = curr_rids
+                # 滑动窗口：保留最近 window_size 条
+                while len(known_msg_ids) > window_size:
+                    old_id = known_msg_ids.popleft()
+                    known_msg_id_set.discard(old_id)
 
                 if stop_event.wait(interval):
                     break
