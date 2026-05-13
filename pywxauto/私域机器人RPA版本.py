@@ -129,6 +129,7 @@ class Siyu:
 
     def _handle_response(self, resp: requests.Response) -> dict:
         """统一处理响应，检查 HTTP 状态码和业务错误码"""
+        print("================>", resp.json())
         resp.raise_for_status()
         data = resp.json()
         code = data.get("code", -1)
@@ -403,6 +404,9 @@ class Siyu:
         headers = {}
         if self.robot_id:
             headers["droplet-robot-id"] = self.robot_id
+        # multipart/form-data 请求必须移除 session 级别的 Content-Type，
+        # 让 requests 自动生成带 boundary 的 Content-Type
+        headers["Content-Type"] = None
 
         file_name = os.path.basename(file_path)
         with open(file_path, "rb") as fp:
@@ -412,13 +416,12 @@ class Siyu:
                 "sender_nickname": sender_nickname,
                 "file_type": file_type,
             }
-            # multipart/form-data 请求不能带 Content-Type: application/json
             resp = self._session.post(
                 self._url("/siyu/v2_file_upload_raw"),
                 files=files,
                 data=data,
                 headers=headers,
-                timeout=max(self.timeout, 30),  # 上传文件给更长超时
+                timeout=max(self.timeout, 30),
             )
         return self._handle_response(resp)
 
@@ -825,42 +828,42 @@ class ExcelFileHandler(FileSystemEventHandler):
                     continue
 
                 # 消息预校验：询问服务端该群/发送者的文件是否需要处理
-                # if self._siyu:
-                #     try:
-                #         precheck = self._siyu.message_precheck(
-                #             room_nickname=f.source_name,
-                #             sender_nickname=f.sender_name,
-                #         )
-                #         if not precheck.get("should_process", True):
-                #             reason = precheck.get("reason", "服务端拒绝")
-                #             try:
-                #                 self._wx.file_manager.delete_file(f)
-                #                 print(f"  🚫 [{i}/{len(today_files)}] 预校验跳过并删除: {f.file_name} ({reason})")
-                #             except Exception as e:
-                #                 print(f"  ⚠️ 删除异常: {f.file_name} - {e}")
-                #             continue
-                #     except Exception as e:
-                #         print(f"  ⚠️ 预校验异常（继续处理）: {f.file_name} - {e}")
+                if self._siyu:
+                    try:
+                        precheck = self._siyu.message_precheck(
+                            room_nickname=f.source_name,
+                            sender_nickname=f.sender_name,
+                        )
+                        if not precheck.get("should_process", True):
+                            reason = precheck.get("reason", "服务端拒绝")
+                            try:
+                                self._wx.file_manager.delete_file(f)
+                                print(f"  🚫 [{i}/{len(today_files)}] 预校验跳过并删除: {f.file_name} ({reason})")
+                            except Exception as e:
+                                print(f"  ⚠️ 删除异常: {f.file_name} - {e}")
+                            continue
+                    except Exception as e:
+                        print(f"  ⚠️ 预校验异常（继续处理）: {f.file_name} - {e}")
 
                 # 文件名校验：询问服务端该文件名是否有效，避免无效下载
-                # if self._siyu:
-                #     try:
-                #         file_size_bytes = int(parse_file_size(f.file_size))
-                #         validate = self._siyu.file_validate(
-                #             room_nickname=f.source_name,
-                #             file_name=f.file_name,
-                #             file_size=file_size_bytes,
-                #         )
-                #         if not validate.get("valid", True):
-                #             reason = validate.get("reason", "文件名无效")
-                #             try:
-                #                 self._wx.file_manager.delete_file(f)
-                #                 print(f"  🚫 [{i}/{len(today_files)}] 文件校验不通过并删除: {f.file_name} ({reason})")
-                #             except Exception as e:
-                #                 print(f"  ⚠️ 删除异常: {f.file_name} - {e}")
-                #             continue
-                #     except Exception as e:
-                #         print(f"  ⚠️ 文件校验异常（继续处理）: {f.file_name} - {e}")
+                if self._siyu:
+                    try:
+                        file_size_bytes = int(parse_file_size(f.file_size))
+                        validate = self._siyu.file_validate(
+                            room_nickname=f.source_name,
+                            file_name=f.file_name,
+                            file_size=file_size_bytes,
+                        )
+                        if not validate.get("valid", True):
+                            reason = validate.get("reason", "文件名无效")
+                            try:
+                                self._wx.file_manager.delete_file(f)
+                                print(f"  🚫 [{i}/{len(today_files)}] 文件校验不通过并删除: {f.file_name} ({reason})")
+                            except Exception as e:
+                                print(f"  ⚠️ 删除异常: {f.file_name} - {e}")
+                            continue
+                    except Exception as e:
+                        print(f"  ⚠️ 文件校验异常（继续处理）: {f.file_name} - {e}")
 
                 # 未下载的文件先触发下载，尝试右键复制验证下载完成（最长30秒）
                 if f.file_status == "未下载":
@@ -885,24 +888,17 @@ class ExcelFileHandler(FileSystemEventHandler):
                         print(f"  ❌ 下载异常: {f.file_name} - {e}")
                         continue
 
-                # 群聊文件：另存为到本地 → 上传服务端 → 定位回复 → 删除
-                # 构造本地保存路径
-                save_path = os.path.join(SAVE_DIR, f.file_name)
-                if os.path.exists(save_path):
-                    name, ext = os.path.splitext(f.file_name)
-                    timestamp = datetime.now().strftime("%H%M%S")
-                    save_path = os.path.join(SAVE_DIR, f"{name}_{timestamp}{ext}")
-
-                # 另存为到本地
-                print(f"  📥 [{i}/{len(today_files)}] 另存为: {f.file_name}")
+                # 群聊文件：复制获取本地路径 → 上传服务端 → 定位回复 → 删除
+                # 通过右键复制获取文件的本地路径
+                print(f"  📋 [{i}/{len(today_files)}] 获取文件路径: {f.file_name}")
                 try:
-                    ok = self._wx.file_manager.save_file_as(f, save_path)
-                    if not ok:
-                        print(f"  ❌ 另存为失败: {f.file_name}")
+                    file_path = f.copy()
+                    if not file_path or not os.path.exists(file_path):
+                        print(f"  ❌ 获取文件路径失败: {f.file_name} (path={file_path})")
                         continue
-                    print(f"  ✅ 已保存到本地: {save_path}")
+                    print(f"  ✅ 文件路径: {file_path}")
                 except Exception as e:
-                    print(f"  ❌ 另存为异常: {f.file_name} - {e}")
+                    print(f"  ❌ 复制获取路径异常: {f.file_name} - {e}")
                     continue
 
                 # 上传文件到服务端 v2_file_upload_raw
@@ -911,7 +907,7 @@ class ExcelFileHandler(FileSystemEventHandler):
                     print(f"  📤 [{i}/{len(today_files)}] 上传服务端: {f.file_name}")
                     try:
                         result = self._siyu.file_upload_raw(
-                            file_path=save_path,
+                            file_path=file_path,
                             room_nickname=f.source_name,
                             sender_nickname=f.sender_name or "",
                         )
@@ -926,14 +922,7 @@ class ExcelFileHandler(FileSystemEventHandler):
                         print(f"  ❌ 上传异常: {f.file_name} - {e}")
                         traceback.print_exc()
 
-                # 清理本地临时文件
-                try:
-                    if os.path.exists(save_path):
-                        os.remove(save_path)
-                except Exception:
-                    pass
-
-                # 上传成功后，定位到聊天位置并引用回复确认消息
+                # 上传成功后，定位到聊天位置并引用回复确认消息，然后删除文件
                 if upload_success:
                     try:
                         f.switch_to_message()
@@ -958,13 +947,15 @@ class ExcelFileHandler(FileSystemEventHandler):
                     except Exception as e:
                         print(f"  ⚠️ 回复异常（不影响删除）: {f.file_name} - {e}")
 
-                # 删除聊天文件管理器中的文件项
-                try:
-                    time.sleep(0.5)
-                    self._wx.file_manager.delete_file(f)
-                    print(f"  🗑️ 已删除: {f.file_name}")
-                except Exception as e:
-                    print(f"  ⚠️ 删除异常: {f.file_name} - {e}")
+                    # 上传成功才删除聊天文件管理器中的文件项
+                    try:
+                        time.sleep(0.5)
+                        self._wx.file_manager.delete_file(f)
+                        print(f"  🗑️ 已删除: {f.file_name}")
+                    except Exception as e:
+                        print(f"  ⚠️ 删除异常: {f.file_name} - {e}")
+                else:
+                    print(f"  ⚠️ 上传未成功，保留文件不删除: {f.file_name}")
 
             # 4. 关闭聊天文件窗口
             self._wx.file_manager.close()
@@ -1588,36 +1579,36 @@ def run():
     # 初始化微信
     wx = Weixin()
     print("✅ 微信已连接")
-    # self_info = wx.get_self_info()
-    # bot_nickname_local = self_info.get("nickname", "")
-    # print(f"当前账号: {bot_nickname_local} (微信号: {self_info.get('account', '')})")
+    self_info = wx.get_self_info()
+    bot_nickname_local = self_info.get("nickname", "")
+    print(f"当前账号: {bot_nickname_local} (微信号: {self_info.get('account', '')})")
 
     # 更新全局 bot_nickname
-    # global bot_nickname
-    # bot_nickname = bot_nickname_local
+    global bot_nickname
+    bot_nickname = bot_nickname_local
 
     # 连接私域服务端
     siyu = Siyu(
-        base_url="https://dev-sy.jushuitan.com/WebApi/v1",
-        token="your_jwt_token",  # TODO: 替换为实际 token
+        base_url="https://sy.jushuitan.com/WebApi/v1",
+        token="eyJ0eXAiOiJKV1QiLCJhbGciOiJIUzI1NiJ9.eyJpc3MiOiJKc3QiLCJhdWQiOiJKeHkiLCJzdWIiOiJKd3QiLCJpYXQiOjE3NzgwNTc4MDgsImV4cCI6MTc3ODY2MjYwOCwiY29faWQiOjEwMDAwMDMwMzgsImNvX25hbWUiOiLogZrljY_kupEiLCJ1X2lkIjo0MDA1NSwidV9uYW1lIjoi6IGa5Y2P5LqRMTEiLCJwZXJtaXNzaW9uIjpbMTAwMDAwMDVdLCJ0aW1lb3V0IjoxNzc4NjYyNjA4LCJlX2NvaWQiOjEzMjAwMjYzLCJlX3VpZCI6MTc0MjYxMTN9.r-PTyKwri61cYkebeRII7l-UnJzVyjsOgR7fln4VSSs",
     )
-    # device_id = f"rpa_{os.environ.get('COMPUTERNAME', 'unknown')}_{wx.pid}"
-    # siyu.connect(
-    #     nickname=bot_nickname_local,
-    #     device_id=device_id,
-    #     account=self_info.get("account", ""),
-    #     avatar=self_info.get("avatar", ""),
-    # )
-    # print(f"✅ 私域服务端已连接: robot_id={siyu.robot_id}")
+    device_id = f"rpa_{os.environ.get('COMPUTERNAME', 'unknown')}_{wx.pid}"
+    siyu.connect(
+        nickname=bot_nickname_local,
+        device_id=device_id,
+        account=self_info.get("account", ""),
+        avatar=f"data:image/png;base64,{self_info.get('avatar', '')}" if self_info.get("avatar") else "",
+    )
+    print(f"✅ 私域服务端已连接: robot_id={siyu.robot_id}")
 
     # 启动心跳线程
-    # siyu.start_heartbeat(interval=22)
+    siyu.start_heartbeat(interval=10)
     print("💓 心跳线程已启动")
 
     # 在文件传输助手发送启动通知
-    # startup_time = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
-    # wx.send_text("文件传输助手", f"[{startup_time}] 机器人启动成功！")
-    # print("📨 已发送启动通知到文件传输助手")
+    startup_time = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+    wx.send_text("文件传输助手", f"[{startup_time}] 机器人启动成功！")
+    print("📨 已发送启动通知到文件传输助手")
 
     # 初始化任务管理器
     task_mgr = SiYuTask()
