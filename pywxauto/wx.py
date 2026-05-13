@@ -1404,15 +1404,37 @@ def ensure_narrator_registry() -> bool:
         raise RegistryError(f"注册表访问失败: {e}")
 
 # ---- 剪贴板操作 ----
-def get_clipboard() -> str:
+def get_clipboard_all():
+    result = {}
     win32clipboard.OpenClipboard()
     try:
-        if win32clipboard.IsClipboardFormatAvailable(win32con.CF_UNICODETEXT):
-            data = win32clipboard.GetClipboardData(win32con.CF_UNICODETEXT)
-            return data
-        return ""
+        fmt = 0
+        while True:
+            fmt = win32clipboard.EnumClipboardFormats(fmt)
+            if fmt == 0:
+                break
+            if win32clipboard.IsClipboardFormatAvailable(fmt):
+                data = win32clipboard.GetClipboardData(fmt)
+                result[fmt] = data
+        return result
     finally:
         win32clipboard.CloseClipboard()
+
+def get_clipboard(fmt):
+    win32clipboard.OpenClipboard()
+    try:
+        if win32clipboard.IsClipboardFormatAvailable(fmt):
+            data = win32clipboard.GetClipboardData(fmt)
+            return data
+    finally:
+        win32clipboard.CloseClipboard()
+
+def get_clipboard_text():
+    return get_clipboard(win32con.CF_UNICODETEXT)
+
+def get_clipboard_file():
+    files = get_clipboard(win32con.CF_HDROP)
+    return files[0] if files else None
 
 def save_clipboard() -> Optional[tuple[int, object]]:
     """
@@ -2783,7 +2805,7 @@ class Message:
             复制到剪贴板的文本内容
         """
         self._click_context_menu(i_("复制"))
-        return get_clipboard()
+        return get_clipboard_text()
 
     @PIM.guard
     def collect(self) -> None:
@@ -7848,7 +7870,7 @@ class ChatFile:
             复制到剪贴板的文本内容（通常为文件路径或文件名）
         """
         self._context_action(i_("复制"))
-        return get_clipboard()
+        return get_clipboard_file()
 
     @PIM.guard
     def collect(self) -> None:
@@ -15579,12 +15601,11 @@ class Weixin(WeixinWindow):
                 try:
                     visible = chat.get_visible_messages(sender_cache=sender_cache)
                 except Exception as e:
-                    print(e)
+                    logger.error(e)
                     if stop_event.wait(interval):
                         break
                     continue
-                
-                print(visible)
+
                 # 当前可见消息的 RuntimeId 集合
                 curr_rids = {msg.runtime_id for msg in visible if msg.runtime_id}
 
