@@ -893,6 +893,7 @@ class ExcelFileHandler(FileSystemEventHandler):
                 print(f"  📋 [{i}/{len(today_files)}] 获取文件路径: {f.file_name}")
                 try:
                     file_path = f.copy()
+                    time.sleep(0.5)  # 等待剪贴板释放
                     if not file_path or not os.path.exists(file_path):
                         print(f"  ❌ 获取文件路径失败: {f.file_name} (path={file_path})")
                         continue
@@ -926,24 +927,8 @@ class ExcelFileHandler(FileSystemEventHandler):
                 if upload_success:
                     try:
                         f.switch_to_message()
-                        time.sleep(1)
-
-                        chat = self._wx.chat
-                        if chat:
-                            messages = chat.get_visible_messages()
-                            target_msg = None
-                            for msg in reversed(messages):
-                                if hasattr(msg, 'file_name') and msg.file_name == f.file_name:
-                                    target_msg = msg
-                                    break
-                            if target_msg:
-                                chat.send_text("已收到文件，正在处理中，请耐心等待。", reply_to=target_msg)
-                                print(f"  ✅ 已引用回复: {f.file_name}")
-                            else:
-                                chat.send_text("已收到文件，正在处理中，请耐心等待。")
-                                print(f"  ✅ 已回复（未匹配到消息引用）: {f.file_name}")
-                        else:
-                            print(f"  ⚠️ 定位后未找到聊天窗口: {f.file_name}")
+                        self._wx.chat.send_at(f"【Excel下单】\n您的文件已收到：{f.file_name}，订单正在处理中，请耐心等待。", at_members=[f.sender_name])
+                        print(f"  ✅ 已回复（未匹配到消息引用）: {f.file_name}")
                     except Exception as e:
                         print(f"  ⚠️ 回复异常（不影响删除）: {f.file_name} - {e}")
 
@@ -1380,9 +1365,11 @@ def siyu_cmd_callback(req: SiyuCmdRequest):
 
     # 忽略桌面自动化模式不需要处理的命令
     if api_path in _IGNORED_API_PATHS:
+        msg = f"命令已忽略（桌面自动化模式不适用）: {api_path}"
+        print(msg)
         return {
             "code": 0,
-            "msg": f"命令已忽略（桌面自动化模式不适用）: {api_path}",
+            "msg": msg,
             "data": {"ignored": True},
         }
 
