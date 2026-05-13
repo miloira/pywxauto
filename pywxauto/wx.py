@@ -8964,9 +8964,9 @@ class Chat:
         前台模式：ValuePattern 设置文本 + 点击发送按钮
         后台模式：ValuePattern 设置文本 + send_keys 回车发送
         """
-        self._resolve_reply_to(reply_to)
-
         self._activate_window()
+
+        self._resolve_reply_to(reply_to)
 
         field = self._input_field
         if not field.Exists(maxSearchSeconds=2):
@@ -9442,9 +9442,9 @@ class Chat:
         if not keyword:
             raise ValueError("keyword 不能为空")
 
-        self._resolve_reply_to(reply_to)
-
         self._activate_window()
+
+        self._resolve_reply_to(reply_to)
 
         # 1. 打开收藏选择面板
         self._open_collection_panel()
@@ -9545,9 +9545,9 @@ class Chat:
         if index < 1:
             raise ValueError("index 必须 >= 1")
 
-        self._resolve_reply_to(reply_to)
-
         self._activate_window()
+
+        self._resolve_reply_to(reply_to)
 
         try:
             # 1. 打开表情面板
