@@ -35,7 +35,7 @@ import win32gui
 import win32process
 import win32ui
 import winreg
-from PIL import Image
+from PIL import Image, ImageFilter, ImageDraw
 from pyee.base import EventEmitter
 from rapidocr import RapidOCR
 import sys
@@ -520,118 +520,6 @@ class LoginError(WxAutoError):
 class RegistryError(Exception):
     """注册表操作异常"""
     pass
-
-
-import io
-import sys
-
-from PIL import Image, ImageFilter, ImageDraw
-
-
-def _is_touching_border(x1: int, y1: int, x2: int, y2: int, w: int, h: int, margin: int) -> bool:
-    """判断矩形是否触碰图片边缘"""
-    return x1 <= margin or y1 <= margin or x2 >= w - 1 - margin or y2 >= h - 1 - margin
-
-
-def _is_contained(inner: tuple, outer: tuple) -> bool:
-    """判断 inner 矩形是否被 outer 矩形完全包含"""
-    return (outer[0] <= inner[0] and outer[1] <= inner[1] and
-            outer[2] >= inner[2] and outer[3] >= inner[3])
-
-
-def _remove_contained(rects: list[tuple]) -> list[tuple]:
-    """去除被其他矩形完全包含的矩形，只保留最外层"""
-    result = []
-    for i, rect_a in enumerate(rects):
-        contained = False
-        for j, rect_b in enumerate(rects):
-            if i == j:
-                continue
-            if _is_contained(rect_a, rect_b):
-                if rect_a == rect_b and i < j:
-                    continue
-                contained = True
-                break
-        if not contained:
-            result.append(rect_a)
-    return result
-
-
-def find_contour_rects(
-    image_bytes: bytes,
-    threshold: int = 1,
-    min_area: int = 100,
-    border_margin: int = 2,
-) -> tuple[bytes, list[tuple[int, int, int, int]]]:
-    """
-    检测图片中的轮廓区域，用红色矩形框出并返回标注图和坐标。
-
-    规则：
-    - 触碰图片边缘的区域视为图片边框，排除
-    - 被其他矩形完全包含的矩形排除，只保留最外层
-
-    Args:
-        image_bytes: 输入图片的字节数据（PNG/JPG 等）
-        threshold: 边缘二值化阈值（0-255），值越小检测到的边缘越多
-        min_area: 最小区域面积（像素数），过滤噪点
-        border_margin: 边缘容差像素，触碰图片边缘 margin 内的区域视为边框排除
-
-    Returns:
-        (标注后的 PNG 图片字节数据, 矩形坐标列表 [(x1, y1, x2, y2), ...])
-    """
-    img = Image.open(io.BytesIO(image_bytes)).convert("RGB")
-    gray = img.convert("L")
-    w, h = img.size
-
-    # 边缘检测 + 二值化
-    edges = gray.filter(ImageFilter.FIND_EDGES)
-    binary = edges.point(lambda p: 1 if p > threshold else 0, mode="1")
-
-    # 连通区域标记（flood fill）
-    pixels = binary.load()
-    visited = [[False] * h for _ in range(w)]
-    raw_rects: list[tuple[int, int, int, int]] = []
-
-    for y in range(h):
-        for x in range(w):
-            if pixels[x, y] == 0 or visited[x][y]:
-                continue
-            # BFS 找连通区域
-            min_x, min_y, max_x, max_y = x, y, x, y
-            stack = [(x, y)]
-            area = 0
-            while stack:
-                cx, cy = stack.pop()
-                if cx < 0 or cx >= w or cy < 0 or cy >= h:
-                    continue
-                if visited[cx][cy] or pixels[cx, cy] == 0:
-                    continue
-                visited[cx][cy] = True
-                area += 1
-                min_x = min(min_x, cx)
-                min_y = min(min_y, cy)
-                max_x = max(max_x, cx)
-                max_y = max(max_y, cy)
-                stack.extend([(cx + 1, cy), (cx - 1, cy), (cx, cy + 1), (cx, cy - 1)])
-
-            if area >= min_area:
-                raw_rects.append((min_x, min_y, max_x, max_y))
-
-    # 过滤触碰图片边缘的区域（图片边框不算）
-    rects = [r for r in raw_rects if not _is_touching_border(*r, w, h, border_margin)]
-
-    # 去除被其他矩形完全包含的（只保留最外层）
-    rects = _remove_contained(rects)
-
-    # 在原图上画红色矩形框
-    draw = ImageDraw.Draw(img)
-    for rect in rects:
-        draw.rectangle(rect, outline="red", width=2)
-
-    # 输出为 PNG 字节
-    buf = io.BytesIO()
-    img.save(buf, format="PNG")
-    return buf.getvalue(), rects
 
 
 # ---- 底层钩子常量与结构体 ----
