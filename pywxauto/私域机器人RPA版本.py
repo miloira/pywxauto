@@ -18,34 +18,32 @@ def run(droplet_token, device_id, send_offline_msg):
     4. 全部处理完后关闭聊天文件窗口
     """
 
+    import base64
     import json
+    import logging
     import os
     import re
-    import time
     import threading
+    import time
     import traceback
-    import base64
     import urllib.parse
+    import uuid
     from datetime import datetime
     from enum import Enum
     from typing import Optional
 
+    import openpyxl
     import pymem
+    import requests
     import uvicorn
     from fastapi import FastAPI, HTTPException
     from pydantic import BaseModel, Field
     from sqlalchemy import create_engine, Column, Integer, String, Text, DateTime, Enum as SAEnum
     from sqlalchemy.orm import declarative_base, sessionmaker, Session as DBSession
-
     from watchdog.observers import Observer
     from watchdog.events import FileSystemEventHandler
 
-    from wx import Weixin, MessageStatus, find_process
-
-    import logging
-    import uuid
-
-    import requests
+    from wx import Weixin, MessageStatus
 
     logger = logging.getLogger(__name__)
 
@@ -477,6 +475,7 @@ def run(droplet_token, device_id, send_offline_msg):
     EXCEL_EXTS = {".xls", ".xlsx", ".csv"}
     STABLE_CHECK_INTERVAL = 1
     STABLE_CHECK_COUNT = 3
+    EXCEL_FILE_MAX_SIZE = 2 * 1024 ** 2  # 2M
     API_HOST = "127.0.0.1"
     API_PORT = 8000
     HEARTBEAT_INTERVAL = 10
@@ -698,7 +697,7 @@ def run(droplet_token, device_id, send_offline_msg):
                         continue
 
                     # 超过 2MB 的文件直接删除，不下载
-                    if parse_file_size(f.file_size) > 2 * 1024 ** 2:
+                    if parse_file_size(f.file_size) > EXCEL_FILE_MAX_SIZE:
                         try:
                             self._wx.file_manager.delete_file(f)
                             print(f"  🗑️ [{i}/{len(today_files)}] 文件超过2M直接删除: {f.file_name} ({f.file_size})")
@@ -892,8 +891,6 @@ def run(droplet_token, device_id, send_offline_msg):
 
     def _generate_excel_file(excel_name: str, datas: list) -> str:
         """根据 excel_msg 数据生成 Excel 文件到临时目录，返回文件路径。"""
-        import openpyxl
-
         wb = openpyxl.Workbook()
         ws = wb.active
         for row in datas:
