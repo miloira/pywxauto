@@ -4552,6 +4552,55 @@ class Login(WeixinWindow):
             raise WxControlNotFoundError("未找到'保存'按钮")
         input_wx.click(btn)
 
+    @property
+    def has_safe_window(self) -> bool:
+        """
+        检测登录窗口内是否弹出了安全验证弹窗。
+
+        安全弹窗是登录窗口内部的子控件：
+        - WindowControl, ClassName="mmui::XDialog", Name="Weixin"
+        包含"我知道了"确认按钮。
+
+        Returns:
+            True 安全弹窗存在，False 不存在
+        """
+        self._ensure_exists()
+        dlg = self._win.WindowControl(
+            ClassName="mmui::XDialog",
+        )
+        return dlg.Exists(0, 0)
+
+    @PIM.guard
+    def safe_window_confirm(self) -> None:
+        """
+        点击登录窗口内安全验证弹窗中的"我知道了"按钮确认。
+
+        安全弹窗控件结构（位于登录窗口 mmui::LoginWindow 内部）：
+        - 弹窗: WindowControl, ClassName="mmui::XDialog", Name="Weixin"
+        - 确认按钮: ButtonControl, ClassName="mmui::XOutlineButton", Name="我知道了"
+
+        Raises:
+            WxWindowNotFoundError: 登录窗口或安全弹窗未找到
+            WxControlNotFoundError: "我知道了"按钮未找到
+        """
+        self._ensure_exists()
+
+        dlg = self._win.WindowControl(
+            ClassName="mmui::XDialog",
+        )
+        if not dlg.Exists(maxSearchSeconds=3):
+            raise WxWindowNotFoundError("安全验证弹窗未找到")
+
+        btn = dlg.ButtonControl(
+            ClassName="mmui::XOutlineButton",
+            Name=i_("我知道了"),
+        )
+        if not btn.Exists(maxSearchSeconds=2):
+            raise WxControlNotFoundError("未找到'我知道了'按钮")
+
+        input_wx.click(btn)
+        time.sleep(0.5)
+
     @PIM.guard
     def close(self) -> None:
         self._ensure_exists()
