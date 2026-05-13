@@ -2451,7 +2451,7 @@ class Message:
     """聊天消息基类"""
 
     def __init__(self, *, sender: str = "", source: Source = Source.UNKNOWN,
-                 content: str = "", raw_name: str = "",
+                 content: str = "", raw_name: str = "", ui_cls: str = "",
                  status: MessageStatus = MessageStatus.UNKNOWN,
                  runtime_id: tuple = (), bubble_rect: tuple = (),
                  room: Optional[str] = None, chat: object = None,
@@ -2462,6 +2462,7 @@ class Message:
         self.source: Source = source
         self.content: str = content
         self.raw_name: str = raw_name
+        self.ui_cls: str = ui_cls
         self.status: MessageStatus = status
         self.runtime_id: tuple = runtime_id
         self.bubble_rect: tuple = bubble_rect
@@ -2473,7 +2474,7 @@ class Message:
         self.headimg_rect: tuple = headimg_rect
         self.nickname_rect: tuple = nickname_rect
         self.content_rect: tuple = content_rect
-        self.msg_id: int = hash((runtime_id, self.__class__.__name__, raw_name, source, content))
+        self.msg_id: int = hash((runtime_id, ui_cls, raw_name))
 
     @property
     def type_label(self) -> str:
@@ -2491,7 +2492,7 @@ class Message:
             "raw_name": self.raw_name,
             "status": self.status.value,
         }
-        _base_keys = {"sender", "source", "content", "raw_name",
+        _base_keys = {"sender", "source", "content", "raw_name", "ui_cls",
                       "status", "runtime_id", "bubble_rect", "chat",
                       "msg_id", "control", "room", "pid", "chat_type",
                       "headimg_rect", "nickname_rect", "content_rect"}
@@ -2790,7 +2791,7 @@ class Message:
         time.sleep(0.3)
 
     @PIM.guard
-    def refer(self) -> None:
+    def quote(self) -> None:
         """
         引用此条消息。
 
@@ -8483,13 +8484,13 @@ class Chat:
         if quote is None:
             return
         if isinstance(quote, Message):
-            quote.refer()
+            quote.quote()
             return
         if isinstance(quote, int):
             messages = self.get_visible_messages()
             for msg in messages:
                 if msg.msg_id == quote:
-                    msg.refer()
+                    msg.quote()
                     return
             raise ValueError(f"当前可见消息中未找到 msg_id={quote} 的消息")
         raise TypeError(f"quote 参数类型错误: {type(quote)}, 支持 Message | int | None")
@@ -10346,7 +10347,7 @@ class Chat:
         input_wx.send_keys(lc, "{End}")
         time.sleep(0.3)
 
-    def get_visible_messages(self, sender_cache: dict[tuple, tuple] = None) -> list[Message]:
+    def get_visible_messages(self, sender_cache: dict[int, tuple] = None) -> list[Message]:
         """
         获取当前可见的消息列表，返回具体消息子类实例。
 
@@ -10357,10 +10358,11 @@ class Chat:
 
         Args:
             sender_cache: 可选的发送者缓存字典，格式为
-                {runtime_id: (sender, source)}。
+                {msg_id: (sender, source, bubble_rect, headimg_rect, nickname_rect, content_rect)}。
                 传入后，已缓存的消息跳过截图检测直接使用缓存结果，
                 新消息检测后自动写入缓存。
                 用于监听场景下避免对已知消息重复截图导致窗口闪烁。
+                msg_id 由 hash((runtime_id, class_name, raw_name)) 计算。
         """
         lc = self._message_list
         if not lc.Exists(maxSearchSeconds=2):
@@ -10426,6 +10428,7 @@ class Chat:
                     content=raw_name,
                     timestamp=raw_name,
                     raw_name=raw_name,
+                    ui_cls=ui_cls,
                     runtime_id=rid,
                     room=chat_name if is_room else None,
                     chat=self,
@@ -10434,9 +10437,12 @@ class Chat:
                 messages.append(sys_msg)
                 continue
 
+            # 缓存 key 与 msg_id 计算方式一致：hash((runtime_id, ui_cls, raw_name))
+            cache_key = hash((rid, ui_cls, raw_name)) if rid else None
+
             # 判断发送者：优先从缓存读取，避免重复截图
-            if sender_cache is not None and rid and rid in sender_cache:
-                sender, source, bubble_rect, headimg_rect, nickname_rect, content_rect = sender_cache[rid]
+            if sender_cache is not None and cache_key is not None and cache_key in sender_cache:
+                sender, source, bubble_rect, headimg_rect, nickname_rect, content_rect = sender_cache[cache_key]
             else:
                 sender, source, bubble_rect, headimg_rect, nickname_rect, content_rect = self._detect_sender(
                     hwnd, ctrl, chat_name,
@@ -10449,12 +10455,12 @@ class Chat:
                     except Exception:
                         sender = None
                 # 写入缓存
-                if sender_cache is not None and rid:
-                    sender_cache[rid] = (sender, source, bubble_rect, headimg_rect, nickname_rect, content_rect)
+                if sender_cache is not None and cache_key is not None:
+                    sender_cache[cache_key] = (sender, source, bubble_rect, headimg_rect, nickname_rect, content_rect)
 
             # 构造具体消息对象
             msg = self._build_message(
-                msg_cls, 
+                msg_cls,
                 raw_name, 
                 sender, source,
                 runtime_id=rid, 
@@ -10464,6 +10470,7 @@ class Chat:
                 headimg_rect=headimg_rect, 
                 nickname_rect=nickname_rect,
                 content_rect=content_rect,
+                ui_cls=ui_cls,
             )
             messages.append(msg)
         return messages
@@ -10927,6 +10934,7 @@ class Chat:
         headimg_rect: tuple = (),
         nickname_rect: tuple = (),
         content_rect: tuple = (),
+        ui_cls: str = "",
     ) -> Message:
         """根据消息子类构造具体消息对象，调用各子类的 parse 方法提取字段"""
         msg_status, actual_name = Chat._detect_message_status(
@@ -10934,7 +10942,7 @@ class Chat:
         )
 
         base = dict(sender=sender, source=source,
-                    raw_name=raw_name, status=msg_status,
+                    raw_name=raw_name, ui_cls=ui_cls, status=msg_status,
                     runtime_id=runtime_id, bubble_rect=bubble_rect,
                     room=room, chat=chat, control=control,
                     headimg_rect=headimg_rect, nickname_rect=nickname_rect,
@@ -15637,8 +15645,8 @@ class Weixin(WeixinWindow):
             # 滑动窗口：保留最近 N 条消息的 msg_id，N = 当前可见消息数量
             known_msg_ids: deque[int] = deque()
             known_msg_id_set: set[int] = set()
-            # 发送者缓存：{runtime_id: (sender, source, bubble_rect)}
-            sender_cache: dict[tuple, tuple] = {}
+            # 发送者缓存：{msg_id: (sender, source, bubble_rect, headimg_rect, nickname_rect, content_rect)}
+            sender_cache: dict[int, tuple] = {}
             first_scan = True
 
             # 监听前滚动到最新消息
@@ -16354,7 +16362,7 @@ class WeixinManager:
             # 滑动窗口：保留最近 N 条消息的 msg_id，N = 当前可见消息数量
             known_msg_ids: deque[int] = deque()
             known_msg_id_set: set[int] = set()
-            sender_cache: dict[tuple, tuple] = {}
+            sender_cache: dict[int, tuple] = {}
             first_scan = True
             offscreen = weixin.background
 
