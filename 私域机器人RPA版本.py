@@ -475,7 +475,7 @@ def run(droplet_token, device_id, send_offline_msg):
         DROPLET_CLIENT_PATH = os.path.join(appdata_path, "droplet-client")
 
     WECHAT_DATA_DIR = r"C:\Users\张明明\xwechat_files\wxid_g7leryvu7kqm22_a246"
-    IDLE_FILE_SCAN_SECONDS = 120
+    IDLE_FILE_SCAN_SECONDS = 600
     ENABLE_IDLE_FILE_SCAN = True
     WECHAT_FILE_ROOT = rf"{WECHAT_DATA_DIR}\msg\file"
     TEMP_DIR = os.path.join(os.environ.get("TEMP", r"C:\Temp"), "jxysy")
@@ -552,17 +552,8 @@ def run(droplet_token, device_id, send_offline_msg):
 
     def _get_offline_grpc_paths() -> List[str]:
         """获取离线消息文件路径列表"""
-        current_path = os.path.dirname(os.path.abspath(__file__))
-        droplet_client = os.path.dirname(os.path.dirname(os.path.dirname(current_path)))
-        old_grpc_file_path = os.path.join(
-            droplet_client,
-            "pluginPackages",
-            "64d45e76b4574ad2ee651930",
-            "64d45e76b4574ad2ee651930",
-            "grpc.msg",
-        )
-        grpc_file_path = os.path.join(droplet_client, "GrpcMsg", "siyu.msg")
-        return [old_grpc_file_path, grpc_file_path]
+        grpc_file_path = os.path.join(DROPLET_CLIENT_PATH, "GrpcMsg", "siyu.msg")
+        return [grpc_file_path]
 
     def _read_grpc(grpc_path: str) -> List[dict]:
         """读取离线消息文件，返回命令列表"""
