@@ -373,7 +373,7 @@ def run(droplet_token, device_id, send_offline_msg):
     class SiYuTask:
         """私域任务表操作封装。"""
 
-        def __init__(self, db_path: str = "siyu_task.db", echo: bool = False):
+        def __init__(self, db_path: str = "syrpa.db", echo: bool = False):
             db_url = f"sqlite:///{db_path}"
             self._engine = create_engine(db_url, echo=echo)
             Base.metadata.create_all(self._engine)
