@@ -2341,30 +2341,41 @@ class MessageStatus(Enum):
 class Message:
     """聊天消息基类"""
 
-    def __init__(self, *, sender: str = "", source: Source = Source.UNKNOWN,
-                 content: str = "", raw_name: str = "", ui_cls: str = "",
-                 status: MessageStatus = MessageStatus.UNKNOWN,
-                 runtime_id: tuple = (), bubble_rect: tuple = (),
-                 room: Optional[str] = None, chat: object = None,
-                 control: object = None, pid: int = 0,
-                 headimg_rect: tuple = (), nickname_rect: tuple = (),
-                 content_rect: tuple = ()):
+    def __init__(
+        self,
+        *,
+        sender: str = "",
+        source: Source = Source.UNKNOWN,
+        content: str = "",
+        room: Optional[str] = None,
+        status: MessageStatus = MessageStatus.UNKNOWN,
+        pid: int = 0,
+        raw_name: str = "",
+        ui_cls: str = "",
+        runtime_id: tuple = (),
+        bubble_rect: tuple = (),
+        headimg_rect: tuple = (),
+        nickname_rect: tuple = (),
+        content_rect: tuple = (),
+        chat: object = None,
+        control: object = None,
+    ):
         self.sender: str = sender
         self.source: Source = source
         self.content: str = content
+        self.room: Optional[str] = room
+        self.status: MessageStatus = status
+        self.pid: int = pid
         self.raw_name: str = raw_name
         self.ui_cls: str = ui_cls
-        self.status: MessageStatus = status
         self.runtime_id: tuple = runtime_id
         self.bubble_rect: tuple = bubble_rect
-        self.room: Optional[str] = room
-        self.control: object = control
-        self.chat: object = chat
-        self.chat_type: str = self.chat.chat_type if self.chat else "未知"
-        self.pid: int = pid
         self.headimg_rect: tuple = headimg_rect
         self.nickname_rect: tuple = nickname_rect
         self.content_rect: tuple = content_rect
+        self.chat: object = chat
+        self.chat_type: str = self.chat.chat_type if self.chat else "未知"
+        self.control: object = control
         self.msg_id: int = hash((runtime_id, ui_cls, raw_name))
 
     @property
@@ -3022,11 +3033,18 @@ class TextMessage(Message):
 class QuoteMessage(Message):
     """引用消息"""
 
-    def __init__(self, *, reply_content: str = "", quote_sender: str = "", quote_content: str = "", **kw):
+    def __init__(
+        self,
+        *,
+        quote_sender: str = "",
+        quote_content: str = "",
+        reply_content: str = "",
+        **kw,
+    ):
         super().__init__(**kw)
-        self.reply_content: str = reply_content
         self.quote_sender: str = quote_sender
         self.quote_content: str = quote_content
+        self.reply_content: str = reply_content
 
     @property
     def type_label(self) -> str:
@@ -3056,10 +3074,16 @@ class QuoteMessage(Message):
 class VoiceMessage(Message):
     """语音消息"""
 
-    def __init__(self, *, duration: int = 0, played: bool = True, **kw):
+    def __init__(
+        self,
+        *,
+        played: bool = True,
+        duration: int = 0,
+        **kw,
+    ):
         super().__init__(**kw)
-        self.duration: int = duration
         self.played: bool = played
+        self.duration: int = duration
 
     @property
     def type_label(self) -> str:
@@ -3323,7 +3347,14 @@ class VideoMessage(Message):
 class FileMessage(Message):
     """文件消息"""
 
-    def __init__(self, *, file_name: str = "", file_size: str = "", file_status: str = "", **kw):
+    def __init__(
+        self,
+        *,
+        file_name: str = "",
+        file_size: str = "",
+        file_status: str = "",
+        **kw,
+    ):
         super().__init__(**kw)
         self.file_name: str = file_name
         self.file_size: str = file_size
@@ -3463,7 +3494,13 @@ class LocationMessage(Message):
 class LinkMessage(Message):
     """链接消息"""
 
-    def __init__(self, *, title: str = "", link_source: str = "", **kw):
+    def __init__(
+        self,
+        *,
+        title: str = "",
+        link_source: str = "",
+        **kw,
+    ):
         super().__init__(**kw)
         self.title: str = title
         self.link_source: str = link_source
@@ -3558,11 +3595,18 @@ class MusicMessage(Message):
         "虾米音乐", "咪咕音乐", "Apple Music", "Spotify",
     )
 
-    def __init__(self, *, music_source: str = "", song_name: str = "", artist: str = "", **kw):
+    def __init__(
+        self,
+        *,
+        song_name: str = "",
+        artist: str = "",
+        music_source: str = "",
+        **kw,
+    ):
         super().__init__(**kw)
-        self.music_source: str = music_source
         self.song_name: str = song_name
         self.artist: str = artist
+        self.music_source: str = music_source
 
     @property
     def type_label(self) -> str:
@@ -3587,7 +3631,13 @@ class MusicMessage(Message):
 class CardMessage(Message):
     """卡片消息"""
 
-    def __init__(self, *, title: str = "", description: str = "", **kw):
+    def __init__(
+        self,
+        *,
+        title: str = "",
+        description: str = "",
+        **kw,
+    ):
         super().__init__(**kw)
         self.title: str = title
         self.description: str = description
@@ -3623,7 +3673,13 @@ class SystemMessage(Message):
 class VoipMessage(Message):
     """语音/视频通话消息"""
 
-    def __init__(self, *, call_type: str = "", call_status: str = "", **kw):
+    def __init__(
+        self,
+        *,
+        call_type: str = "",
+        call_status: str = "",
+        **kw,
+    ):
         super().__init__(**kw)
         self.call_type: str = call_type
         self.call_status: str = call_status
@@ -3646,7 +3702,13 @@ class VoipMessage(Message):
 class TransferMessage(Message):
     """微信转账消息"""
 
-    def __init__(self, *, amount: str = "", remark: str = "", **kw):
+    def __init__(
+        self,
+        *,
+        amount: str = "",
+        remark: str = "",
+        **kw,
+    ):
         super().__init__(**kw)
         self.amount: str = amount
         self.remark: str = remark
@@ -5323,9 +5385,18 @@ class Navigator:
 class SessionItem:
     """会话列表中的一条会话"""
 
-    def __init__(self, session: Optional[Session] = None, *, name: str = "", last_msg: str = "", msg_time: str = "",
-                 muted: bool = False, unread: str = "", is_active: bool = False,
-                 runtime_id: tuple = ()):
+    def __init__(
+        self,
+        session: Optional[Session] = None,
+        *,
+        name: str = "",
+        last_msg: str = "",
+        msg_time: str = "",
+        unread: str = "",
+        muted: bool = False,
+        is_active: bool = False,
+        runtime_id: tuple = (),
+    ):
         """
         初始化会话项。
 
@@ -5334,8 +5405,8 @@ class SessionItem:
             name: 会话名称。
             last_msg: 最后一条消息摘要。
             msg_time: 消息时间文本。
-            muted: 是否消息免打扰。
             unread: 未读条数文本，如 "[9条]"。
+            muted: 是否消息免打扰。
             is_active: 是否为当前选中（激活）的会话。
             runtime_id: UI Automation RuntimeId，用于唯一标识控件。
         """
@@ -5343,8 +5414,8 @@ class SessionItem:
         self.name = name
         self.last_msg = last_msg
         self.msg_time = msg_time
-        self.muted = muted
         self.unread = unread
+        self.muted = muted
         self.is_active = is_active
         self.runtime_id = runtime_id
 
@@ -12349,33 +12420,43 @@ class SeparateChat(Chat, WeixinWindow):
 class MomentItem:
     """朋友圈动态条目"""
 
-    def __init__(self, moment: Moment, runtime_id: tuple, *,
-                 type: str = "", sender: str = "", content: str = "",
-                 raw_text: str = "", timestamp: str = "", image_count: int = 0,
-                 cell_type: str = "", scroll_offset: int = 0):
+    def __init__(
+        self,
+        moment: Moment,
+        runtime_id: tuple,
+        *,
+        sender: str = "",
+        content: str = "",
+        type: str = "",
+        timestamp: str = "",
+        image_count: int = 0,
+        raw_text: str = "",
+        cell_type: str = "",
+        scroll_offset: int = 0,
+    ):
         """
         初始化朋友圈动态条目。
 
         Args:
             moment: 关联的 Moment 实例。
             runtime_id: UI Automation RuntimeId。
-            type: 动态类型（如 "文本"、"图片"、"视频"、"分享"）。
             sender: 发送者昵称。
             content: 正文内容。
-            raw_text: 原始 Name 属性文本。
+            type: 动态类型（如 "文本"、"图片"、"视频"、"分享"）。
             timestamp: 时间戳文本。
             image_count: 图片数量。
+            raw_text: 原始 Name 属性文本。
             cell_type: 控件 ClassName。
             scroll_offset: 该动态在列表中的累计滚动偏移（像素）。
         """
         self.moment = moment
         self.runtime_id = runtime_id
-        self.type = type
         self.sender = sender
         self.content = content
-        self.raw_text = raw_text
+        self.type = type
         self.timestamp = timestamp
         self.image_count = image_count
+        self.raw_text = raw_text
         self.cell_type = cell_type
         self.scroll_offset = scroll_offset
 
@@ -13730,10 +13811,20 @@ class Moment(WeixinWindow):
 class ChatFile:
     """聊天文件信息（来自"聊天文件"管理器窗口）"""
 
-    def __init__(self, file_manager: Optional[FileManager] = None, *, name: str = "",
-                 sender: str = "", room: str = "", chat_type: str = "",
-                 date: str = "", status: str = "", size: str = "",
-                 raw_text: str = "", _cell: Optional[auto.Control] = None):
+    def __init__(
+        self,
+        file_manager: Optional[FileManager] = None,
+        *,
+        name: str = "",
+        sender: str = "",
+        room: str = "",
+        chat_type: str = "",
+        size: str = "",
+        date: str = "",
+        status: str = "",
+        raw_text: str = "",
+        _cell: Optional[auto.Control] = None,
+    ):
         """
         初始化聊天文件信息。
 
@@ -13743,9 +13834,9 @@ class ChatFile:
             sender: 发送人昵称。
             room: 来源（群名或个人昵称）。
             chat_type: 来源类型，"contact"(私聊) 或 "room"(群聊)。
+            size: 文件大小文本。
             date: 日期文本。
             status: 状态文本（空字符串表示已下载）。
-            size: 文件大小文本。
             raw_text: 原始 Name 属性文本。
             _cell: UI 控件引用（内部使用）。
         """
@@ -13754,9 +13845,9 @@ class ChatFile:
         self.sender = sender
         self.room = room
         self.chat_type = chat_type
+        self.size = size
         self.date = date
         self.status = status
-        self.size = size
         self.raw_text = raw_text
         self._cell = _cell
 
