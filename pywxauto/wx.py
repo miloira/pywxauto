@@ -2227,7 +2227,7 @@ def copy() -> None:
     """复制（Ctrl+C）"""
     send_shortcut("{Ctrl}c")
 
-def paste(content: object) -> None:
+def paste(content: Union[str, list]) -> None:
     """
     通过剪贴板粘贴内容。
 
