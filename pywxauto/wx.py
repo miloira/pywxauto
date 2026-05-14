@@ -15834,7 +15834,6 @@ class Weixin(WeixinWindow):
                 try:
                     visible = chat.get_visible_messages(sender_cache=sender_cache)
                 except Exception as e:
-                    logger.error(e)
                     if stop_event.wait(interval):
                         break
                     continue
