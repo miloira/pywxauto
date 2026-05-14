@@ -17,7 +17,7 @@ def run(droplet_token, device_id, send_offline_msg):
     3. 逐个另存为到临时目录，保存后直接删除该文件项
     4. 全部处理完后关闭聊天文件窗口
     """
-
+    # CODE START
     import base64
     import json
     import logging
@@ -30,7 +30,7 @@ def run(droplet_token, device_id, send_offline_msg):
     import uuid
     from datetime import datetime
     from enum import Enum
-    from typing import Optional
+    from typing import Dict, List, Optional
 
     import openpyxl
     import pymem
@@ -201,9 +201,9 @@ def run(droplet_token, device_id, send_offline_msg):
             self,
             room_nickname: str,
             file_name: str,
-            headers: list[str],
-            first_line: list[str],
-            rows: list[list[str]],
+            headers: List[str],
+            first_line: List[str],
+            rows: List[List[str]],
             sender_nickname: str = "",
             file_id: str = "",
             file_type: str = "",
@@ -388,8 +388,8 @@ def run(droplet_token, device_id, send_offline_msg):
             task_name: str,
             to: str = "",
             content: str = "",
-            files: Optional[list[str]] = None,
-            at_members: Optional[list[str]] = None,
+            files: Optional[List[str]] = None,
+            at_members: Optional[List[str]] = None,
             msg_id: Optional[str] = None,
             metadata: Optional[dict] = None,
             bot_id: str = "",
@@ -416,11 +416,11 @@ def run(droplet_token, device_id, send_offline_msg):
             with self._get_session() as session:
                 return session.query(JxySiyuTask).filter_by(id=task_id).first()
 
-        def get_by_status(self, status: TaskStatus) -> list[JxySiyuTask]:
+        def get_by_status(self, status: TaskStatus) -> List[JxySiyuTask]:
             with self._get_session() as session:
                 return session.query(JxySiyuTask).filter_by(status=status).all()
 
-        def get_pending(self) -> list[JxySiyuTask]:
+        def get_pending(self) -> List[JxySiyuTask]:
             return self.get_by_status(TaskStatus.PENDING)
 
         def update_status(self, task_id: int, status: TaskStatus, fail_reason: str = "") -> bool:
@@ -445,11 +445,11 @@ def run(droplet_token, device_id, send_offline_msg):
                 session.commit()
                 return True
 
-        def get_by_bot_id(self, bot_id: str) -> list[JxySiyuTask]:
+        def get_by_bot_id(self, bot_id: str) -> List[JxySiyuTask]:
             with self._get_session() as session:
                 return session.query(JxySiyuTask).filter_by(bot_id=bot_id).all()
 
-        def get_by_type(self, task_type: str) -> list[JxySiyuTask]:
+        def get_by_type(self, task_type: str) -> List[JxySiyuTask]:
             with self._get_session() as session:
                 return session.query(JxySiyuTask).filter_by(task_type=task_type).all()
 
@@ -543,7 +543,7 @@ def run(droplet_token, device_id, send_offline_msg):
     # 离线消息处理
     # ==============================
 
-    def _get_offline_grpc_paths() -> list[str]:
+    def _get_offline_grpc_paths() -> List[str]:
         """获取离线消息文件路径列表"""
         current_path = os.path.dirname(os.path.abspath(__file__))
         droplet_client = os.path.dirname(os.path.dirname(os.path.dirname(current_path)))
@@ -557,7 +557,7 @@ def run(droplet_token, device_id, send_offline_msg):
         grpc_file_path = os.path.join(droplet_client, "GrpcMsg", "siyu.msg")
         return [old_grpc_file_path, grpc_file_path]
 
-    def _read_grpc(grpc_path: str) -> list[dict]:
+    def _read_grpc(grpc_path: str) -> List[dict]:
         """读取离线消息文件，返回命令列表"""
         with open(grpc_path, "r", encoding="utf-8") as f:
             lines = f.readlines()
@@ -1039,7 +1039,7 @@ def run(droplet_token, device_id, send_offline_msg):
         """发送文本消息的回调请求体"""
         to: str = Field(..., description="目标会话（联系人昵称或群名）")
         content: str = Field(..., description="消息内容")
-        at_members: Optional[list[str]] = Field(default=None, description="需要@的成员列表")
+        at_members: Optional[List[str]] = Field(default=None, description="需要@的成员列表")
         msg_id: Optional[str] = Field(default=None, description="外部消息ID，用于去重/追踪")
         bot_id: Optional[str] = Field(default=None, description="机器人ID")
 
@@ -1370,6 +1370,8 @@ def run(droplet_token, device_id, send_offline_msg):
         observer.stop()
         print("\n\n🛑 已停止")
     observer.join()
+    # CODE END
+
 
 
 if __name__ == "__main__":
