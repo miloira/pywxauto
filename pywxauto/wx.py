@@ -23,7 +23,7 @@ from collections import deque
 from datetime import date
 from enum import Enum
 from queue import Empty, Queue
-from typing import Iterable, Optional
+from typing import Deque, Dict, Iterable, List, Literal, Optional, Set, Tuple, Union
 
 import psutil
 import requests
@@ -451,7 +451,7 @@ def _detect_language(pid: int = None) -> str:
     return "cn"
 
 
-def _detect_language_by_main_window(win) -> Optional[str]:
+def _detect_language_by_main_window(win: auto.WindowControl) -> Optional[str]:
     try:
         tabbar = win.ToolBarControl(ClassName="mmui::MainTabBar", searchDepth=5)
         if not tabbar.Exists(0, 0):
@@ -468,7 +468,7 @@ def _detect_language_by_main_window(win) -> Optional[str]:
     return None
 
 
-def _detect_language_by_login_window(win) -> Optional[str]:
+def _detect_language_by_login_window(win: auto.WindowControl) -> Optional[str]:
     try:
         # 检测"网络代理设置"按钮（标题栏始终存在）
         if win.ButtonControl(ClassName="mmui::XButton", Name="网络代理设置").Exists(0, 0):
@@ -618,14 +618,14 @@ class PIM:
         PIM.idle_wait = idle_wait
         PIM.lock_input = lock_input
 
-    def __call__(self, idle_wait: float = None, lock_input: bool = None) -> "PIM":
+    def __call__(self, idle_wait: float = None, lock_input: bool = None) -> PIM:
         if idle_wait is not None:
             PIM.idle_wait = idle_wait
         if lock_input is not None:
             PIM.lock_input = lock_input
         return self
 
-    def __enter__(self) -> "PIM":
+    def __enter__(self) -> PIM:
         PIM.start()
         return self
 
@@ -640,7 +640,7 @@ class PIM:
             PIM._last_physical_input = time.monotonic()
 
     @staticmethod
-    def _keyboard_hook(nCode, wParam, lParam) -> int:
+    def _keyboard_hook(nCode: int, wParam: int, lParam: int) -> int:
         if nCode >= 0 and lParam:
             kb = ctypes.cast(lParam, ctypes.POINTER(_KBDLLHOOKSTRUCT)).contents
             if not (kb.flags & _LLKHF_INJECTED):
@@ -648,7 +648,7 @@ class PIM:
         return ctypes.windll.user32.CallNextHookEx(None, nCode, wParam, lParam)
 
     @staticmethod
-    def _mouse_hook(nCode, wParam, lParam) -> int:
+    def _mouse_hook(nCode: int, wParam: int, lParam: int) -> int:
         if nCode >= 0 and lParam:
             ms = ctypes.cast(lParam, ctypes.POINTER(_MSLLHOOKSTRUCT)).contents
             if not (ms.flags & _LLMHF_INJECTED):
@@ -791,7 +791,7 @@ class PIM:
         raise TypeError(f"PIM.guard 参数类型错误: {type(func_or_wait)}")
 
 
-def find_process(name: str) -> list[dict]:
+def find_process(name: str) -> List[dict]:
     """
     查询指定名称的进程信息（使用 psutil）。
 
@@ -811,51 +811,51 @@ def find_process(name: str) -> list[dict]:
     return processes
 
 ######## 窗口操作
-def minimize_window(hwnd):
+def minimize_window(hwnd: int) -> bool:
     """最小化窗口"""
     return not win32gui.SendMessage(hwnd, win32con.WM_SYSCOMMAND, win32con.SC_MINIMIZE, 0)
 
-def maximize_window(hwnd):
+def maximize_window(hwnd: int) -> bool:
     """最大化窗口"""
     return not win32gui.SendMessage(hwnd, win32con.WM_SYSCOMMAND, win32con.SC_MAXIMIZE, 0)
 
-def restore_window(hwnd):
+def restore_window(hwnd: int) -> bool:
     """还原窗口"""
     return not win32gui.SendMessage(hwnd, win32con.WM_SYSCOMMAND, win32con.SC_RESTORE, 0)
 
-def close_window(hwnd):
+def close_window(hwnd: int) -> bool:
     """关闭窗口"""
     return not win32gui.SendMessage(hwnd, win32con.WM_CLOSE, 0, 0)
 
-def focus_window(hwnd):
+def focus_window(hwnd: int) -> None:
     """聚焦窗口（不激活）"""
     win32gui.SendMessage(hwnd, win32con.WM_SETFOCUS, 0, 0)
 
-def activate_window(hwnd):
+def activate_window(hwnd: int) -> None:
     """激活窗口"""
     win32gui.SendMessage(hwnd, win32con.WM_ACTIVATE, win32con.WA_ACTIVE, 0)
 
-def deactivate_window(hwnd):
+def deactivate_window(hwnd: int) -> None:
     """取消激活窗口"""
     win32gui.SendMessage(hwnd, win32con.WM_ACTIVATE, win32con.WA_INACTIVE, 0)
 
-def move_window(hwnd, x, y):
+def move_window(hwnd: int, x: int, y: int) -> bool:
     """移动窗口"""
     return not win32gui.SendMessage(hwnd, win32con.WM_MOVE, 0, (y << 16) | x)
 
-def resize_window(hwnd, width, height):
+def resize_window(hwnd: int, width: int, height: int) -> bool:
     """设置窗口大小"""
     return not win32gui.SendMessage(hwnd, win32con.WM_SIZE, 0, (height << 16) | width)
 
-def show_window(hwnd):
+def show_window(hwnd: int) -> None:
     """显示窗口"""
     win32gui.SendMessage(hwnd, win32con.WM_SHOWWINDOW, True, 0)
 
-def hide_window(hwnd):
+def hide_window(hwnd: int) -> None:
     """隐藏窗口"""
     win32gui.SendMessage(hwnd, win32con.WM_SHOWWINDOW, False, 0)
 
-def toggle_window(hwnd, status):
+def toggle_window(hwnd: int, status: str) -> Optional[bool]:
     """切换窗口状态
 
     Args:
@@ -887,36 +887,36 @@ def toggle_window(hwnd, status):
             return show_window(hwnd)
 
 ######## 鼠标操作
-def move_window(hwnd, x, y):
+def move_window(hwnd: int, x: int, y: int) -> None:
     """鼠标移动到指定位置"""
     lParam = win32api.MAKELONG(x, y)
     win32gui.SendMessage(hwnd, win32con.WM_MOUSEMOVE, 0, lParam)
 
-def click_window(hwnd, x, y):
+def click_window(hwnd: int, x: int, y: int) -> None:
     """鼠标左键单击"""
     lParam = win32api.MAKELONG(x, y)
     win32gui.SendMessage(hwnd, win32con.WM_LBUTTONDOWN, win32con.MK_LBUTTON, lParam)
     win32gui.SendMessage(hwnd, win32con.WM_LBUTTONUP, 0, lParam)
 
-def double_click_window(hwnd, x, y):
+def double_click_window(hwnd: int, x: int, y: int) -> None:
     """鼠标左键双击"""
     lParam = win32api.MAKELONG(x, y)
     win32gui.SendMessage(hwnd, win32con.WM_LBUTTONDBLCLK, win32con.MK_LBUTTON, lParam)
     win32gui.SendMessage(hwnd, win32con.WM_LBUTTONUP, 0, lParam)
 
-def right_click_window(hwnd, x, y):
+def right_click_window(hwnd: int, x: int, y: int) -> None:
     """鼠标右键单击"""
     lParam = win32api.MAKELONG(x, y)
     win32gui.SendMessage(hwnd, win32con.WM_RBUTTONDOWN, win32con.MK_RBUTTON, lParam)
     win32gui.SendMessage(hwnd, win32con.WM_RBUTTONUP, 0, lParam)
 
-def middle_click_window(hwnd, x, y):
+def middle_click_window(hwnd: int, x: int, y: int) -> None:
     """鼠标中键单击"""
     lParam = win32api.MAKELONG(x, y)
     win32gui.SendMessage(hwnd, win32con.WM_MBUTTONDOWN, win32con.MK_MBUTTON, lParam)
     win32gui.SendMessage(hwnd, win32con.WM_MBUTTONUP, 0, lParam)
 
-def scroll_window(hwnd, x, y, delta=120):
+def scroll_window(hwnd: int, x: int, y: int, delta: int = 120) -> bool:
     """鼠标滚轮滚动
 
     Args:
@@ -929,17 +929,17 @@ def scroll_window(hwnd, x, y, delta=120):
     return not win32gui.SendMessage(hwnd, win32con.WM_MOUSEWHEEL, wParam, lParam)
 
 ######## 键盘操作
-def key_down_window(hwnd, key):
+def key_down_window(hwnd: int, key: Union[str, int]) -> bool:
     """按下一个键（不释放）"""
     vk = ord(key.upper()) if isinstance(key, str) else key
     return not win32gui.SendMessage(hwnd, win32con.WM_KEYDOWN, vk, 0)
 
-def key_up_window(hwnd, key):
+def key_up_window(hwnd: int, key: Union[str, int]) -> bool:
     """释放一个键"""
     vk = ord(key.upper()) if isinstance(key, str) else key
     return not win32gui.SendMessage(hwnd, win32con.WM_KEYUP, vk, 0)
 
-def key_press_window(hwnd, key):
+def key_press_window(hwnd: int, key: Union[str, int]) -> bool:
     """按下并释放一个键
 
     Args:
@@ -948,7 +948,7 @@ def key_press_window(hwnd, key):
     """
     return key_down_window(hwnd, key) and key_up_window(hwnd, key)
 
-def key_hotkey_window(hwnd, modifier, key):
+def key_hotkey_window(hwnd: int, modifier: int, key: int) -> bool:
     """发送热键消息（需要目标窗口已注册该热键）
 
     Args:
@@ -960,7 +960,7 @@ def key_hotkey_window(hwnd, modifier, key):
     lParam = (key << 16) | modifier
     return not win32gui.SendMessage(hwnd, win32con.WM_HOTKEY, 0, lParam)
 
-def key_type_window(hwnd, text):
+def key_type_window(hwnd: int, text: str) -> bool:
     """输入一段文本
 
     Args:
@@ -1040,7 +1040,7 @@ def query_reg_install_path(reg_path: str) -> Optional[str]:
 
     return None
 
-def get_weixin_install_path():
+def get_weixin_install_path() -> str:
     try:
         key = winreg.OpenKey(
             winreg.HKEY_CURRENT_USER,
@@ -1094,7 +1094,9 @@ def get_wechat_install_path(version: Optional[int] = None) -> Optional[str]:
     return None
 
 def get_wechat_wxocr_path() -> Optional[str]:
-    appdata_path = os.getenv('APPDATA')
+    appdata_path = os.getenv("APPDATA")
+    if not appdata_path:
+        return None
 
     ocr_dir = os.path.join(appdata_path, r"Tencent\xwechat\XPlugin\Plugins\WeChatOcr")
     if not os.path.exists(ocr_dir):
@@ -1161,7 +1163,7 @@ def get_wechat_version(version: int = 3) -> str:
 
     raise FileNotFoundError(f"未在注册表中找到微信{version}.x版本信息")
 
-def get_hwnd(title=None, mode="exact", pid=None):
+def get_hwnd(title: Optional[str] = None, mode: Literal["exact", "wildcard", "regex"] = "exact", pid: Optional[int] = None) -> Optional[int]:
     """根据窗口标题获取窗口句柄
 
     Args:
@@ -1207,7 +1209,7 @@ def get_hwnd(title=None, mode="exact", pid=None):
     win32gui.EnumWindows(enum_callback, None)
     return results[0] if results else None
 
-def get_hwnds_by_pid(pid: int, visible_only: bool = True) -> list[int]:
+def get_hwnds_by_pid(pid: int, visible_only: bool = True) -> List[int]:
     """
     获取指定进程 PID 的所有顶层窗口句柄。
 
@@ -1304,7 +1306,7 @@ def _open_clipboard_with_retry(max_retries: int = 10, interval: float = 0.1) -> 
                 raise
             time.sleep(interval)
 
-def get_clipboard_all():
+def get_clipboard_all() -> Dict[int, object]:
     result = {}
     _open_clipboard_with_retry()
     try:
@@ -1320,7 +1322,7 @@ def get_clipboard_all():
     finally:
         win32clipboard.CloseClipboard()
 
-def get_clipboard(fmt):
+def get_clipboard(fmt: int) -> object:
     _open_clipboard_with_retry()
     try:
         if win32clipboard.IsClipboardFormatAvailable(fmt):
@@ -1329,14 +1331,14 @@ def get_clipboard(fmt):
     finally:
         win32clipboard.CloseClipboard()
 
-def get_clipboard_text():
+def get_clipboard_text() -> Optional[str]:
     return get_clipboard(win32con.CF_UNICODETEXT)
 
-def get_clipboard_file():
+def get_clipboard_file() -> Optional[str]:
     files = get_clipboard(win32con.CF_HDROP)
     return files[0] if files else None
 
-def save_clipboard() -> Optional[tuple[int, object]]:
+def save_clipboard() -> Optional[Tuple[int, object]]:
     """
     保存当前剪贴板中的一条数据（按优先级匹配格式）。
 
@@ -1356,7 +1358,7 @@ def save_clipboard() -> Optional[tuple[int, object]]:
     finally:
         win32clipboard.CloseClipboard()
 
-def restore_clipboard(saved: Optional[tuple[int, object]]) -> None:
+def restore_clipboard(saved: Optional[Tuple[int, object]]) -> None:
     """
     恢复之前保存的剪贴板数据。
 
@@ -1375,7 +1377,7 @@ def restore_clipboard(saved: Optional[tuple[int, object]]) -> None:
     finally:
         win32clipboard.CloseClipboard()
 
-def set_clipboard(fmt, data) -> None:
+def set_clipboard(fmt: int, data: object) -> None:
     _open_clipboard_with_retry()
     try:
         win32clipboard.EmptyClipboard()
@@ -1383,12 +1385,12 @@ def set_clipboard(fmt, data) -> None:
     finally:
         win32clipboard.CloseClipboard()
 
-def copy_text(text) -> None:
+def copy_text(text: str) -> None:
     if text.isdigit():
         text += "\0"
     set_clipboard(win32con.CF_UNICODETEXT, text)
 
-def copy_files(file_paths) -> None:
+def copy_files(file_paths: List[str]) -> None:
     header = struct.pack(DROPFILES_FORMAT, DROPFILES_SIZE, 0, 0, 0, True)
     files = "\0".join(p.replace("/", "\\") for p in file_paths)
     payload = files.encode("utf-16-le") + b"\0\0\0\0"
@@ -1588,7 +1590,7 @@ def capture_window(
     offset_top: int = 0, 
     offset_right: int = 0, 
     offset_bottom: int = 0, 
-    mode: str = "bitblt"
+    mode: Literal["bitblt", "print_window", "window_capture"] = "bitblt"
 ) -> bytes:
     """统一截图接口
 
@@ -1620,12 +1622,12 @@ def capture_window(
 
 def capture_control(
     hwnd: int, 
-    uia_control,
+    uia_control: auto.Control,
     offset_left: int = 0, 
     offset_top: int = 0,
     offset_right: int = 0, 
     offset_bottom: int = 0, 
-    mode: str = "bitblt"
+    mode: Literal["bitblt", "print_window", "window_capture"] = "bitblt"
 ) -> bytes:
     """
     通过截取窗口图像，然后裁剪出指定控件区域。
@@ -1673,7 +1675,7 @@ def _find_contour_rects(
     threshold: int = 1,
     min_area: int = 100,
     border_margin: int = 2,
-) -> tuple[bytes, list[tuple[int, int, int, int]]]:
+) -> Tuple[bytes, List[Tuple[int, int, int, int]]]:
     """
     检测图片中的轮廓区域，用红色矩形框出并返回标注图和坐标。
 
@@ -1701,7 +1703,7 @@ def _find_contour_rects(
 
     pixels = binary.load()
     visited = [[False] * h for _ in range(w)]
-    raw_rects: list[tuple[int, int, int, int]] = []
+    raw_rects: List[Tuple[int, int, int, int]] = []
 
     for y in range(h):
         for x in range(w):
@@ -1756,9 +1758,9 @@ def _find_contour_rects(
 
 
 def _classify_contour_rects(
-    rects: list[tuple[int, int, int, int]],
+    rects: List[Tuple[int, int, int, int]],
     image_bytes: bytes = None,
-) -> tuple[tuple, tuple, tuple]:
+) -> Tuple[tuple, tuple, tuple]:
     """
     将轮廓矩形分类为头像、昵称、消息内容。
 
@@ -1885,7 +1887,7 @@ def _classify_contour_rects(
     return headimg_rect, nickname_rect, content_rect
 
 
-def _get_hwnd(control) -> int:
+def _get_hwnd(control: auto.Control) -> int:
     """从 uiautomation 控件获取所属窗口句柄，向上遍历父控件查找。"""
     hwnd = control.NativeWindowHandle
     if hwnd:
@@ -1898,7 +1900,7 @@ def _get_hwnd(control) -> int:
         parent = parent.GetParentControl()
     return 0
 
-def _screen_to_client(control, randomize: bool = True) -> tuple[int, int, int]:
+def _screen_to_client(control: auto.Control, randomize: bool = True) -> Tuple[int, int, int]:
     """
     获取控件的屏幕坐标，并转换为所属窗口的客户区坐标。
 
@@ -1931,7 +1933,7 @@ def _screen_to_client(control, randomize: bool = True) -> tuple[int, int, int]:
     client_x, client_y = win32gui.ScreenToClient(hwnd, (screen_x, screen_y))
     return hwnd, client_x, client_y
 
-def activate(control) -> None:
+def activate(control: auto.Control) -> None:
     """
     激活控件所属窗口。
 
@@ -1946,7 +1948,7 @@ def activate(control) -> None:
         if hwnd:
             input_wm.activate_window(hwnd)
 
-def focus(control) -> None:
+def focus(control: auto.Control) -> None:
     """
     让控件获得焦点。
 
@@ -1960,7 +1962,7 @@ def focus(control) -> None:
         if hwnd:
             input_wm.focus_window(hwnd)
 
-def click(control, button: str = "left", click: str = "once") -> None:
+def click(control: auto.Control, button: Literal["left", "right", "middle"] = "left", click: Literal["once", "double"] = "once") -> None:
     """
     点击控件。
 
@@ -1994,7 +1996,7 @@ def click(control, button: str = "left", click: str = "once") -> None:
         else:
             raise ValueError(f"无效的 button: {button!r}，可选: left/right/middle")
 
-def send_keys(control, text: str) -> None:
+def send_keys(control: Optional[auto.Control], text: str) -> None:
     """
     向控件发送按键。
 
@@ -2037,7 +2039,7 @@ def send_keys(control, text: str) -> None:
             input_wm.focus_window(hwnd)
             _send_keys(hwnd, text)
 
-def move_to(control) -> None:
+def move_to(control: auto.Control) -> None:
     """
     将鼠标移动到控件中心。
 
@@ -2224,14 +2226,14 @@ def copy() -> None:
     """复制（Ctrl+C）"""
     send_shortcut("{Ctrl}c")
 
-def paste(content) -> None:
+def paste(content: object) -> None:
     """
     通过剪贴板粘贴内容。
 
     保存当前剪贴板 → 设置内容到剪贴板 → Ctrl+V 粘贴 → 恢复剪贴板。
 
     Args:
-        content: str 粘贴文本，list[str] 粘贴文件路径列表
+        content: str 粘贴文本，List[str] 粘贴文件路径列表
     """
     saved = save_clipboard()
     try:
@@ -2245,7 +2247,7 @@ def paste(content) -> None:
     finally:
         restore_clipboard(saved)
 
-def paste_or_type(control, text: str) -> None:
+def paste_or_type(control: Optional[auto.Control], text: str) -> None:
     """
     输入纯文本内容（不含功能键）。
 
@@ -2406,7 +2408,7 @@ class Message:
                 f"room={self.room!r}, sender={self.sender!r}, "
                 f"source={self.source.value}, content={self.content!r}, pid={self.pid})")
 
-    def _find_ctrl(self) -> "auto.Control | None":
+    def _find_ctrl(self) -> Optional[auto.Control]:
         """
         在当前可见的消息列表中查找此消息对应的控件。
 
@@ -2472,7 +2474,7 @@ class Message:
             return False
 
     @property
-    def center(self) -> tuple[int, int] | None:
+    def center(self) -> Optional[Tuple[int, int]]:
         """
         获取消息内容区域的屏幕中心点坐标。
 
@@ -2733,7 +2735,7 @@ class Message:
         self._click_context_menu(i_("翻译"))
 
     @PIM.guard
-    def forward(self, nicknames: "str | list[str]", remark: Optional[str] = None) -> bool:
+    def forward(self, nicknames: Union[str, List[str]], remark: Optional[str] = None) -> bool:
         """
         转发此条消息给指定联系人。
 
@@ -3019,7 +3021,7 @@ class TextMessage(Message):
 class QuoteMessage(Message):
     """引用消息"""
 
-    def __init__(self, *, reply_content="", quote_sender="", quote_content="", **kw):
+    def __init__(self, *, reply_content: str = "", quote_sender: str = "", quote_content: str = "", **kw):
         super().__init__(**kw)
         self.reply_content: str = reply_content
         self.quote_sender: str = quote_sender
@@ -3030,7 +3032,7 @@ class QuoteMessage(Message):
         return "引用消息"
 
     @staticmethod
-    def _get_quote_re():
+    def _get_quote_re() -> re.Pattern:
         """动态构建引用消息正则（支持多语言）"""
         pattern = i_("引用正则")
         return re.compile(pattern, re.DOTALL)
@@ -3040,7 +3042,7 @@ class QuoteMessage(Message):
         return bool(QuoteMessage._get_quote_re().match(raw_name))
 
     @staticmethod
-    def parse(raw_name: str) -> tuple[str, str, str, str]:
+    def parse(raw_name: str) -> Tuple[str, str, str, str]:
         m = QuoteMessage._get_quote_re().match(raw_name)
         if m:
             reply_content = m.group(1).strip()
@@ -3053,7 +3055,7 @@ class QuoteMessage(Message):
 class VoiceMessage(Message):
     """语音消息"""
 
-    def __init__(self, *, duration=0, played=True, **kw):
+    def __init__(self, *, duration: int = 0, played: bool = True, **kw):
         super().__init__(**kw)
         self.duration: int = duration
         self.played: bool = played
@@ -3063,7 +3065,7 @@ class VoiceMessage(Message):
         return "语音消息"
 
     @staticmethod
-    def parse(raw_name: str) -> tuple[str, int, bool]:
+    def parse(raw_name: str) -> Tuple[str, int, bool]:
         voice_kw = i_("语音")
         unplayed_kw = i_("未播放")
         played_kw = i_("已播放")
@@ -3212,7 +3214,7 @@ class VoiceMessage(Message):
 
         return ""
 
-    def _get_current_name_by_rid(self, lc) -> Optional[str]:
+    def _get_current_name_by_rid(self, lc: auto.ListControl) -> Optional[str]:
         """
         通过 runtime_id 在消息列表中重新查找控件，返回其当前 Name。
 
@@ -3320,7 +3322,7 @@ class VideoMessage(Message):
 class FileMessage(Message):
     """文件消息"""
 
-    def __init__(self, *, file_name="", file_size="", file_status="", **kw):
+    def __init__(self, *, file_name: str = "", file_size: str = "", file_status: str = "", **kw):
         super().__init__(**kw)
         self.file_name: str = file_name
         self.file_size: str = file_size
@@ -3331,7 +3333,7 @@ class FileMessage(Message):
         return "文件消息"
 
     @staticmethod
-    def parse(raw_name: str) -> tuple[str, str, str, str]:
+    def parse(raw_name: str) -> Tuple[str, str, str, str]:
         """
         解析文件消息的 raw_name。
 
@@ -3442,7 +3444,7 @@ class FileMessage(Message):
 class LocationMessage(Message):
     """位置消息"""
 
-    def __init__(self, *, address="", **kw):
+    def __init__(self, *, address: str = "", **kw):
         super().__init__(**kw)
         self.address: str = address
 
@@ -3451,7 +3453,7 @@ class LocationMessage(Message):
         return "位置消息"
 
     @staticmethod
-    def parse(raw_name: str) -> tuple[str, str]:
+    def parse(raw_name: str) -> Tuple[str, str]:
         loc_kw = i_("位置")
         addr = raw_name[len(loc_kw):] if raw_name.startswith(loc_kw) else raw_name
         return addr, addr
@@ -3460,7 +3462,7 @@ class LocationMessage(Message):
 class LinkMessage(Message):
     """链接消息"""
 
-    def __init__(self, *, title="", link_source="", **kw):
+    def __init__(self, *, title: str = "", link_source: str = "", **kw):
         super().__init__(**kw)
         self.title: str = title
         self.link_source: str = link_source
@@ -3470,7 +3472,7 @@ class LinkMessage(Message):
         return "链接消息"
 
     @staticmethod
-    def parse(raw_name: str) -> tuple[str, str, str]:
+    def parse(raw_name: str) -> Tuple[str, str, str]:
         link_kw = i_("链接")
         bracket_prefix = f"[{link_kw}]"
         if raw_name.startswith(bracket_prefix):
@@ -3497,7 +3499,7 @@ class EmotionMessage(Message):
 
     _EMOJI_NAME_RE = re.compile(r"\[(.+?)\]")
 
-    def __init__(self, *, emoji_name="", **kw):
+    def __init__(self, *, emoji_name: str = "", **kw):
         super().__init__(**kw)
         self.emoji_name: str = emoji_name
 
@@ -3506,7 +3508,7 @@ class EmotionMessage(Message):
         return "表情消息"
 
     @staticmethod
-    def parse(raw_name: str) -> tuple[str, str]:
+    def parse(raw_name: str) -> Tuple[str, str]:
         m = EmotionMessage._EMOJI_NAME_RE.search(raw_name)
         emoji_name = m.group(1) if m else ""
         return raw_name, emoji_name
@@ -3522,7 +3524,7 @@ class MergeMessage(Message):
 class PersonalCardMessage(Message):
     """名片消息"""
 
-    def __init__(self, *, card_name="", **kw):
+    def __init__(self, *, card_name: str = "", **kw):
         super().__init__(**kw)
         self.card_name: str = card_name
 
@@ -3531,7 +3533,7 @@ class PersonalCardMessage(Message):
         return "名片消息"
 
     @staticmethod
-    def parse(raw_name: str) -> tuple[str, str]:
+    def parse(raw_name: str) -> Tuple[str, str]:
         card_suffix = i_("个人名片")
         if raw_name.endswith(card_suffix):
             name = raw_name[:-len(card_suffix)]
@@ -3555,7 +3557,7 @@ class MusicMessage(Message):
         "虾米音乐", "咪咕音乐", "Apple Music", "Spotify",
     )
 
-    def __init__(self, *, music_source="", song_name="", artist="", **kw):
+    def __init__(self, *, music_source: str = "", song_name: str = "", artist: str = "", **kw):
         super().__init__(**kw)
         self.music_source: str = music_source
         self.song_name: str = song_name
@@ -3570,7 +3572,7 @@ class MusicMessage(Message):
         return any(raw_name.startswith(src) for src in MusicMessage._MUSIC_SOURCES)
 
     @staticmethod
-    def parse(raw_name: str) -> tuple[str, str, str, str]:
+    def parse(raw_name: str) -> Tuple[str, str, str, str]:
         music_source = ""
         rest = raw_name
         for src in MusicMessage._MUSIC_SOURCES:
@@ -3584,7 +3586,7 @@ class MusicMessage(Message):
 class CardMessage(Message):
     """卡片消息"""
 
-    def __init__(self, *, title="", description="", **kw):
+    def __init__(self, *, title: str = "", description: str = "", **kw):
         super().__init__(**kw)
         self.title: str = title
         self.description: str = description
@@ -3594,7 +3596,7 @@ class CardMessage(Message):
         return "卡片消息"
 
     @staticmethod
-    def parse(raw_name: str) -> tuple[str, str, str]:
+    def parse(raw_name: str) -> Tuple[str, str, str]:
         parts = [p.strip() for p in raw_name.split("\n") if p.strip()]
         title = parts[0] if parts else raw_name
         description = parts[1] if len(parts) > 1 else ""
@@ -3605,7 +3607,7 @@ class CardMessage(Message):
 class SystemMessage(Message):
     """系统消息"""
 
-    def __init__(self, *, timestamp="", **kw):
+    def __init__(self, *, timestamp: str = "", **kw):
         kw.setdefault("source", Source.SYSTEM)
         kw.setdefault("sender", "系统")
         kw.setdefault("status", MessageStatus.RECEIVED)
@@ -3620,7 +3622,7 @@ class SystemMessage(Message):
 class VoipMessage(Message):
     """语音/视频通话消息"""
 
-    def __init__(self, *, call_type="", call_status="", **kw):
+    def __init__(self, *, call_type: str = "", call_status: str = "", **kw):
         super().__init__(**kw)
         self.call_type: str = call_type
         self.call_status: str = call_status
@@ -3630,7 +3632,7 @@ class VoipMessage(Message):
         return "通话消息"
 
     @staticmethod
-    def parse(raw_name: str) -> tuple[str, str, str]:
+    def parse(raw_name: str) -> Tuple[str, str, str]:
         voice_call_kw = i_("语音通话")
         video_call_kw = i_("视频通话")
         for prefix in (voice_call_kw, video_call_kw):
@@ -3643,7 +3645,7 @@ class VoipMessage(Message):
 class TransferMessage(Message):
     """微信转账消息"""
 
-    def __init__(self, *, amount="", remark="", **kw):
+    def __init__(self, *, amount: str = "", remark: str = "", **kw):
         super().__init__(**kw)
         self.amount: str = amount
         self.remark: str = remark
@@ -3676,7 +3678,7 @@ class TransferMessage(Message):
         return True
 
     @staticmethod
-    def parse(raw_name: str) -> tuple[str, str, str]:
+    def parse(raw_name: str) -> Tuple[str, str, str]:
         transfer_kw = i_("微信转账")
         transfer_re = re.compile(rf"^￥([\d.]+)\s+(.+?)\s+{re.escape(transfer_kw)}$")
         transfer_no_remark_re = re.compile(rf"^￥([\d.]+)\s+{re.escape(transfer_kw)}$")
@@ -3695,7 +3697,7 @@ class TransferMessage(Message):
 class RedPacketMessage(Message):
     """微信红包消息"""
 
-    def __init__(self, *, greeting="", **kw):
+    def __init__(self, *, greeting: str = "", **kw):
         super().__init__(**kw)
         self.greeting: str = greeting
 
@@ -3789,7 +3791,7 @@ class RedPacketMessage(Message):
         }
 
     @staticmethod
-    def parse(raw_name: str) -> tuple[str, str]:
+    def parse(raw_name: str) -> Tuple[str, str]:
         red_packet_kw = i_("微信红包")
         red_packet_re = re.compile(rf"^(.+?)\s{{2,}}{re.escape(red_packet_kw)}$")
         m = red_packet_re.match(raw_name)
@@ -3807,7 +3809,7 @@ class OtherMessage(Message):
 
 
 # ---- 消息类 -> 事件类型映射 ----
-_MSG_CLASS_TO_EVENT: dict[type, Event] = {
+_MSG_CLASS_TO_EVENT: Dict[type, Event] = {
     TextMessage: Event.TEXT,
     ImageMessage: Event.IMAGE,
     VideoMessage: Event.VIDEO,
@@ -3917,16 +3919,16 @@ class WeixinWindow:
         win32gui.MoveWindow(hwnd, rect[0], rect[1], width, height, True)
 
     @property
-    def rect(self) -> tuple[int, int, int, int]:
+    def rect(self) -> Tuple[int, int, int, int]:
         return win32gui.GetWindowRect(self._hwnd)
 
     @property
-    def size(self) -> tuple[int, int]:
+    def size(self) -> Tuple[int, int]:
         r = self.rect
         return (r[2] - r[0], r[3] - r[1])
 
     @property
-    def position(self) -> tuple[int, int]:
+    def position(self) -> Tuple[int, int]:
         r = self.rect
         return (r[0], r[1])
 
@@ -4536,7 +4538,7 @@ class WeixinUpdate(WeixinWindow):
     WINDOW_CLASS = "mmui::UpdateWindow"
     WINDOW_ID = "UpdateWindow"
 
-    def __init__(self, wx: "Weixin"):
+    def __init__(self, wx: Weixin):
         """
         初始化更新窗口操作实例。
 
@@ -4615,7 +4617,7 @@ class VoipCall(WeixinWindow):
     WINDOW_CLASS = "mmui::VOIPWindow"
     WINDOW_ID = "VOIPWindow"
 
-    def __init__(self, chat: "Chat"):
+    def __init__(self, chat: Chat):
         """
         初始化通话窗口控制实例，绑定 VOIPWindow 控件。
 
@@ -4780,7 +4782,7 @@ class NoteEditor(WeixinWindow):
     EDITOR_INPUT_ID = "xeditorInputId"
     MAIN_CONTAINER_ID = "mainContainer"
 
-    def __init__(self, wx: "Weixin"):
+    def __init__(self, wx: Weixin):
         """
         初始化笔记编辑窗口。
 
@@ -5019,7 +5021,7 @@ class NoteEditor(WeixinWindow):
         return f"NoteEditor(content={preview!r})"
 
 
-def _parse_session_name(raw: str, session: "Session | None" = None) -> "SessionItem":
+def _parse_session_name(raw: str, session: Optional[Session] = None) -> SessionItem:
     """
     解析会话 ListItem 的 Name 属性。
 
@@ -5038,101 +5040,9 @@ def _parse_session_name(raw: str, session: "Session | None" = None) -> "SessionI
     return item
 
 
-class SessionItem:
-    """会话列表中的一条会话"""
-
-    def __init__(self, session: "Session | None" = None, *, name="", last_msg="", msg_time="",
-                 muted=False, unread="", is_active=False,
-                 runtime_id: tuple = ()):
-        """
-        初始化会话项。
-
-        Args:
-            session: 关联的 Session 实例，用于执行右键菜单等操作。
-            name: 会话名称。
-            last_msg: 最后一条消息摘要。
-            msg_time: 消息时间文本。
-            muted: 是否消息免打扰。
-            unread: 未读条数文本，如 "[9条]"。
-            is_active: 是否为当前选中（激活）的会话。
-            runtime_id: UI Automation RuntimeId，用于唯一标识控件。
-        """
-        self.session = session
-        self.name = name
-        self.last_msg = last_msg
-        self.msg_time = msg_time
-        self.muted = muted
-        self.unread = unread
-        self.is_active = is_active
-        self.runtime_id = runtime_id
-
-    def pin(self) -> None:
-        """置顶会话"""
-        self.session._session_context_action(self.name, i_("置顶"))
-
-    def unpin(self) -> None:
-        """取消置顶会话"""
-        self.session._session_context_action(self.name, i_("取消置顶"))
-
-    def mark_as_unread(self) -> None:
-        """标为未读"""
-        self.session._session_context_action(self.name, i_("标为未读"))
-
-    def mark_as_read(self) -> None:
-        """标为已读"""
-        self.session._session_context_action(self.name, i_("标为已读"))
-
-    def mute(self) -> None:
-        """消息免打扰"""
-        self.session._session_context_action(self.name, i_("消息免打扰"))
-
-    def unmute(self) -> None:
-        """允许消息通知"""
-        self.session._session_context_action(self.name, i_("允许消息通知"))
-
-    def separate(self) -> None:
-        """独立窗口显示"""
-        self.session._session_context_action(self.name, i_("独立窗口显示"))
-
-    def separate_by_click(self) -> "SeparateChat":
-        """双击打开独立窗口，返回 SeparateChat 实例"""
-        session = self.session
-        if session.wx:
-            session.wx.activate()
-        item = session._ensure_session_visible(self.name)
-        input_wx.click(item, click="double")
-        return SeparateChat(session.wx, self.name)
-
-    def hide(self) -> None:
-        """不显示该会话"""
-        self.session._session_context_action(self.name, i_("不显示"))
-
-    def delete(self) -> None:
-        """删除会话（危险操作，会清除聊天记录）"""
-        session = self.session
-        session._session_context_action(self.name, i_("删除"))
-        confirm_btn = session._win.ButtonControl(Name=i_("删除"), ClassName="mmui::XOutlineButton")
-        if not confirm_btn.Exists(maxSearchSeconds=2):
-            raise WxControlNotFoundError("未找到删除确认弹窗")
-        input_wx.click(confirm_btn)
-
-    def open(self) -> None:
-        """激活会话"""
-        self.session.open(self.name)
-
-    def close(self) -> None:
-        """取消激活（如果处于激活状态则取消选中）"""
-        self.session.close(self.name)
-
-    def __repr__(self):
-        muted_tag = " [免打扰]" if self.muted else ""
-        active_tag = " [激活]" if self.is_active else ""
-        return f"SessionItem({self.name!r}, {self.msg_time}{muted_tag}{active_tag})"
-
-
 class Navigator:
     @property
-    def TABS(self):
+    def TABS(self) -> Dict[str, str]:
         return {
             i_("微信"): i_("微信"),
             i_("通讯录"): i_("通讯录"),
@@ -5144,7 +5054,7 @@ class Navigator:
             i_("更多"): i_("更多"),
         }
 
-    def __init__(self, wx: "Weixin"):
+    def __init__(self, wx: Weixin):
         """
         初始化导航栏。
 
@@ -5409,6 +5319,98 @@ class Navigator:
         return f"Navigator(tabs=[{tabs}])"
 
 
+class SessionItem:
+    """会话列表中的一条会话"""
+
+    def __init__(self, session: Optional[Session] = None, *, name: str = "", last_msg: str = "", msg_time: str = "",
+                 muted: bool = False, unread: str = "", is_active: bool = False,
+                 runtime_id: tuple = ()):
+        """
+        初始化会话项。
+
+        Args:
+            session: 关联的 Session 实例，用于执行右键菜单等操作。
+            name: 会话名称。
+            last_msg: 最后一条消息摘要。
+            msg_time: 消息时间文本。
+            muted: 是否消息免打扰。
+            unread: 未读条数文本，如 "[9条]"。
+            is_active: 是否为当前选中（激活）的会话。
+            runtime_id: UI Automation RuntimeId，用于唯一标识控件。
+        """
+        self.session = session
+        self.name = name
+        self.last_msg = last_msg
+        self.msg_time = msg_time
+        self.muted = muted
+        self.unread = unread
+        self.is_active = is_active
+        self.runtime_id = runtime_id
+
+    def pin(self) -> None:
+        """置顶会话"""
+        self.session._session_context_action(self.name, i_("置顶"))
+
+    def unpin(self) -> None:
+        """取消置顶会话"""
+        self.session._session_context_action(self.name, i_("取消置顶"))
+
+    def mark_as_unread(self) -> None:
+        """标为未读"""
+        self.session._session_context_action(self.name, i_("标为未读"))
+
+    def mark_as_read(self) -> None:
+        """标为已读"""
+        self.session._session_context_action(self.name, i_("标为已读"))
+
+    def mute(self) -> None:
+        """消息免打扰"""
+        self.session._session_context_action(self.name, i_("消息免打扰"))
+
+    def unmute(self) -> None:
+        """允许消息通知"""
+        self.session._session_context_action(self.name, i_("允许消息通知"))
+
+    def separate(self) -> None:
+        """独立窗口显示"""
+        self.session._session_context_action(self.name, i_("独立窗口显示"))
+
+    def separate_by_click(self) -> SeparateChat:
+        """双击打开独立窗口，返回 SeparateChat 实例"""
+        session = self.session
+        if session.wx:
+            session.wx.activate()
+        item = session._ensure_session_visible(self.name)
+        input_wx.click(item, click="double")
+        return SeparateChat(session.wx, self.name)
+
+    def hide(self) -> None:
+        """不显示该会话"""
+        self.session._session_context_action(self.name, i_("不显示"))
+
+    def delete(self) -> None:
+        """删除会话（危险操作，会清除聊天记录）"""
+        session = self.session
+        session._session_context_action(self.name, i_("删除"))
+        confirm_btn = session._win.ButtonControl(Name=i_("删除"), ClassName="mmui::XOutlineButton")
+        if not confirm_btn.Exists(maxSearchSeconds=2):
+            raise WxControlNotFoundError("未找到删除确认弹窗")
+        input_wx.click(confirm_btn)
+
+    def open(self) -> None:
+        """激活会话"""
+        self.session.open(self.name)
+
+    def close(self) -> None:
+        """取消激活（如果处于激活状态则取消选中）"""
+        self.session.close(self.name)
+
+    def __repr__(self) -> str:
+        muted_tag = " [免打扰]" if self.muted else ""
+        active_tag = " [激活]" if self.is_active else ""
+        return f"SessionItem({self.name!r}, {self.msg_time}{muted_tag}{active_tag})"
+
+
 class Session:
     """
     会话列表面板，包含搜索框和会话列表。
@@ -5420,7 +5422,7 @@ class Session:
               AutomationId="session_item_{name}"
     """
 
-    def __init__(self, wx: "Weixin"):
+    def __init__(self, wx: Weixin):
         """
         初始化会话列表面板。
 
@@ -5445,13 +5447,13 @@ class Session:
     def _list_control(self) -> auto.ListControl:
         return self._win.ListControl(ClassName="mmui::XTableView", AutomationId="session_list")
 
-    def visible(self) -> list[SessionItem]:
+    def visible(self) -> List[SessionItem]:
         """获取当前可见的会话列表"""
         lc = self._list_control
         if not lc.Exists(maxSearchSeconds=3):
             raise WxControlNotFoundError("未找到会话列表控件")
 
-        sessions: list[SessionItem] = []
+        sessions: List[SessionItem] = []
         for ctrl, _ in auto.WalkControl(lc):
             if ctrl.ControlType != auto.ControlType.ListItemControl:
                 continue
@@ -5472,7 +5474,7 @@ class Session:
             sessions.append(item)
         return sessions
 
-    def names(self) -> list[str]:
+    def names(self) -> List[str]:
         """获取当前可见会话的名称列表"""
         return [s.name for s in self.visible()]
 
@@ -5512,13 +5514,13 @@ class Session:
         )
 
     @PIM.guard
-    def search(self, keyword: str, chat_type: Optional[list[str]] = None) -> None:
+    def search(self, keyword: str, chat_type: Optional[List[str]] = None) -> None:
         """搜索并打开会话（search_and_select 的别名，失败时抛异常）"""
         if not self.search_and_select(keyword, chat_type):
             raise WxControlNotFoundError(f"搜索未找到结果: {keyword}")
 
     @PIM.guard
-    def open_by_search(self, name: str, chat_type: Optional[list[str]] = None,
+    def open_by_search(self, name: str, chat_type: Optional[List[str]] = None,
                        force_search: bool = False) -> None:
         """
         打开指定名称的会话。
@@ -5570,7 +5572,7 @@ class Session:
         self.search(name, chat_type)
 
     @PIM.guard
-    def scroll(self, direction: str = "down", clicks: int = 3) -> None:
+    def scroll(self, direction: Literal["up", "down"] = "down", clicks: int = 3) -> None:
         """
         滚动会话列表。
         direction: "up" 或 "down"
@@ -5586,7 +5588,7 @@ class Session:
         auto.WheelDown(cx, cy, abs(delta)) if direction == "down" else auto.WheelUp(cx, cy, abs(delta))
         time.sleep(0.3)
 
-    def all(self, step: int = 5, max_scrolls: int = 500) -> list[SessionItem]:
+    def all(self, step: int = 5, max_scrolls: int = 500) -> List[SessionItem]:
         """
         通过滚动获取完整的会话列表。
 
@@ -5617,8 +5619,8 @@ class Session:
             input_wx.send_keys(lc, "{Home}")
             time.sleep(0.3)
 
-        all_sessions: list[SessionItem] = []
-        seen_rids: set[tuple] = set()
+        all_sessions: List[SessionItem] = []
+        seen_rids: Set[tuple] = set()
         no_new_count = 0
 
         for _ in range(max_scrolls):
@@ -5686,7 +5688,7 @@ class Session:
         # 逐步向下滚动查找
         step = 5
         no_new_count = 0
-        prev_names: set[str] = set()
+        prev_names: Set[str] = set()
         for _ in range(500):
             sp = lc.GetScrollPattern()
             if sp:
@@ -5827,7 +5829,7 @@ class Session:
         input_wx.click(confirm_btn)
 
     @PIM.guard
-    def search_and_select(self, keyword: str, chat_type: Optional[list[str]] = None) -> bool:
+    def search_and_select(self, keyword: str, chat_type: Optional[List[str]] = None) -> bool:
         """
         在搜索框中输入关键词并点击第一个匹配结果。
         返回是否成功找到并点击了结果。
@@ -5907,7 +5909,7 @@ class Session:
         self._click_quick_action_item(item_name)
 
     @PIM.guard
-    def create_room(self, nickname_list: list[str]) -> None:
+    def create_room(self, nickname_list: List[str]) -> None:
         """
         发起群聊。
 
@@ -6179,7 +6181,7 @@ class Session:
         input_wx.click(confirm_btn)
 
     @PIM.guard
-    def new_note(self) -> "NoteEditor":
+    def new_note(self) -> NoteEditor:
         """
         新建笔记，返回笔记编辑窗口对象。
 
@@ -6190,7 +6192,7 @@ class Session:
         return NoteEditor(self.wx)
 
     @PIM.guard
-    def open_session(self, nickname: str) -> "Chat":
+    def open_session(self, nickname: str) -> Chat:
         """通过在会话列表中查找并点击来打开指定会话，返回 Chat 对象"""
         self._ensure_ready()
         self.open(nickname)
@@ -6202,8 +6204,8 @@ class Session:
         raise RuntimeError(f"打开会话失败: {nickname}")
 
     @PIM.guard
-    def open_session_by_search(self, nickname: str, chat_type: Optional[list[str]] = None,
-                               force_search: bool = False) -> "Chat":
+    def open_session_by_search(self, nickname: str, chat_type: Optional[List[str]] = None,
+                               force_search: bool = False) -> Chat:
         """通过搜索打开指定会话，返回 Chat 对象"""
         self._ensure_ready()
         self.open_by_search(nickname, chat_type, force_search)
@@ -6235,1918 +6237,6 @@ class Session:
             return f"Session(visible={len(sessions)}, active={selected!r})"
         except Exception as e:
             return f"Session(error={e!r})"
-
-
-class MomentItem:
-    """朋友圈动态条目"""
-
-    def __init__(self, moment: "Moment", runtime_id: tuple, *,
-                 type="", sender="", content="",
-                 raw_text="", timestamp="", image_count=0,
-                 cell_type="", scroll_offset: int = 0):
-        """
-        初始化朋友圈动态条目。
-
-        Args:
-            moment: 关联的 Moment 实例。
-            runtime_id: UI Automation RuntimeId。
-            type: 动态类型（如 "文本"、"图片"、"视频"、"分享"）。
-            sender: 发送者昵称。
-            content: 正文内容。
-            raw_text: 原始 Name 属性文本。
-            timestamp: 时间戳文本。
-            image_count: 图片数量。
-            cell_type: 控件 ClassName。
-            scroll_offset: 该动态在列表中的累计滚动偏移（像素）。
-        """
-        self.moment = moment
-        self.runtime_id = runtime_id
-        self.type = type
-        self.sender = sender
-        self.content = content
-        self.raw_text = raw_text
-        self.timestamp = timestamp
-        self.image_count = image_count
-        self.cell_type = cell_type
-        self.scroll_offset = scroll_offset
-
-    def like(self) -> bool:
-        """
-        点赞此条动态。
-
-        如果已点赞则不重复操作，返回 True。
-        """
-        self.moment._ensure_ready()
-        ctrl = self._find_cell()
-        if not ctrl:
-            raise WxControlNotFoundError(f"未找到朋友圈动态: {self.sender}")
-        self._scroll_into_view(ctrl)
-
-        win = self.moment._win
-        if not self._open_action_bar(ctrl):
-            return False
-
-        # 已点赞时显示"取消"，未点赞时显示"赞"
-        # 先检查是否已点赞（"取消"按钮），避免重复点赞
-        for cls in ("mmui::XTextView", "mmui::XButton"):
-            cancel_btn = win.Control(Name=i_("取消"), ClassName=cls)
-            if cancel_btn.Exists(0, 0):
-                # 已点赞，关闭操作栏
-                input_wx.send_keys(None, "{Esc}")
-                time.sleep(0.2)
-                return True
-
-        # 未点赞，点击"赞"
-        btn = win.TextControl(Name=i_("赞"), ClassName="mmui::XTextView")
-        if btn.Exists(0, 0):
-            input_wx.click(btn)
-            time.sleep(0.3)
-            return True
-
-        return False
-
-    def unlike(self) -> bool:
-        """
-        取消点赞此条动态。
-
-        如果未点赞则不操作，返回 True。
-        """
-        self.moment._ensure_ready()
-        ctrl = self._find_cell()
-        if not ctrl:
-            raise WxControlNotFoundError(f"未找到朋友圈动态: {self.sender}")
-        self._scroll_into_view(ctrl)
-
-        win = self.moment._win
-        if not self._open_action_bar(ctrl):
-            return False
-
-        # 检查是否已点赞（"取消"按钮）
-        for cls in ("mmui::XTextView", "mmui::XButton"):
-            cancel_btn = win.Control(Name=i_("取消"), ClassName=cls)
-            if cancel_btn.Exists(0, 0):
-                input_wx.click(cancel_btn)
-                time.sleep(0.3)
-                return True
-
-        # 未点赞，关闭操作栏
-        input_wx.send_keys(None, "{Esc}")
-        time.sleep(0.2)
-        return True
-
-    def comment(self, content: str) -> bool:
-        """
-        评论此条动态。
-
-        Args:
-            content: 评论内容
-        """
-        if not content or not content.strip():
-            raise ValueError("评论内容不能为空")
-
-        self.moment._ensure_ready()
-        ctrl = self._find_cell()
-        if not ctrl:
-            raise WxControlNotFoundError(f"未找到朋友圈动态: {self.sender}")
-        self._scroll_into_view(ctrl)
-
-        if not self._click_action_button(ctrl, "评论"):
-            raise RuntimeError("未能打开评论输入框")
-
-        input_wx.paste(content)
-        time.sleep(0.5)
-
-        # 当前动态的下一个兄弟控件就是其评论区
-        comment_cell = ctrl.GetNextSiblingControl()
-        if (not comment_cell
-                or comment_cell.ClassName != "mmui::TimelineCommentCell"):
-            raise WxControlNotFoundError("未找到当前动态的评论区控件")
-
-        rect = comment_cell.BoundingRectangle
-        send_x = rect.right - 70
-        send_y = rect.bottom - 50
-        auto.MoveTo(send_x, send_y)
-        time.sleep(0.1)
-        auto.Click(send_x, send_y)
-        time.sleep(0.5)
-        return True
-
-    def scroll_to_visible(self) -> bool:
-        """将此条动态滚动到可见区域"""
-        self.moment._ensure_ready()
-        ctrl = self._find_cell()
-        if not ctrl:
-            raise WxControlNotFoundError(f"未找到朋友圈动态: {self.sender}")
-        return self._scroll_into_view(ctrl)
-
-    def _find_cell(self) -> "auto.Control | None":
-        """
-        在朋友圈列表中查找此条动态的控件。
-
-        利用 scroll_offset（前面所有朋友圈高度累加）快速定位：
-        1. 先在当前可见区域查找（命中直接返回）
-        2. 点击"刷新"回到列表顶部
-        3. 边滚动边匹配：每滚一小段就检查可见区域，命中立即返回
-        """
-        lc = self.moment._find_sns_list()
-
-        def _match_in_visible():
-            for ctrl, _ in auto.WalkControl(lc):
-                if ctrl.ControlType != auto.ControlType.ListItemControl:
-                    continue
-                cls_name = ctrl.ClassName or ""
-                if not cls_name.startswith(Moment.TIMELINE_CELL_PREFIX):
-                    continue
-                if cls_name in Moment.SKIP_CELL_CLASSES:
-                    continue
-                if (ctrl.Name
-                        and self.sender in ctrl.Name
-                        and self.content[:20] in ctrl.Name):
-                    return ctrl
-            return None
-
-        # 先在当前可见区域查找
-        result = _match_in_visible()
-        if result:
-            return result
-
-        # 回到顶部
-        refresh_btn = self.moment._win.ButtonControl(
-            ClassName="mmui::XTabBarItem",
-            Name=i_("刷新"),
-        )
-        if refresh_btn.Exists(maxSearchSeconds=2):
-            input_wx.click(refresh_btn)
-            time.sleep(2)
-
-        if self.scroll_offset <= 0:
-            return _match_in_visible()
-
-        # 边滚动边匹配
-        # 每次滚动约 500px（wheelTimes=5），滚完立即检查
-        scrolled = 0
-        step = 5
-        step_px = 500
-        while scrolled < self.scroll_offset + step_px:
-            result = _match_in_visible()
-            if result:
-                return result
-            lc.WheelDown(wheelTimes=step)
-            scrolled += step_px
-            time.sleep(0.15)
-
-        # 最后再检查一次
-        return _match_in_visible()
-
-    def _scroll_into_view(self, ctrl) -> bool:
-        """将控件滚动到朋友圈列表可见区域内"""
-        lc = self.moment._find_sns_list()
-        list_rect = lc.BoundingRectangle
-        for _ in range(30):
-            ctrl_rect = ctrl.BoundingRectangle
-            if ctrl_rect.bottom <= list_rect.bottom - 10:
-                return True
-            lc.WheelDown(wheelTimes=3)
-            time.sleep(0.3)
-        return False
-
-    def _open_action_bar(self, ctrl) -> bool:
-        """
-        触发朋友圈动态的操作栏（赞/评论按钮）。
-
-        从动态右下角逐步向左移动鼠标并点击，直到操作栏出现。
-        """
-        win = self.moment._win
-        distance = 30
-        while distance < 200:
-            ctrl_rect = ctrl.BoundingRectangle
-            auto.MoveTo(ctrl_rect.right - distance, ctrl_rect.bottom - 5)
-            time.sleep(0.1)
-            auto.Click(ctrl_rect.right - distance, ctrl_rect.bottom - 5)
-            time.sleep(0.3)
-
-            # 检查操作栏是否出现
-            if (win.TextControl(Name=i_("赞"), ClassName="mmui::XTextView").Exists(0, 0)
-                    or win.TextControl(Name=i_("评论"), ClassName="mmui::XTextView").Exists(0, 0)
-                    or win.Control(Name=i_("取消"), ClassName="mmui::XTextView").Exists(0, 0)
-                    or win.Control(Name=i_("取消"), ClassName="mmui::XButton").Exists(0, 0)):
-                return True
-
-            distance += 20
-        return False
-
-    def _click_action_button(self, ctrl, button_name: str) -> bool:
-        """触发操作栏后点击指定按钮（用于评论等）"""
-        win = self.moment._win
-        if not self._open_action_bar(ctrl):
-            return False
-
-        btn = win.TextControl(Name=button_name, ClassName="mmui::XTextView")
-        if btn.Exists(0, 0):
-            input_wx.click(btn)
-            time.sleep(0.3)
-            return True
-        return False
-
-    def __repr__(self):
-        return (f"MomentItem(type={self.type!r}, sender={self.sender!r}, "
-                f"content={self.content!r}, timestamp={self.timestamp!r})")
-
-    def __str__(self):
-        preview = self.content[:60] + "..." if len(self.content) > 60 else self.content
-        return f"[{self.type}] [{self.timestamp}] {self.sender}: {preview}"
-
-    def to_dict(self) -> dict:
-        """转换为字典"""
-        return {
-            "type": self.type,
-            "sender": self.sender,
-            "content": self.content,
-            "raw_text": self.raw_text,
-            "timestamp": self.timestamp,
-            "image_count": self.image_count,
-        }
-
-
-class Moment(WeixinWindow):
-    """
-    朋友圈（Moment）操作类。
-
-    继承自 WeixinWindow，复用通用窗口操作（activate、pin、unpin、
-    minimize、maximize、restore、close）。
-
-    微信 4.x 的朋友圈通过左侧导航栏的"朋友圈"标签页打开，
-    会弹出一个独立窗口。
-
-    关键控件信息（来自 desktop-ui-inspector 对微信 4.x 的实际检查）：
-    - 导航标签: ButtonControl, ClassName="mmui::XTabBarItem", Name="朋友圈"
-    - 独立窗口: WindowControl, ClassName="mmui::SNSWindow",
-                AutomationId="SNSWindow", Name="朋友圈"
-    - 列表容器: ListControl, ClassName="mmui::TimeLineListView",
-                AutomationId="sns_list", Name="朋友圈"
-    - 单条动态: ListItemControl, ClassName 前缀 "mmui::Timeline"
-      （如 mmui::TimelineGridImageCell 等）
-    - 动态的 Name 属性包含完整信息，格式示例：
-      "王芳 Ai漫剧的发展和出海的机遇[玫瑰] 包含2张图片 8小时前 "
-      即: "昵称 正文内容 [附件描述] 时间戳"
-    """
-
-    # 朋友圈独立窗口
-    SNS_WINDOW_CLASS = "mmui::SNSWindow"
-    SNS_WINDOW_ID = "SNSWindow"
-    # 朋友圈 feed 列表
-    SNS_LIST_CLASS = "mmui::TimeLineListView"
-    SNS_LIST_ID = "sns_list"
-    # 单条动态的 ClassName 前缀
-    TIMELINE_CELL_PREFIX = "mmui::Timeline"
-    # 需要跳过的非动态 Cell（评论区、辅助行等）
-    SKIP_CELL_CLASSES = {
-        "mmui::TimelineCommentCell",  # 评论区
-        "mmui::TimelineCell",         # 辅助行（如 "余下0条"）
-    }
-
-    # ---- 发布相关常量 ----
-    PUBLISH_PANEL_CLASS = "mmui::SnsPublishPanel"
-    PUBLISH_PANEL_ID = "SnsPublishPanel"
-    PUBLISH_INPUT_CLASS = "mmui::XValidatorTextEdit"
-    PUBLISH_BTN_CLASS = "mmui::XOutlineButton"
-    TOOLBAR_CLASS = "mmui::SNSWindowToolBar"
-    TOOLBAR_ID = "sns_window_tool_bar"
-
-    # ---- 隐私设置相关常量 ----
-    PRIVACY_BTN_CLASS = "mmui::PublishPrivacyView"
-    PRIVACY_SELECTION_CLASS = "mmui::PublishPrivacySelection"
-
-    def __init__(self, wx: "Weixin"):
-        """
-        初始化朋友圈操作实例。
-
-        Args:
-            wx: Weixin 实例。
-        """
-        self.wx = wx
-        self._win = auto.WindowControl(
-            ClassName=self.SNS_WINDOW_CLASS,
-            AutomationId=self.SNS_WINDOW_ID,
-            ProcessId=self.wx.pid,
-            searchDepth=1
-        )
-
-    def _ensure_ready(self) -> None:
-        """
-        打开朋友圈独立窗口。
-
-        如果窗口已存在则直接激活，否则通过导航栏点击"朋友圈"打开。
-
-        窗口: WindowControl, ClassName="mmui::SNSWindow",
-              AutomationId="SNSWindow", Name="朋友圈"
-        """
-        if self._win.Exists(maxSearchSeconds=1):
-            self.activate()
-            return
-
-        # 窗口不存在，通过导航栏打开
-        self.wx.activate()
-        self.wx.navigator.switch_to(i_("朋友圈"))
-
-        # 等待独立窗口出现
-        if not self._win.Exists(maxSearchSeconds=5):
-            raise RuntimeError("朋友圈窗口未打开")
-
-        self.activate()
-
-    def _find_sns_list(self) -> auto.ListControl:
-        """
-        在朋友圈窗口中查找 feed 列表控件。
-
-        列表: ListControl, ClassName="mmui::TimeLineListView",
-              AutomationId="sns_list"
-        """
-        lc = self._win.ListControl(
-            ClassName=self.SNS_LIST_CLASS,
-            AutomationId=self.SNS_LIST_ID,
-        )
-        if not lc.Exists(maxSearchSeconds=5):
-            raise WxControlNotFoundError("未找到朋友圈列表控件 (sns_list)")
-        return lc
-
-    def _parse_moment_name(self, runtime_id: tuple, raw_name: str,
-                           cls_name: str = "", scroll_offset: int = 0) -> MomentItem | None:
-        """
-        解析单条朋友圈动态 ListItem 的 Name 属性。
-
-        Name 格式示例（空格分隔，末尾带时间戳）：
-          "王芳 Ai漫剧的发展和出海的机遇[玫瑰] 包含2张图片 8小时前 "
-          "张三 今天天气真好 3分钟前 "
-          "七夏 放大看看[太阳] 包含1张图片 5天前 "
-
-        已知 Cell ClassName 与类型的对应关系：
-          mmui::TimelineGridImageCell  — 多图（九宫格）
-          mmui::TimelineContentCell    — 单图/大图/内容
-          mmui::TimelineVideoCell      — 视频（推测）
-          mmui::TimelineLinkCell / mmui::TimelineUrlCell — 分享链接（推测）
-
-        解析策略：
-        1. 正则匹配末尾时间戳
-        2. 提取 "包含X张图片" 中的图片数量
-        3. 检测 Name 中的视频/链接关键词
-        4. 结合 ClassName 判断类型标识
-        5. 第一个空格前为昵称，中间为正文
-        """
-        if not raw_name or not raw_name.strip():
-            return None
-
-        text = raw_name.strip()
-
-        # 匹配末尾时间戳
-        ts_pattern = (
-            r'(\d+分钟前|\d+小时前|\d+天前|昨天|前天|刚刚'
-            r'|\d{1,2}月\d{1,2}日'
-            r'|\d{4}年\d{1,2}月\d{1,2}日'
-            r')\s*$'
-        )
-        ts_match = re.search(ts_pattern, text)
-        timestamp = ""
-        body = text
-        if ts_match:
-            timestamp = ts_match.group(1)
-            body = text[:ts_match.start()].strip()
-
-        if not body:
-            return None
-
-        # 提取图片数量
-        image_count = 0
-        img_match = re.search(r'包含(\d+)张图片', body)
-        if img_match:
-            image_count = int(img_match.group(1))
-            body = (body[:img_match.start()] + body[img_match.end():]).strip()
-
-        # 检测视频关键词
-        has_video_kw = False
-        video_match = re.search(r'包含\d*段?视频', body)
-        if video_match:
-            has_video_kw = True
-            body = (body[:video_match.start()] + body[video_match.end():]).strip()
-
-        # 检测链接/分享关键词
-        has_link_kw = bool(re.search(r'链接|网页|分享', body))
-
-        # 第一个空格前为昵称
-        parts = body.split(None, 1)
-        sender = parts[0] if parts else ""
-        content = parts[1].strip() if len(parts) > 1 else ""
-
-        # --- 判断类型标识（临时变量，不存入实例） ---
-        cls_lower = cls_name.lower()
-        has_image = image_count > 0 or "image" in cls_lower
-        has_video = "video" in cls_lower or has_video_kw
-        has_link = ("link" in cls_lower or "url" in cls_lower
-                    or has_link_kw)
-        has_text = bool(content)
-
-        # 生成类型文本
-        media = ""
-        if has_image:
-            media = "图片"
-        elif has_video:
-            media = "视频"
-        elif has_link:
-            media = "分享"
-
-        if has_text and media:
-            moment_type = f"文本{media}"
-        elif has_text:
-            moment_type = "文本"
-        elif media:
-            moment_type = media
-        else:
-            moment_type = "其他"
-
-        return MomentItem(
-            self, 
-            runtime_id,
-            type=moment_type,
-            sender=sender,
-            content=content,
-            raw_text=raw_name,
-            timestamp=timestamp,
-            image_count=image_count,
-            cell_type=cls_name,
-            scroll_offset=scroll_offset,
-        )
-
-    def _collect_moments(self, lc) -> list[tuple[str, str, tuple, int]]:
-        """
-        收集当前可见的动态条目的 (raw_name, cls_name, runtime_id, ctrl_height) 列表。
-        跳过评论区、辅助行等非动态 Cell。
-        ctrl_height 为控件的高度（像素），用于累加计算滚动偏移。
-        """
-        items: list[tuple[str, str, tuple, int]] = []
-        for ctrl, _ in auto.WalkControl(lc):
-            if ctrl.ControlType != auto.ControlType.ListItemControl:
-                continue
-            cls_name = ctrl.ClassName or ""
-            if not cls_name.startswith(self.TIMELINE_CELL_PREFIX):
-                continue
-            if cls_name in self.SKIP_CELL_CLASSES:
-                continue
-            raw = ctrl.Name
-            if raw:
-                try:
-                    rid = tuple(ctrl.GetRuntimeId())
-                except Exception:
-                    rid = ()
-                try:
-                    ctrl_height = ctrl.BoundingRectangle.height()
-                except Exception:
-                    ctrl_height = 0
-                items.append((raw, cls_name, rid, ctrl_height))
-        return items
-
-    @PIM.guard
-    def get_moments(self, count: int = 10, position: str = "top") -> list[MomentItem]:
-        """
-        获取朋友圈动态列表。
-
-        持续滚动采集直到收集满 count 条动态才返回，
-        如果朋友圈动态不足 count 条则返回全部。
-
-        Args:
-            count:    要获取的动态条数，默认 10 条，收集满后立即返回
-            position: 起始位置
-                - "top":     先点击"刷新"回到顶部，再从头采集（默认）
-                - "current": 从当前滚动位置开始采集
-
-        Returns:
-            Moment 列表，长度 <= count
-        """
-        self._ensure_ready()
-
-        if position == "top":
-            refresh_btn = self._win.ButtonControl(
-                ClassName="mmui::XTabBarItem",
-                Name=i_("刷新"),
-            )
-            if refresh_btn.Exists(maxSearchSeconds=2):
-                input_wx.click(refresh_btn)
-                time.sleep(2)
-
-        lc = self._find_sns_list()
-
-        moments: list[MomentItem] = []
-        seen_keys: set[tuple] = set()  # (runtime_id, raw_text) 组合去重
-        cumulative_height: int = 0  # 已采集朋友圈的高度累加
-
-        while len(moments) < count:
-            new_found = False
-            for raw, cls_name, rid, ctrl_height in self._collect_moments(lc):
-                key = (rid, raw) if rid else ((), raw)
-                if key in seen_keys:
-                    continue
-                item = self._parse_moment_name(
-                    rid, raw, cls_name, scroll_offset=cumulative_height,
-                )
-                if item:
-                    seen_keys.add(key)
-                    moments.append(item)
-                    cumulative_height += ctrl_height
-                    new_found = True
-                if len(moments) >= count:
-                    break
-
-            if len(moments) >= count:
-                break
-
-            if not new_found:
-                input_wx.focus(lc)
-                time.sleep(0.2)
-                input_wx.send_keys(lc, "{PageDown}")
-                time.sleep(1)
-                found_after_scroll = False
-                for raw, _, rid, _ in self._collect_moments(lc):
-                    key = (rid, raw) if rid else ((), raw)
-                    if key not in seen_keys:
-                        found_after_scroll = True
-                        break
-                if not found_after_scroll:
-                    break
-            else:
-                input_wx.focus(lc)
-                time.sleep(0.2)
-                input_wx.send_keys(lc, "{PageDown}")
-                time.sleep(0.5)
-
-        return moments[:count]
-
-    @PIM.guard
-    def iter_moments(self, count: int = 10, position: str = "top"):
-        """
-        逐条获取朋友圈动态（生成器）。
-
-        与 get_moments 相同的采集逻辑，但每获取到一条新动态立即 yield，
-        适合边获取边操作的场景（如逐条点赞）。
-
-        注意：不使用 @PIM.guard 装饰器（装饰器与生成器不兼容），
-        在首次迭代时手动执行一次 guard 等待。
-
-        Args:
-            count:    要获取的动态条数，默认 10 条
-            position: "top" 从顶部开始，"current" 从当前位置
-
-        Yields:
-            Moment 实例
-
-        用法::
-
-            for item in wx.moment.iter_moments(10):
-                print(item)
-                wx.moment.like(item)
-        """
-        # 手动执行 guard 等待（替代 @PIM.guard）
-        if PIM._running and PIM.idle_wait > 0:
-            PIM.wait_for_idle(PIM.idle_wait)
-
-        self._ensure_ready()
-
-        if position == "top":
-            refresh_btn = self._win.ButtonControl(
-                ClassName="mmui::XTabBarItem",
-                Name=i_("刷新"),
-            )
-            if refresh_btn.Exists(maxSearchSeconds=2):
-                input_wx.click(refresh_btn)
-                time.sleep(2)
-
-        lc = self._find_sns_list()
-
-        yielded = 0
-        seen_keys: set[tuple] = set()
-        cumulative_height: int = 0
-
-        while yielded < count:
-            new_found = False
-            for raw, cls_name, rid, ctrl_height in self._collect_moments(lc):
-                key = (rid, raw) if rid else ((), raw)
-                if key in seen_keys:
-                    continue
-                item = self._parse_moment_name(
-                    rid, raw, cls_name, scroll_offset=cumulative_height,
-                )
-                if item:
-                    seen_keys.add(key)
-                    cumulative_height += ctrl_height
-                    yield item
-                    yielded += 1
-                    new_found = True
-                if yielded >= count:
-                    return
-
-            if not new_found:
-                input_wx.focus(lc)
-                time.sleep(0.2)
-                input_wx.send_keys(lc, "{PageDown}")
-                time.sleep(1)
-                found_after_scroll = False
-                for raw, _, rid, _ in self._collect_moments(lc):
-                    key = (rid, raw) if rid else ((), raw)
-                    if key not in seen_keys:
-                        found_after_scroll = True
-                        break
-                if not found_after_scroll:
-                    return
-            else:
-                input_wx.focus(lc)
-                time.sleep(0.2)
-                input_wx.send_keys(lc, "{PageDown}")
-                time.sleep(0.5)
-
-    def like(self, moment_item: MomentItem) -> bool:
-        """对指定动态点赞"""
-        return moment_item.like()
-
-    def unlike(self, moment_item: MomentItem) -> bool:
-        """取消指定动态的点赞"""
-        return moment_item.unlike()
-
-    def comment(self, moment_item: MomentItem, content: str) -> bool:
-        """对指定动态评论"""
-        return moment_item.comment(content)
-
-    def scroll_into_visible(self, moment_item: MomentItem) -> bool:
-        """将指定动态滚动到可见区域"""
-        return moment_item.scroll_to_visible()
-
-    @PIM.guard
-    def like_when(self, func: "callable",
-                  position: str = "top") -> list[MomentItem]:
-        """
-        条件批量点赞：遍历朋友圈，回调返回 True 时点赞。
-
-        Args:
-            func:     回调函数，签名 func(liked_count: int, item: MomentItem) -> bool。
-                      liked_count 为当前已点赞数（从 0 开始），item 为当前动态。
-                      返回 True 点赞，返回 False 跳过。
-            position: 起始位置，"top" 从顶部开始，"current" 从当前位置。
-
-        Returns:
-            成功点赞的 MomentItem 列表
-
-        用法::
-
-            # 全部点赞
-            wx.moment.like_when(lambda c, item: True)
-
-            # 只点赞包含"旅行"的动态
-            wx.moment.like_when(lambda c, item: "旅行" in item.content)
-
-            # 只点赞"张三"发的
-            wx.moment.like_when(lambda c, item: "张三" in item.sender)
-
-            # 点赞前 5 条后停止（通过 liked_count 控制）
-            wx.moment.like_when(lambda c, item: c < 5)
-
-            # 复杂条件
-            wx.moment.like_when(
-                lambda c, item: item.image_count > 0 and "美食" in item.content,
-            )
-        """
-        liked: list[MomentItem] = []
-
-        for item in self.iter_moments(count=500, position=position):
-            try:
-                should = func(len(liked), item)
-            except Exception as e:
-                logger.warning(f"回调异常: {item.sender} - {e}")
-                continue
-
-            if not should:
-                continue
-
-            try:
-                if item.like():
-                    liked.append(item)
-                    logger.info(
-                        f"点赞 [{len(liked)}]: "
-                        f"{item.sender} - {item.content[:30] if item.content else '(无文字)'}"
-                    )
-            except Exception as e:
-                logger.warning(f"点赞失败: {item.sender} - {e}")
-                continue
-
-            time.sleep(0.5)
-
-        logger.info(f"批量点赞完成: 成功 {len(liked)} 条")
-        return liked
-
-    @PIM.guard
-    def comment_when(self, func: "callable",
-                     position: str = "top") -> list[MomentItem]:
-        """
-        条件批量评论：遍历朋友圈，回调返回评论内容时评论。
-
-        Args:
-            func:     回调函数，签名 func(commented_count: int, item: MomentItem) -> str | None。
-                      commented_count 为当前已评论数（从 0 开始），item 为当前动态。
-                      返回非空字符串时评论该动态，返回 None 或空字符串跳过。
-            position: 起始位置，"top" 从顶部开始，"current" 从当前位置。
-
-        Returns:
-            成功评论的 MomentItem 列表
-
-        用法::
-
-            # 对所有动态评论"好棒"
-            wx.moment.comment_when(lambda c, item: "好棒")
-
-            # 评论前 3 条后停止
-            wx.moment.comment_when(lambda c, item: "不错" if c < 3 else None)
-
-            # 只评论"张三"发的
-            wx.moment.comment_when(
-                lambda c, item: "赞一个" if "张三" in item.sender else None
-            )
-
-            # 根据内容生成不同评论
-            def gen_comment(count, item):
-                if "旅行" in item.content:
-                    return "风景真美！"
-                if "美食" in item.content:
-                    return "看起来好好吃"
-                return None  # 其他跳过
-
-            wx.moment.comment_when(gen_comment)
-        """
-        commented: list[MomentItem] = []
-
-        for item in self.iter_moments(count=500, position=position):
-            try:
-                content = func(len(commented), item)
-            except Exception as e:
-                logger.warning(f"回调异常: {item.sender} - {e}")
-                continue
-
-            if not content:
-                continue
-
-            try:
-                if item.comment(content):
-                    commented.append(item)
-                    logger.info(
-                        f"评论 [{len(commented)}]: "
-                        f"{item.sender} - {content[:30]!r}"
-                    )
-            except Exception as e:
-                logger.warning(f"评论失败: {item.sender} - {e}")
-                continue
-
-            time.sleep(0.5)
-
-        logger.info(f"批量评论完成: 成功 {len(commented)} 条")
-        return commented
-
-    # ---- 发布相关控件信息 ----
-    # 发布面板: GroupControl, ClassName="mmui::SnsPublishPanel",
-    #           AutomationId="SnsPublishPanel"
-    # 文本输入: EditControl, ClassName="mmui::XValidatorTextEdit"
-    #           位于 mmui::PublishInputView > mmui::ReplyTextView 内
-    # 表情按钮: ButtonControl, ClassName="mmui::XButton", Name="发送表情"
-    # 提醒谁看: GroupControl, ClassName="mmui::PublishComponent", Name=i_("提醒谁看")
-    # 谁可以看: ButtonControl, ClassName="mmui::PublishPrivacyView", Name 以 "谁可以看" 开头
-    # 发表按钮: ButtonControl, ClassName="mmui::XOutlineButton", Name="发表"
-    # 取消按钮: ButtonControl, ClassName="mmui::XOutlineButton", Name="取消"
-    # 工具栏发表: ButtonControl, ClassName="mmui::XTabBarItem", Name="发表"
-
-    def _open_publish_panel(self, text_only: bool = False) -> auto.Control:
-        """
-        打开发布面板并返回面板控件。
-
-        如果面板已打开则直接返回，否则通过工具栏"发表"按钮打开。
-
-        当 text_only=True 时，移动鼠标到"发表"按钮并长按 3 秒，
-        触发纯文本发布面板（微信通过长按相机图标进入文字发布模式）。
-
-        当 text_only=False 时，直接左键点击"发表"按钮打开默认发布面板。
-
-        面板: GroupControl, ClassName="mmui::SnsPublishPanel",
-              AutomationId="SnsPublishPanel"
-        """
-        panel = self._win.GroupControl(
-            ClassName=self.PUBLISH_PANEL_CLASS,
-            AutomationId=self.PUBLISH_PANEL_ID,
-        )
-        if panel.Exists(maxSearchSeconds=1):
-            return panel
-
-        # 查找工具栏
-        toolbar = self._win.ToolBarControl(
-            ClassName=self.TOOLBAR_CLASS,
-            AutomationId=self.TOOLBAR_ID,
-        )
-        if not toolbar.Exists(maxSearchSeconds=2):
-            raise WxControlNotFoundError("未找到朋友圈工具栏")
-
-        # 查找工具栏中的"发表"按钮
-        publish_tab = toolbar.ButtonControl(
-            ClassName="mmui::XTabBarItem",
-            Name=i_("发表"),
-        )
-        if not publish_tab.Exists(maxSearchSeconds=2):
-            raise WxControlNotFoundError("未找到工具栏'发表'按钮")
-
-        if text_only:
-            # 纯文本发布：移动鼠标到"发表"按钮，长按 3 秒触发文字发布面板
-            rect = publish_tab.BoundingRectangle
-            cx = rect.left + int(rect.width() * rand_ratio())
-            cy = rect.top + int(rect.height() * rand_ratio())
-            if not background:
-                win32api.SetCursorPos((cx, cy))
-                time.sleep(0.1)
-                win32api.mouse_event(win32con.MOUSEEVENTF_LEFTDOWN, cx, cy, 0, 0)
-                time.sleep(2)
-                win32api.mouse_event(win32con.MOUSEEVENTF_LEFTUP, cx, cy, 0, 0)
-            else:
-                hwnd_tmp = win32gui.WindowFromPoint((cx, cy))
-                if hwnd_tmp:
-                    client_x, client_y = win32gui.ScreenToClient(hwnd_tmp, (cx, cy))
-                    lparam = win32api.MAKELONG(client_x, client_y)
-                    win32gui.SendMessage(hwnd_tmp, win32con.WM_LBUTTONDOWN, win32con.MK_LBUTTON, lparam)
-                    time.sleep(2)
-                    win32gui.SendMessage(hwnd_tmp, win32con.WM_LBUTTONUP, 0, lparam)
-            time.sleep(1)
-        else:
-            # 默认发布：左键点击"发表"按钮
-            input_wx.click(publish_tab)
-            time.sleep(1)
-
-        # 等待发布面板出现
-        if not panel.Exists(maxSearchSeconds=5):
-            raise RuntimeError("发布面板未打开")
-
-        return panel
-
-    def _find_publish_input(self, panel: auto.Control) -> auto.EditControl:
-        """
-        在发布面板中查找文本输入框。
-
-        输入框: EditControl, ClassName="mmui::XValidatorTextEdit"
-        """
-        edit = panel.EditControl(
-            ClassName=self.PUBLISH_INPUT_CLASS,
-            searchDepth=10,
-        )
-        if not edit.Exists(maxSearchSeconds=3):
-            raise WxControlNotFoundError("未找到朋友圈文本输入框")
-        return edit
-
-    def _find_publish_button(self, panel: auto.Control) -> auto.ButtonControl:
-        """
-        在发布面板中查找"发表"按钮。
-
-        按钮: ButtonControl, ClassName="mmui::XOutlineButton", Name="发表"
-        """
-        btn = panel.ButtonControl(
-            ClassName=self.PUBLISH_BTN_CLASS,
-            Name=i_("发表"),
-            searchDepth=3,
-        )
-        if not btn.Exists(maxSearchSeconds=3):
-            raise WxControlNotFoundError("未找到'发表'按钮")
-        return btn
-
-    def _find_cancel_button(self, panel: auto.Control) -> auto.ButtonControl:
-        """
-        在发布面板中查找"取消"按钮。
-
-        按钮: ButtonControl, ClassName="mmui::XOutlineButton", Name="取消"
-        """
-        btn = panel.ButtonControl(
-            ClassName=self.PUBLISH_BTN_CLASS,
-            Name=i_("取消"),
-            searchDepth=10,
-        )
-        if not btn.Exists(maxSearchSeconds=3):
-            raise WxControlNotFoundError("未找到'取消'按钮")
-        return btn
-
-    def _select_file_in_dialog(self, file_path: str) -> None:
-        """
-        在系统文件选择对话框中选择文件。
-
-        等待 #32770 对话框出现，输入文件路径，按 Alt+O 打开。
-        """
-        file_dlg = self._win.WindowControl(ClassName="#32770")
-        if not file_dlg.Exists(maxSearchSeconds=5):
-            raise RuntimeError("文件选择对话框未弹出")
-
-        # 激活文件名输入框
-        input_wx.send_keys(file_dlg, "{Alt}N")
-        time.sleep(0.3)
-
-        # 输入文件路径
-        file_edit = file_dlg.PaneControl(AutomationId="1148").EditControl()
-        if not file_edit.Exists(maxSearchSeconds=3):
-            file_edit = file_dlg.EditControl(AutomationId="1148")
-        if not file_edit.Exists(maxSearchSeconds=3):
-            raise WxControlNotFoundError("未找到文件名输入框")
-
-        vp = file_edit.GetValuePattern()
-        if vp:
-            vp.SetValue(file_path)
-        else:
-            input_wx.paste(file_path)
-        time.sleep(0.3)
-
-        # Alt+O 打开
-        input_wx.send_keys(file_dlg, "{Alt}O")
-
-    def _set_remind_contacts(self, panel: auto.Control,
-                             contacts: list[str]) -> None:
-        """
-        在发布面板中设置"提醒谁看"的联系人。
-
-        流程:
-        1. 点击发布面板中的"提醒谁看"按钮
-        2. 等待 SessionPickerWindow（"微信提醒谁看"）弹出
-        3. 通过 _select_in_session_picker 搜索并勾选联系人
-        4. 点击"完成"关闭弹窗
-
-        Args:
-            panel:    发布面板控件
-            contacts: 联系人昵称列表
-        """
-        # 点击"提醒谁看"
-        remind_btn = panel.GroupControl(
-            ClassName="mmui::PublishComponent",
-            Name=i_("提醒谁看"),
-        )
-        if not remind_btn.Exists(maxSearchSeconds=2):
-            raise WxControlNotFoundError("未找到'提醒谁看'按钮")
-        input_wx.click(remind_btn)
-        time.sleep(0.5)
-
-        # 复用 SessionPickerWindow 选择逻辑
-        self._select_in_session_picker(i_("微信提醒谁看"), contacts=contacts)
-
-    def _set_privacy(self, panel: auto.Control, permission: str,
-                     permission_contacts: list[str] | None = None,
-                     permission_labels: list[str] | None = None) -> None:
-        """
-        在发布面板中设置"谁可以看"隐私权限。
-
-        流程:
-        1. 点击发布面板中的 mmui::PublishPrivacyView 按钮
-        2. 弹出隐私选择面板，包含 4 个 RadioButton:
-           "公开"、"私密"、"谁可以看"、"不给谁看"
-        3. 选择对应的 RadioButton
-        4. 若选择"谁可以看"或"不给谁看"，会弹出 SessionPickerWindow
-           （Name="微信谁可以看" 或 "微信不给谁看"），
-           包含"标签"和"朋友"两个 tab，可分别选择标签和联系人
-        5. 选完后点击"完成"关闭 SessionPickerWindow
-        6. 点击"确定"关闭隐私选择面板
-
-        控件结构:
-        - 隐私按钮: ButtonControl, ClassName="mmui::PublishPrivacyView"
-        - 隐私选项: RadioButtonControl, ClassName="mmui::PublishPrivacySelection"
-        - 确定按钮: ButtonControl, ClassName="mmui::XOutlineButton", Name="确定"
-        - SessionPickerWindow 内部结构同 _set_remind_contacts，
-          额外有"标签"/"朋友"两个 tab (mmui::XButton)
-
-        Args:
-            panel:               发布面板控件
-            permission:          隐私选项，"公开"/"私密"/"谁可以看"/"不给谁看"
-            permission_contacts: 联系人昵称列表（"谁可以看"/"不给谁看"时使用）
-            permission_labels:   标签名称列表（"谁可以看"/"不给谁看"时使用）
-        """
-        if permission not in (i_("公开"), i_("私密"), i_("谁可以看"), i_("不给谁看")):
-            raise ValueError(
-                f"无效的隐私选项 '{permission}'，"
-                f"有效值: {(i_('公开'), i_('私密'), i_('谁可以看'), i_('不给谁看'))}"
-            )
-
-        # 点击隐私按钮打开隐私选择面板
-        privacy_btn = panel.ButtonControl(
-            ClassName=self.PRIVACY_BTN_CLASS,
-            searchDepth=5,
-        )
-        if not privacy_btn.Exists(maxSearchSeconds=2):
-            raise WxControlNotFoundError("未找到'谁可以看'隐私按钮")
-        input_wx.click(privacy_btn)
-        time.sleep(0.5)
-
-        # 隐私选项面板覆盖在发布面板上方，但不在 panel 子树中，
-        # 需要在 SNSWindow 上搜索
-        # 选择对应的隐私选项 RadioButton
-        radio = self._win.RadioButtonControl(
-            ClassName=self.PRIVACY_SELECTION_CLASS,
-            Name=permission,
-            searchDepth=10,
-        )
-        if not radio.Exists(maxSearchSeconds=2):
-            raise WxControlNotFoundError(f"未找到隐私选项 '{permission}'")
-        input_wx.click(radio)
-        time.sleep(0.5)
-
-        # "谁可以看"和"不给谁看"需要选择联系人/标签
-        if permission in (i_("谁可以看"), i_("不给谁看")):
-            # 根据 permission 查找对应的 picker 窗口名称
-            if permission == i_("谁可以看"):
-                picker_name = i_("微信谁可以看")
-            else:
-                picker_name = i_("微信不给谁看")
-            self._select_in_session_picker(
-                picker_name, permission_contacts, permission_labels,
-            )
-
-        # 点击"确定"关闭隐私选择面板（同样在 SNSWindow 上搜索）
-        confirm_btn = self._win.ButtonControl(
-            ClassName=self.PUBLISH_BTN_CLASS,
-            Name=i_("确定"),
-            searchDepth=10,
-        )
-        if not confirm_btn.Exists(maxSearchSeconds=2):
-            raise WxControlNotFoundError("未找到隐私设置'确定'按钮")
-        input_wx.click(confirm_btn)
-
-    def _select_in_session_picker(
-        self,
-        picker_name: str,
-        contacts: list[str] | None = None,
-        labels: list[str] | None = None,
-    ) -> None:
-        """
-        在 SessionPickerWindow 中选择联系人和/或标签。
-
-        "谁可以看"/"不给谁看"/"提醒谁看"共用此方法。
-        SessionPickerWindow 内部结构:
-        - 搜索框: EditControl, Name=i_("搜索"), ClassName="mmui::XValidatorTextEdit"
-        - 搜索结果: CheckBoxControl, ClassName="mmui::SearchContactCellView"
-        - "标签" tab: ButtonControl, Name=i_("标签"), ClassName="mmui::XButton"
-        - "朋友" tab: ButtonControl, Name=i_("朋友"), ClassName="mmui::XButton"
-        - 标签列表项: CheckBoxControl, ClassName="mmui::SPSelectionContactRow"
-        - 完成按钮: ButtonControl, AutomationId="confirm_btn"
-
-        注意：picker 内部存在自引用控件，所有子控件查找必须限制 searchDepth。
-
-        Args:
-            picker_name: SessionPickerWindow 的 Name（如 "微信谁可以看"）
-            contacts:    联系人昵称列表
-            labels:      标签名称列表
-        """
-        picker = self._win.WindowControl(
-            ClassName="mmui::SessionPickerWindow",
-            Name=picker_name,
-        )
-        if not picker.Exists(maxSearchSeconds=3):
-            raise RuntimeError(f"'{picker_name}'弹窗未打开")
-
-        # 选择标签
-        if labels:
-            # 点击"标签" tab
-            label_tab = picker.ButtonControl(
-                ClassName="mmui::XButton",
-                Name=i_("标签"),
-                searchDepth=5,
-            )
-            if label_tab.Exists(maxSearchSeconds=2):
-                input_wx.click(label_tab)
-                time.sleep(0.5)
-
-                # 标签列表中直接勾选（标签数量通常不多，无需搜索）
-                contact_list = picker.ListControl(
-                    AutomationId="sp_to_select_contact_list",
-                    searchDepth=5,
-                )
-                if contact_list.Exists(maxSearchSeconds=2):
-                    for label_name in labels:
-                        label_item = contact_list.CheckBoxControl(
-                            Name=label_name,
-                            searchDepth=2,
-                        )
-                        if label_item.Exists(maxSearchSeconds=2):
-                            input_wx.click(label_item)
-                            time.sleep(0.3)
-                        else:
-                            logger.warning("未找到标签 '%s'", label_name)
-
-        # 选择联系人
-        if contacts:
-            # 点击"朋友" tab（如果有标签 tab 说明需要切换）
-            friend_tab = picker.ButtonControl(
-                ClassName="mmui::XButton",
-                Name=i_("朋友"),
-                searchDepth=5,
-            )
-            if friend_tab.Exists(maxSearchSeconds=2):
-                input_wx.click(friend_tab)
-                time.sleep(0.5)
-
-            # 通过搜索逐个选择联系人
-            search_edit = picker.EditControl(
-                ClassName="mmui::XValidatorTextEdit",
-                Name=i_("搜索"),
-                searchDepth=5,
-            )
-            if not search_edit.Exists(maxSearchSeconds=2):
-                raise WxControlNotFoundError("未找到搜索框")
-
-            not_found: list[str] = []
-
-            for contact in contacts:
-                input_wx.click(search_edit)
-                time.sleep(0.2)
-                input_wx.send_keys(search_edit, "{Ctrl}a{Del}")
-                time.sleep(0.2)
-                input_wx.paste(contact)
-                time.sleep(1)
-
-                result_list = picker.ListControl(
-                    AutomationId="sp_search_result_list",
-                    searchDepth=5,
-                )
-                if not result_list.Exists(maxSearchSeconds=2):
-                    logger.warning("搜索 '%s' 时未出现结果列表", contact)
-                    not_found.append(contact)
-                    continue
-
-                matched = result_list.CheckBoxControl(
-                    ClassName="mmui::SearchContactCellView",
-                    Name=contact,
-                    searchDepth=2,
-                )
-                if matched.Exists(maxSearchSeconds=2):
-                    input_wx.click(matched)
-                    time.sleep(0.3)
-                else:
-                    first_result = result_list.CheckBoxControl(
-                        ClassName="mmui::SearchContactCellView",
-                        searchDepth=2,
-                    )
-                    if first_result.Exists(maxSearchSeconds=1):
-                        logger.warning(
-                            "未精确匹配 '%s'，选择第一个结果: '%s'",
-                            contact, first_result.Name,
-                        )
-                        input_wx.click(first_result)
-                        time.sleep(0.3)
-                    else:
-                        logger.warning("搜索 '%s' 无结果", contact)
-                        not_found.append(contact)
-
-            if not_found:
-                logger.warning("以下联系人未找到: %s", not_found)
-
-        # 点击"完成"按钮
-        confirm_btn = picker.ButtonControl(
-            AutomationId="confirm_btn",
-            searchDepth=5,
-        )
-        if not confirm_btn.Exists(maxSearchSeconds=2):
-            raise WxControlNotFoundError("未找到'完成'按钮")
-        input_wx.click(confirm_btn)
-
-    @PIM.guard
-    def publish(self, text: Optional[str] = None, images: list[str] = None,
-                video: str = None, remind_contacts: list[str] = None,
-                permission: str = None,
-                permission_contacts: list[str] = None,
-                permission_labels: list[str] = None) -> bool:
-        """
-        发布朋友圈。
-
-        支持纯文字、图文、视频三种模式（图片和视频互斥）。
-
-        Args:
-            text:                 文本内容（纯文字模式必填，图文/视频模式可选）
-            images:               图片路径列表（与 video 互斥）
-            video:                视频路径（与 images 互斥）
-            remind_contacts:      提醒谁看的联系人昵称列表
-            permission:           隐私设置，可选值:
-                                  "公开"（默认）/ "私密" / "谁可以看" / "不给谁看"
-            permission_contacts:  隐私联系人列表（"谁可以看"/"不给谁看"时使用）
-            permission_labels:    隐私标签列表（"谁可以看"/"不给谁看"时使用）
-
-        Returns:
-            True 发布成功
-        """
-        # 参数校验
-        if images and video:
-            raise ValueError("images 和 video 只能指定其中一个参数")
-        if images and len(images) > 9:
-            raise ValueError("朋友圈最多发 9 张图片")
-        has_media = bool(images) or bool(video)
-        if not text and not has_media:
-            raise ValueError("text 和 images/video 至少指定一个")
-
-        self._ensure_ready()
-
-        # 右键"发表"按钮弹出菜单
-        publish_tab = self._find_toolbar_button(i_("发表"))
-        input_wx.click(publish_tab, button="right")
-        time.sleep(0.5)
-
-        if has_media:
-            # 点击"选照片或视频"
-            menu_item = self._win.MenuItemControl(
-                ClassName="mmui::XMenuView",
-                Name=i_("选照片或视频"),
-            )
-            if not menu_item.Exists(maxSearchSeconds=2):
-                raise WxControlNotFoundError("未找到'选照片或视频'菜单项")
-            input_wx.click(menu_item)
-            time.sleep(1)
-
-            # 选择第一个文件
-            first_file = images[0] if images else video
-            self._select_file_in_dialog(first_file)
-
-            # 等待发布面板出现
-            panel = self._win.GroupControl(
-                ClassName=self.PUBLISH_PANEL_CLASS,
-                AutomationId=self.PUBLISH_PANEL_ID,
-            )
-            if not panel.Exists(maxSearchSeconds=5):
-                raise RuntimeError("发布面板未打开")
-
-            # 多张图片：逐个点击"添加图片"格子添加
-            if images and len(images) > 1:
-                for img_path in images[1:]:
-                    # "添加图片"是 ListItemControl，ClassName="mmui::PublishImageAddGridCell"
-                    add_cell = panel.ListItemControl(
-                        ClassName="mmui::PublishImageAddGridCell",
-                        Name=i_("添加图片"),
-                        searchDepth=10,
-                    )
-                    if not add_cell.Exists(maxSearchSeconds=3):
-                        raise WxControlNotFoundError("未找到'添加图片'按钮")
-
-                    input_wx.click(add_cell)
-                    time.sleep(1)
-
-                    self._select_file_in_dialog(img_path)
-        else:
-            # 纯文字：点击"发表文字"
-            menu_item = self._win.MenuItemControl(
-                ClassName="mmui::XMenuView",
-                Name=i_("发表文字"),
-            )
-            if not menu_item.Exists(maxSearchSeconds=2):
-                raise WxControlNotFoundError("未找到'发表文字'菜单项")
-            input_wx.click(menu_item)
-            time.sleep(1)
-
-            panel = self._win.GroupControl(
-                ClassName=self.PUBLISH_PANEL_CLASS,
-                AutomationId=self.PUBLISH_PANEL_ID,
-            )
-            if not panel.Exists(maxSearchSeconds=5):
-                raise RuntimeError("发布面板未打开")
-
-        # 输入文字内容
-        if text:
-            edit = self._find_publish_input(panel)
-            edit.GetValuePattern().SetValue(text)
-            # input_wx.send_keys(edit, text)
-
-        # 设置提醒谁看
-        if remind_contacts:
-            self._set_remind_contacts(panel, remind_contacts)
-
-        # 设置隐私权限
-        if permission:
-            self._set_privacy(
-                panel, permission, permission_contacts, permission_labels,
-            )
-
-        # 点击"发表"
-        publish_btn = self._find_publish_button(panel)
-        input_wx.click(publish_btn)
-
-        # 等待发布面板消失
-        for _ in range(30):
-            if not panel.Exists(maxSearchSeconds=1):
-                logger.debug("朋友圈发布成功")
-                return True
-            time.sleep(1)
-
-        raise RuntimeError("发布超时，发布面板未关闭")
-
-    def _find_toolbar_button(self, name: str) -> auto.ButtonControl:
-        """
-        在朋友圈工具栏中查找指定名称的按钮。
-
-        工具栏: ToolBarControl, ClassName="mmui::SNSWindowToolBar",
-                AutomationId="sns_window_tool_bar"
-        按钮:   ButtonControl, ClassName="mmui::XTabBarItem"
-
-        Args:
-            name: 按钮名称（如 "刷新"、"发表"）
-
-        Returns:
-            ButtonControl 控件
-
-        Raises:
-            RuntimeError: 未找到工具栏或按钮时抛出
-        """
-        toolbar = self._win.ToolBarControl(
-            ClassName=self.TOOLBAR_CLASS,
-            AutomationId=self.TOOLBAR_ID,
-        )
-        if not toolbar.Exists(maxSearchSeconds=2):
-            raise WxControlNotFoundError("未找到朋友圈工具栏")
-
-        btn = toolbar.ButtonControl(
-            ClassName="mmui::XTabBarItem",
-            Name=name,
-        )
-        if not btn.Exists(maxSearchSeconds=2):
-            raise WxControlNotFoundError(f"未找到工具栏'{name}'按钮")
-        return btn
-
-    @PIM.guard
-    def refresh(self) -> None:
-        """
-        刷新朋友圈。
-
-        点击工具栏"刷新"按钮，回到列表顶部并加载最新动态。
-        """
-        self._ensure_ready()
-        btn = self._find_toolbar_button(i_("刷新"))
-        input_wx.click(btn)
-
-    def __str__(self) -> str:
-        return "Moment(朋友圈)"
-
-
-class ChatFile:
-    """聊天文件信息（来自"聊天文件"管理器窗口）"""
-
-    def __init__(self, file_manager: "FileManager | None" = None, *, file_name="",
-                 sender_name="", source_name="", source_type="",
-                 file_date="", file_status="", file_size="",
-                 raw_text="", _cell=None):
-        """
-        初始化聊天文件信息。
-
-        Args:
-            file_manager: 关联的 FileManager 实例。
-            file_name: 文件名。
-            sender_name: 发送人昵称。
-            source_name: 来源（群名或个人昵称）。
-            source_type: 来源类型，"contact"(私聊) 或 "room"(群聊)。
-            file_date: 日期文本。
-            file_status: 状态文本（空字符串表示已下载）。
-            file_size: 文件大小文本。
-            raw_text: 原始 Name 属性文本。
-            _cell: UI 控件引用（内部使用）。
-        """
-        self.file_manager = file_manager
-        self.file_name = file_name
-        self.sender_name = sender_name
-        self.source_name = source_name
-        self.source_type = source_type
-        self.file_date = file_date
-        self.file_status = file_status
-        self.file_size = file_size
-        self.raw_text = raw_text
-        self._cell = _cell
-
-    def __str__(self):
-        status = self.file_status if self.file_status else "已下载"
-        type_label = "联系人" if self.source_type == "contact" else "群聊"
-        return (f"[{self.file_date}] [{type_label}] {self.file_name} | "
-                f"发送人: {self.sender_name} | 来源: {self.source_name} | "
-                f"大小: {self.file_size} | 状态: {status}")
-
-    def _ensure_ready(self) -> None:
-        """确保 file_manager 和 _cell 可用，且文件管理器窗口已打开"""
-        if not self.file_manager:
-            raise RuntimeError("ChatFile 未关联 FileManager 实例")
-        if not self._cell:
-            raise RuntimeError("ChatFile 未关联 UI 控件（_cell 为空）")
-        if not self.file_manager.exists:
-            raise RuntimeError("聊天文件窗口未打开")
-
-    def _right_click_and_find_menu(self) -> auto.Control:
-        """右键点击文件项并返回弹出的菜单控件"""
-        self.file_manager.activate()
-        input_wx.click(self._cell, button="right")
-        menu = self.file_manager._find_context_menu_by_point()
-        if not menu:
-            raise WxControlNotFoundError("未找到右键菜单")
-        return menu
-
-    def _click_menu_item(self, menu, item_name: str) -> auto.Control:
-        """在菜单中查找并点击指定名称的菜单项"""
-        target = None
-        for child in menu.GetChildren():
-            if child.Name == item_name:
-                target = child
-                break
-        if not target:
-            raise WxControlNotFoundError(f"未找到'{item_name}'菜单项")
-        input_wx.click(target)
-        return target
-
-    def _context_action(self, menu_name: str) -> None:
-        """
-        通用右键菜单操作：确保就绪 → 右键点击 → 点击指定菜单项。
-
-        Args:
-            menu_name: 菜单项名称
-        """
-        self._ensure_ready()
-        menu = self._right_click_and_find_menu()
-        self._click_menu_item(menu, menu_name)
-
-    def _handle_save_dialog(self, file_path: str) -> bool:
-        """处理 Windows 文件保存对话框：填入路径并保存"""
-        save_dialog = self.file_manager._win.WindowControl(ClassName="#32770", searchDepth=3)
-        if not save_dialog.Exists(maxSearchSeconds=5):
-            raise WxControlNotFoundError("未找到 Windows 文件保存对话框")
-
-        file_name_edit = save_dialog.EditControl(AutomationId="1001", searchDepth=10)
-        if not file_name_edit.Exists(maxSearchSeconds=3):
-            raise WxControlNotFoundError("未找到文件名输入框")
-
-        input_wx.paste_or_type(file_name_edit, file_path)
-
-        # 如果目标文件已存在，先删除（避免覆盖确认弹窗）
-        if os.path.exists(file_path):
-            os.remove(file_path)
-
-        input_wx.send_keys(None, "{Alt}s")
-        if not save_dialog.Exists(maxSearchSeconds=2):
-            return True
-        else:
-            input_wx.send_keys(None, "{Esc}")
-            return False
-
-    @PIM.guard
-    def save_as(self, file_path: str) -> bool:
-        """
-        将文件另存为到指定路径。
-
-        流程:
-        1. 右键点击文件项 → 弹出微信右键菜单
-        2. 点击"另存为..."菜单项 → 弹出 Windows 文件保存对话框
-        3. 设置保存路径 → 按 Alt+S 保存
-
-        Args:
-            file_path: 完整的保存路径（含文件名），如 "C:\\download\\test.xlsx"
-
-        Returns:
-            True 保存成功，False 保存失败
-        """
-        dir_path = os.path.dirname(file_path)
-        if dir_path:
-            os.makedirs(dir_path, exist_ok=True)
-
-        self._context_action("另存为...")
-        return self._handle_save_dialog(file_path)
-
-    @PIM.guard
-    def download_to(self, file_path: str) -> bool:
-        """
-        将文件下载到指定路径。
-
-        流程:
-        1. 右键点击文件项 → 弹出微信右键菜单
-        2. 点击"下载到..."菜单项 → 弹出 Windows 文件保存对话框
-        3. 设置保存路径 → 按 Alt+S 保存
-
-        Args:
-            file_path: 完整的保存路径（含文件名），如 "C:\\download\\test.xlsx"
-
-        Returns:
-            True 下载成功，False 下载失败
-        """
-        dir_path = os.path.dirname(file_path)
-        if dir_path:
-            os.makedirs(dir_path, exist_ok=True)
-
-        self._context_action("下载到...")
-        return self._handle_save_dialog(file_path)
-
-    @PIM.guard
-    def download(self) -> bool:
-        """
-        下载文件（下载到微信默认路径）。
-
-        流程:
-        1. 获取当前文件控件的 RuntimeId 作为唯一标识
-        2. 右键点击文件项 → 弹出微信右键菜单
-        3. 点击"下载"菜单项 → 开始下载
-
-        Returns:
-            True 下载成功（状态变为已下载），False 下载超时
-        """
-        self._context_action(i_("下载"))
-
-    @PIM.guard
-    def delete(self) -> bool:
-        """
-        删除此文件。
-
-        流程:
-        1. 右键点击文件项 → 弹出微信右键菜单
-        2. 点击"删除"菜单项 → 弹出确认对话框
-        3. 点击"删除"确认按钮完成删除
-
-        Returns:
-            True 删除成功，False 删除失败
-        """
-        self._context_action(i_("删除"))
-
-        # 点击确认弹窗中的"删除"按钮
-        delete_btn = self.file_manager._win.ButtonControl(
-            ClassName="mmui::XOutlineButton", Name=i_("删除"),
-        )
-        if delete_btn.Exists(maxSearchSeconds=2):
-            input_wx.click(delete_btn)
-            return True
-        return False
-
-    @PIM.guard
-    def copy(self) -> str:
-        """
-        复制此文件到剪贴板并返回复制的文件路径。
-
-        右键点击文件项，在菜单中点击"复制"，
-        然后从剪贴板读取复制的内容。
-
-        Returns:
-            复制到剪贴板的文本内容（通常为文件路径或文件名）
-        """
-        self._context_action(i_("复制"))
-        return get_clipboard_file()
-
-    @PIM.guard
-    def collect(self) -> None:
-        """
-        收藏此文件。
-
-        右键点击文件项，在菜单中点击"收藏"。
-        """
-        self._context_action(i_("收藏"))
-
-    @PIM.guard
-    def switch_to_message(self) -> None:
-        """
-        定位到聊天位置。
-
-        右键点击文件项，在菜单中点击"定位到聊天位置"，
-        微信会跳转到该文件消息所在的聊天会话并滚动到对应位置。
-        """
-        self._context_action("定位到聊天位置")
-
-
-class FileManager(WeixinWindow):
-    """
-    微信"聊天文件"管理器窗口操作类。
-
-    通过微信主窗口的"更多 → 聊天文件"打开独立的 mmui::FileManagerWindow 窗口，
-    支持按文件类型筛选、获取文件列表、另存为等操作。
-
-    关键控件:
-    - 文件列表项: mmui::FileListCell
-    - 文件类型筛选: mmui::XTableCell (ListItemControl)
-    - 右键菜单: mmui::XMenu（浮动于桌面层级）
-    """
-
-    FILE_LIST_CELL_CLASS = "mmui::FileListCell"
-    FILE_TYPE_FILTER_CLASS = "mmui::XTableCell"
-    CONTEXT_MENU_WIN_CLASS = "mmui::XMenu"
-    # 确认对话框的类名（微信 v4 使用 mmui::XDialog，浮动于桌面层级）
-    CONFIRM_DIALOG_WIN_CLASS = "mmui::XDialog"
-
-    def __init__(self, wx: "Weixin"):
-        """
-        初始化聊天文件管理器。
-
-        Args:
-            wx: Weixin 实例。
-        """
-        self.wx = wx
-        self._win = auto.WindowControl(
-            Name=i_("聊天文件"),
-            ProcessId=self.wx.pid,
-            searchDepth=1,
-        )
-
-    @PIM.guard
-    def open(self, filter_type: Optional[str] = None) -> bool:
-        """
-        打开聊天文件管理器窗口。
-
-        Args:
-            filter_type: 文件类型筛选，可选值:
-                - "全部"、"文档"、"表格"、"图片"、"视频"等
-                - "": 不筛选（默认）
-        """
-        if not self.exists:
-            self.wx.navigator.switch_to(i_("更多"))
-            chat_file_btn = self.wx._win.ButtonControl(
-                Name=i_("聊天文件"), searchDepth=10
-            )
-            if not chat_file_btn.Exists(maxSearchSeconds=3):
-                raise WxControlNotFoundError("未找到'聊天文件'按钮")
-
-            input_wx.click(chat_file_btn)
-
-            if not self.exists:
-                raise RuntimeError("聊天文件窗口未能打开")
-        self.activate()
-
-        if filter_type:
-            self._click_filter(filter_type)
-
-        return True
-
-    def _click_filter(self, filter_name: str) -> bool:
-        """
-        点击聊天文件窗口中的文件类型筛选按钮。
-
-        已知的筛选选项: "全部"、"文档"、"表格"、"图片"、"视频"等。
-        """
-        if not self.exists:
-            raise RuntimeError("聊天文件窗口未打开")
-        self.activate()
-        filter_btn = self._win.ListItemControl(
-            Name=filter_name,
-            ClassName=self.FILE_TYPE_FILTER_CLASS,
-            searchDepth=10,
-        )
-        if not filter_btn.Exists(maxSearchSeconds=3):
-            raise WxControlNotFoundError(f"未找到'{filter_name}'筛选按钮")
-
-        input_wx.click(filter_btn)
-        return True
-
-    def _find_context_menu_by_point(self) -> Optional[auto.Control]:
-        """
-        通过 ControlFromPoint 定位右键菜单。
-
-        右键点击后鼠标指针停在菜单左上角，直接用当前鼠标坐标命中菜单，
-        然后沿 GetParentControl() 向上查找 mmui::XMenu 容器。
-        """
-        for _ in range(10):
-            x, y = auto.GetCursorPos()
-            ctrl = auto.ControlFromPoint(x, y)
-            if ctrl:
-                current = ctrl
-                for _ in range(10):
-                    if current.ClassName == self.CONTEXT_MENU_WIN_CLASS:
-                        return current
-                    parent = current.GetParentControl()
-                    if not parent:
-                        break
-                    current = parent
-            time.sleep(0.3)
-        return None
-
-    def _find_confirm_dialog(self, max_attempts: int = 10) -> Optional[auto.Control]:
-        """
-        通过 ControlFromPoint 定位确认对话框。
-
-        微信 v4 的确认对话框（mmui::XDialog）与右键菜单类似，
-        浮动于桌面层级，不是文件管理器窗口的子控件。
-        点击菜单项后鼠标指针停留在弹窗区域，
-        用当前鼠标坐标命中弹窗，然后沿父级向上查找。
-        """
-        for _ in range(max_attempts):
-            x, y = auto.GetCursorPos()
-            ctrl = auto.ControlFromPoint(x, y)
-            if ctrl:
-                current = ctrl
-                for _ in range(10):
-                    if current.ClassName == self.CONFIRM_DIALOG_WIN_CLASS:
-                        return current
-                    parent = current.GetParentControl()
-                    if not parent:
-                        break
-                    current = parent
-            time.sleep(0.3)
-        return None
-
-    @PIM.guard
-    def save_file_as(self, chat_file: "ChatFile", file_path: str) -> bool:
-        """
-        对文件执行"另存为"操作。
-
-        Args:
-            chat_file: ChatFile 实例
-            file_path: 完整的保存路径（含文件名），如 "C:\\download\\test.xlsx"
-        """
-        return chat_file.save_as(file_path)
-
-    @PIM.guard
-    def download_to(self, chat_file: "ChatFile", file_path: str) -> bool:
-        """
-        对文件执行"下载到"操作。
-
-        Args:
-            chat_file: ChatFile 实例
-            file_path: 完整的保存路径（含文件名），如 "C:\\download\\test.xlsx"
-        """
-        return chat_file.download_to(file_path)
-
-    @PIM.guard
-    def delete_file(self, chat_file: "ChatFile") -> bool:
-        """
-        删除文件。
-
-        Args:
-            chat_file: ChatFile 实例
-
-        Returns:
-            True 删除成功，False 删除失败
-        """
-        return chat_file.delete()
-
-    @PIM.guard
-    def download_file(self, chat_file: "ChatFile", timeout: int = 60) -> bool:
-        """
-        下载文件。
-
-        Args:
-            chat_file: ChatFile 实例
-            timeout:   等待下载完成的超时时间（秒），默认 60 秒
-
-        Returns:
-            True 下载成功（状态变为已下载），False 下载超时
-        """
-        return chat_file.download(timeout)
-
-    def parse_file_cell_text(self, cell_text: str) -> Optional[ChatFile]:
-        """
-        解析 mmui::FileListCell 的 Name 属性文本，提取文件信息。
-
-        文本格式: "文件名 发送人 | 来源 日期 状态 大小"
-        """
-        if not cell_text:
-            return None
-
-        separator = " | "
-        sep_idx = cell_text.rfind(separator)
-        if sep_idx <= 0:
-            return None
-
-        left_part = cell_text[:sep_idx].strip()
-        right_part = cell_text[sep_idx + len(separator):].strip()
-
-        # 解析右侧: 来源 日期 [状态] 大小
-        size_pattern = r'[\d.]+[BKMGT]'
-        right_tokens = right_part.split()
-
-        if len(right_tokens) < 2:
-            return None
-
-        file_size = right_tokens[-1] if re.match(size_pattern, right_tokens[-1]) else ""
-
-        # 日期格式:
-        #   - 今天: 只显示时间 "10:53"
-        #   - 昨天: "昨天"
-        #   - 本周: "星期X"
-        #   - 更早: "YYYY年M月D日"
-        date_str = ""
-        date_idx = -1
-        time_pattern = r'^\d{1,2}:\d{2}$'
-        for i, token in enumerate(right_tokens):
-            if re.match(time_pattern, token):
-                date_str = i_("今天")
-                date_idx = i
-                break
-            if token in (i_("今天"), i_("昨天")) or "星期" in token:
-                date_str = token
-                date_idx = i
-                break
-            if "年" in token and "月" in token:
-                date_str = token
-                date_idx = i
-                break
-
-        source_name = " ".join(right_tokens[:date_idx]) if date_idx > 0 else ""
-
-        if file_size and date_idx >= 0:
-            status_tokens = right_tokens[date_idx + 1:-1]
-            file_status = " ".join(status_tokens)
-        else:
-            file_status = ""
-
-        # 处理 source_name 以 " 未下载" 结尾的情况：
-        # 微信文件列表中未下载的文件，"未下载"会紧跟在来源名称后面，
-        # 被错误地解析为 source_name 的一部分。
-        # 例如: "泡泡马特发货群 未下载 18:20 ..." 中 source_name 会被解析为
-        # "泡泡马特发货群 未下载"，需要将 "未下载" 拆分到 file_status 中。
-        not_downloaded = i_("未下载")
-        if source_name.endswith(f" {not_downloaded}"):
-            source_name = source_name[:-len(f" {not_downloaded}")]
-            file_status = not_downloaded
-
-        left_tokens = left_part.rsplit(" ", 1)
-        if len(left_tokens) == 2:
-            file_name = left_tokens[0].strip()
-            sender_name = left_tokens[1].strip()
-        else:
-            file_name = left_part
-            sender_name = ""
-
-        source_type = "contact" if sender_name and sender_name == source_name else "room"
-
-        return ChatFile(
-            self,
-            file_name=file_name,
-            sender_name=sender_name,
-            source_name=source_name,
-            source_type=source_type,
-            file_date=date_str,
-            file_status=file_status,
-            file_size=file_size,
-            raw_text=cell_text,
-        )
-
-    def _find_all_file_cells(self, parent) -> list:
-        """递归查找所有 mmui::FileListCell 控件"""
-        results = []
-        try:
-            children = parent.GetChildren()
-            for child in children:
-                if child.ClassName == self.FILE_LIST_CELL_CLASS:
-                    results.append(child)
-                else:
-                    results.extend(self._find_all_file_cells(child))
-        except Exception:
-            pass
-        return results
-
-    def get_all_files(self) -> list[ChatFile]:
-        """获取聊天文件窗口中所有可见的文件列表"""
-        if not self.exists:
-            raise RuntimeError("聊天文件窗口未打开")
-        self.activate()
-
-        files = []
-        for cell in self._find_all_file_cells(self._win):
-            chat_file = self.parse_file_cell_text(cell.Name)
-            if chat_file:
-                chat_file._cell = cell
-                files.append(chat_file)
-        return files
-
-    def get_today_files(self) -> list[ChatFile]:
-        """获取今天的文件列表"""
-        all_files = self.get_all_files()
-        today_str = i_("今天")
-        today_date = date.today()
-        today_formatted = f"{today_date.year}年{today_date.month}月{today_date.day}日"
-        return [f for f in all_files
-                if f.file_date == today_str or f.file_date == today_formatted]
-
-    def __str__(self) -> str:
-        if self._win.Exists(0, 0):
-            return "FileManager(open)"
-        return "FileManager(closed)"
 
 
 class Chat:
@@ -8216,7 +6306,7 @@ class Chat:
     EMOJI_CUSTOM_GRID_CLASS = "mmui::EmoticonGridView"
     EMOJI_CUSTOM_ITEM_CLASS = "mmui::FavEmoticonItemView"
 
-    def __init__(self, wx: "Weixin"):
+    def __init__(self, wx: Weixin):
         """
         初始化聊天区域。
 
@@ -8356,7 +6446,7 @@ class Chat:
         input_wx.click(btn)
         return True
 
-    def _resolve_quote(self, quote: "Message | int | None") -> None:
+    def _resolve_quote(self, quote: Optional[Union[Message, int]]) -> None:
         """
         解析 quote 参数并执行引用操作。
 
@@ -8384,7 +6474,7 @@ class Chat:
         raise TypeError(f"quote 参数类型错误: {type(quote)}, 支持 Message | int | None")
 
     def _find_last_self_message_ctrl(
-        self, class_names: set[str],
+        self, class_names: Set[str],
     ) -> Optional[auto.Control]:
         """
         从消息列表中倒序查找最后一条自己发的、且 ClassName 匹配的消息控件。
@@ -8399,7 +6489,7 @@ class Chat:
         hwnd = self._win.NativeWindowHandle or 0
 
         # 收集所有消息控件
-        candidates: list[auto.Control] = []
+        candidates: List[auto.Control] = []
         for ctrl, _ in auto.WalkControl(lc):
             if ctrl.ControlType != auto.ControlType.ListItemControl:
                 continue
@@ -8459,7 +6549,7 @@ class Chat:
         hwnd = self._win.NativeWindowHandle or 0
 
         # 收集所有消息控件
-        candidates: list[auto.Control] = []
+        candidates: List[auto.Control] = []
         for ctrl, _ in auto.WalkControl(lc):
             if ctrl.ControlType != auto.ControlType.ListItemControl:
                 continue
@@ -8600,7 +6690,7 @@ class Chat:
 
         hwnd = self._win.NativeWindowHandle or 0
 
-        candidates: list[auto.Control] = []
+        candidates: List[auto.Control] = []
         for ctrl, _ in auto.WalkControl(lc):
             if ctrl.ControlType != auto.ControlType.ListItemControl:
                 continue
@@ -8690,7 +6780,7 @@ class Chat:
         hwnd = self._win.NativeWindowHandle or 0
 
         target_classes = {"mmui::ChatImageItemView", "mmui::ChatBubbleReferItemView"}
-        candidates: list[auto.Control] = []
+        candidates: List[auto.Control] = []
         for ctrl, _ in auto.WalkControl(lc):
             if ctrl.ControlType != auto.ControlType.ListItemControl:
                 continue
@@ -8760,7 +6850,7 @@ class Chat:
 
         hwnd = self._win.NativeWindowHandle or 0
 
-        candidates: list[auto.Control] = []
+        candidates: List[auto.Control] = []
         for ctrl, _ in auto.WalkControl(lc):
             if ctrl.ControlType != auto.ControlType.ListItemControl:
                 continue
@@ -8831,7 +6921,7 @@ class Chat:
         hwnd = self._win.NativeWindowHandle or 0
 
         target_classes = {"mmui::ChatVideoItemView", "mmui::ChatBubbleReferItemView"}
-        candidates: list[auto.Control] = []
+        candidates: List[auto.Control] = []
         for ctrl, _ in auto.WalkControl(lc):
             if ctrl.ControlType != auto.ControlType.ListItemControl:
                 continue
@@ -8901,7 +6991,7 @@ class Chat:
         return len(text) if text else 0
 
     @PIM.guard
-    def send_text(self, content: str, quote: "Message | int | None" = None, timeout: float = 0) -> MessageStatus:
+    def send_text(self, content: str, quote: Optional[Union[Message, int]] = None, timeout: float = 0) -> MessageStatus:
         """
         在当前会话中发送文本，返回发送状态。
 
@@ -8939,7 +7029,7 @@ class Chat:
         return self.check_text_message_status(content, timeout=timeout)
 
     @PIM.guard
-    def send_file(self, file_path: "str | list[str]", quote: "Message | int | None" = None, timeout: float = 0) -> MessageStatus:
+    def send_file(self, file_path: Union[str, List[str]], quote: Optional[Union[Message, int]] = None, timeout: float = 0) -> MessageStatus:
         """
         在当前会话中发送文件，返回最后一个文件的发送状态。
 
@@ -8955,7 +7045,7 @@ class Chat:
         return self._send_media(file_path, "文件", self.check_file_message_status, timeout)
 
     @PIM.guard
-    def send_image(self, file_path: "str | list[str]", quote: "Message | int | None" = None, timeout: float = 0) -> MessageStatus:
+    def send_image(self, file_path: Union[str, List[str]], quote: Optional[Union[Message, int]] = None, timeout: float = 0) -> MessageStatus:
         """
         在当前会话中发送图片，返回最后一张图片的发送状态。
 
@@ -8971,7 +7061,7 @@ class Chat:
         return self._send_media(file_path, "图片", self.check_image_message_status, timeout)
 
     @PIM.guard
-    def send_video(self, file_path: "str | list[str]", quote: "Message | int | None" = None, timeout: float = 0) -> MessageStatus:
+    def send_video(self, file_path: Union[str, List[str]], quote: Optional[Union[Message, int]] = None, timeout: float = 0) -> MessageStatus:
         """
         在当前会话中发送视频，返回最后一个视频的发送状态。
 
@@ -8986,7 +7076,7 @@ class Chat:
         self._resolve_quote(quote)
         return self._send_media(file_path, "视频", self.check_video_message_status, timeout)
 
-    def _send_media(self, file_path: "str | list[str]", label: str,
+    def _send_media(self, file_path: Union[str, List[str]], label: str,
                     check_status: callable, timeout: float = 0) -> MessageStatus:
         """
         发送文件/图片/视频的通用实现。
@@ -9010,8 +7100,8 @@ class Chat:
             raise ValueError(f"{label}路径不能为空")
 
         # 预处理：下载网络 URL 到临时文件，并转为绝对路径
-        local_paths: list[str] = []
-        tmp_files: list[str] = []
+        local_paths: List[str] = []
+        tmp_files: List[str] = []
         for p in paths:
             if is_url(p):
                 tmp = download_to_temp(p)
@@ -9184,7 +7274,7 @@ class Chat:
         time.sleep(0.5)
 
     @PIM.guard
-    def send_at(self, content: str, at_members: list[str], quote: "Message | int | None" = None, timeout: float = 0) -> MessageStatus:
+    def send_at(self, content: str, at_members: List[str], quote: Optional[Union[Message, int]] = None, timeout: float = 0) -> MessageStatus:
         """
         在当前群聊会话中 @指定成员并发送消息，返回发送状态。
 
@@ -9339,7 +7429,7 @@ class Chat:
 
         raise WxControlNotFoundError("未找到收藏面板搜索框")
 
-    def _find_collection_item(self, detail_list, keyword) -> Optional[auto.ListItemControl]:
+    def _find_collection_item(self, detail_list: auto.ListControl, keyword: str) -> Optional[auto.ListItemControl]:
         """
         在收藏详情列表中查找第一个有效的搜索结果项。
 
@@ -9365,7 +7455,7 @@ class Chat:
         return None
 
     @PIM.guard
-    def send_collection(self, keyword: str, quote: "Message | int | None" = None, timeout: float = 0) -> MessageStatus:
+    def send_collection(self, keyword: str, quote: Optional[Union[Message, int]] = None, timeout: float = 0) -> MessageStatus:
         """
         在当前会话中发送收藏内容。
 
@@ -9470,7 +7560,7 @@ class Chat:
     #     Name 格式: "{关键词}表情，来自{来源}"，支持 InvokePattern 直接点击发送。
 
     @PIM.guard
-    def send_emotion(self, keyword: str = None, index: int = 1, quote: "Message | int | None" = None, timeout: float = 0) -> MessageStatus:
+    def send_emotion(self, keyword: str = None, index: int = 1, quote: Optional[Union[Message, int]] = None, timeout: float = 0) -> MessageStatus:
         """
         在当前会话中发送表情。
 
@@ -9700,7 +7790,7 @@ class Chat:
 
         input_wx.click(emotion_items[index - 1])
 
-    def _collect_emotion_items(self, control, result: list) -> None:
+    def _collect_emotion_items(self, control: auto.Control, result: list) -> None:
         """递归收集 ListItemControl 表情项。"""
         if control.ControlType == auto.ControlType.ListItemControl:
             name = control.Name or ""
@@ -9992,7 +8082,7 @@ class Chat:
             pass
 
     @staticmethod
-    def _get_selected_mention_item(menu) -> "auto.ListItemControl | None":
+    def _get_selected_mention_item(menu: auto.ListControl) -> Optional[auto.ListItemControl]:
         """
         获取 @候选菜单中当前被选中（高亮/激活）的 ListItem。
 
@@ -10007,7 +8097,7 @@ class Chat:
         return None
 
     def _add_at_members(self, chat_input: auto.EditControl,
-                        at_members: list[str]) -> None:
+                        at_members: List[str]) -> None:
         """
         在输入框中 @指定群成员。
 
@@ -10152,19 +8242,19 @@ class Chat:
         time.sleep(0.3)
 
     @PIM.guard
-    def voice_call(self) -> "VoipCall":
+    def voice_call(self) -> VoipCall:
         self._activate_window()
         self._click_voip_menu("语音通话")
         return VoipCall(self)
 
     @PIM.guard
-    def video_call(self) -> "VoipCall":
+    def video_call(self) -> VoipCall:
         self._activate_window()
         self._click_voip_menu("视频通话")
         return VoipCall(self)
 
     @PIM.guard
-    def separate(self) -> "SeparateChat":
+    def separate(self) -> SeparateChat:
         """
         将当前聊天会话打开为独立窗口，返回 SeparateChat 实例。
 
@@ -10203,7 +8293,7 @@ class Chat:
         )
 
     @property
-    def message_view_rect(self) -> tuple[int, int, int, int]:
+    def message_view_rect(self) -> Tuple[int, int, int, int]:
         """
         获取聊天消息可见区域的坐标 (left, top, right, bottom)。
 
@@ -10235,7 +8325,7 @@ class Chat:
         input_wx.send_keys(lc, "{End}")
         time.sleep(0.3)
 
-    def get_visible_messages(self, sender_cache: dict[int, tuple] = None) -> list[Message]:
+    def get_visible_messages(self, sender_cache: Dict[int, tuple] = None) -> List[Message]:
         """
         获取当前可见的消息列表，返回具体消息子类实例。
 
@@ -10260,7 +8350,7 @@ class Chat:
         hwnd = self._win.NativeWindowHandle or 0
 
         # ClassName -> 消息子类映射
-        cls_map: dict[str, type[Message]] = {
+        cls_map: Dict[str, type] = {
             "mmui::ChatTextItemView": TextMessage,
             "mmui::ChatImageItemView": ImageMessage,
             "mmui::ChatFileItemView": FileMessage,
@@ -10277,7 +8367,7 @@ class Chat:
         chat_name = self.chat_name or "对方"
         is_room = self.chat_type == "群聊"
 
-        messages: list[Message] = []
+        messages: List[Message] = []
         for ctrl, _ in auto.WalkControl(lc):
             if ctrl.ControlType != auto.ControlType.ListItemControl:
                 continue
@@ -10428,9 +8518,9 @@ class Chat:
         return QuoteMessage
 
     # 图片 hash → OCR 识别结果缓存（避免重复 OCR 相同头像/昵称区域）
-    _ocr_sender_cache: dict[str, str] = {}
+    _ocr_sender_cache: Dict[str, str] = {}
 
-    def _ocr_sender_name(self, hwnd: int, ctrl) -> str:
+    def _ocr_sender_name(self, hwnd: int, ctrl: auto.Control) -> str:
         """
         通过 OCR 识别消息控件顶部 0-38px 区域，提取群聊中的发送者昵称。
 
@@ -10493,8 +8583,8 @@ class Chat:
 
     @staticmethod
     def _detect_sender(
-        hwnd: int, ctrl, chat_name: str,
-    ) -> tuple[str, Source, tuple, tuple, tuple, tuple]:
+        hwnd: int, ctrl: auto.Control, chat_name: str,
+    ) -> Tuple[str, Source, tuple, tuple, tuple, tuple]:
         """
         判断消息发送者、来源类型，并检测气泡区域坐标和轮廓区域。
 
@@ -10513,8 +8603,8 @@ class Chat:
 
     @staticmethod
     def _detect_sender_by_pixel(
-        ctrl, chat_name: str, hwnd: int = 0,
-    ) -> tuple[str, Source, tuple, tuple, tuple, tuple]:
+        ctrl: auto.Control, chat_name: str, hwnd: int = 0,
+    ) -> Tuple[str, Source, tuple, tuple, tuple, tuple]:
         """
         通过截图轮廓检测判断消息发送者。
 
@@ -10628,9 +8718,9 @@ class Chat:
 
     @staticmethod
     def _detect_bubble_rect(
-        img: "Image.Image", w: int, h: int,
-        source: "Source",
-    ) -> tuple[int, int]:
+        img: Image.Image, w: int, h: int,
+        source: Source,
+    ) -> Tuple[int, int]:
         """
         检测气泡的左边缘和右边缘 x 坐标（相对于控件截图）。
 
@@ -10709,8 +8799,8 @@ class Chat:
 
     @staticmethod
     def _detect_sender_by_edge_scan(
-        img: "Image.Image", w: int, h: int, chat_name: str,
-    ) -> tuple[str, Source, int, int, int] | None:
+        img: Image.Image, w: int, h: int, chat_name: str,
+    ) -> Optional[Tuple[str, Source, int, int, int]]:
         """
         从左右两侧同时向中间扫描，先找到非白色像素的一侧即为头像侧。
 
@@ -10766,7 +8856,7 @@ class Chat:
         msg_cls: type[Message],
         raw_name: str,
         source: Source,
-    ) -> tuple[MessageStatus, str]:
+    ) -> Tuple[MessageStatus, str]:
         """
         检测消息发送状态，返回 (状态, 去掉前缀后的实际内容)。
 
@@ -11098,7 +9188,7 @@ class Chat:
             self._close_chat_info_panel()
 
     @PIM.guard
-    def add_room_members(self, members: list[str]) -> None:
+    def add_room_members(self, members: List[str]) -> None:
         """
         添加群成员。
 
@@ -11257,7 +9347,7 @@ class Chat:
             self._close_chat_info_panel()
 
     @PIM.guard
-    def remove_room_members(self, members: list[str]) -> None:
+    def remove_room_members(self, members: List[str]) -> None:
         """
         移除群成员。
 
@@ -11716,7 +9806,7 @@ class Chat:
         # 回退：图片右边界 - 40px（开关通常在最右侧）
         return img.width - 40
 
-    def _toggle_ocr_switch(self, img, ocr_data, hwnd,
+    def _toggle_ocr_switch(self, img: Image.Image, ocr_data: Dict[str, dict], hwnd: int,
                            switch_name: str, enable: bool) -> None:
         """
         根据已有的 OCR 数据和截图，切换指定开关。
@@ -11797,7 +9887,7 @@ class Chat:
             if not hwnd:
                 raise RuntimeError("无法获取微信窗口句柄")
 
-            def _fresh_ocr() -> tuple[bytes, dict, int, int]:
+            def _fresh_ocr() -> Tuple[bytes, dict, int, int]:
                 """每次操作前重新截图 + OCR，确保坐标准确"""
                 _png = capture_window(hwnd, mode="print_window")
                 _ocr = self._get_image_text(_png)
@@ -12584,7 +10674,7 @@ class Chat:
                 "account": str,
                 "region": str,
                 "remark": str,
-                "tags": list[str],
+                "tags": List[str],
                 "description": str,
                 "permission": str,
                 "common_groups": str,
@@ -13384,7 +11474,7 @@ class Chat:
             self._close_chat_info_panel()
 
     @PIM.guard
-    def remove_contact_phone(self, phones: list[str]) -> None:
+    def remove_contact_phone(self, phones: List[str]) -> None:
         """
         移除当前私聊联系人的电话号码。
 
@@ -13470,7 +11560,7 @@ class Chat:
             self._close_chat_info_panel()
 
     @PIM.guard
-    def remove_contact_image(self, indexes: list[int]) -> None:
+    def remove_contact_image(self, indexes: List[int]) -> None:
         """
         删除当前私聊联系人的备注图片（按序号）。
 
@@ -13819,7 +11909,7 @@ class Chat:
             self._close_chat_info_panel()
 
     @PIM.guard
-    def set_friend_permission(self, permission: str = "all",
+    def set_friend_permission(self, permission: Literal["all", "chatonly"] = "all",
                               hide_my_posts: bool = False,
                               hide_their_posts: bool = False) -> None:
         """
@@ -13921,7 +12011,7 @@ class Chat:
             self._close_chat_info_panel()
 
     @PIM.guard
-    def collect_contact_image(self, indexes: list[int]) -> int:
+    def collect_contact_image(self, indexes: List[int]) -> int:
         """
         收藏当前私聊联系人的指定备注图片。
 
@@ -14028,7 +12118,7 @@ class Chat:
             self._close_chat_info_panel()
 
     @PIM.guard
-    def save_contact_image(self, indexes: list[int], save_path: str) -> int:
+    def save_contact_image(self, indexes: List[int], save_path: str) -> int:
         """
         保存当前私聊联系人的指定备注图片到指定目录。
 
@@ -14189,7 +12279,7 @@ class SeparateChat(Chat, WeixinWindow):
 
     WINDOW_CLASS = "mmui::ChatSingleWindow"
 
-    def __init__(self, wx: "Weixin | None", contact_name: str):
+    def __init__(self, wx: Optional[Weixin], contact_name: str):
         """
         初始化独立聊天窗口。
 
@@ -14255,6 +12345,1918 @@ class SeparateChat(Chat, WeixinWindow):
         return self.__str__()
 
 
+class MomentItem:
+    """朋友圈动态条目"""
+
+    def __init__(self, moment: Moment, runtime_id: tuple, *,
+                 type: str = "", sender: str = "", content: str = "",
+                 raw_text: str = "", timestamp: str = "", image_count: int = 0,
+                 cell_type: str = "", scroll_offset: int = 0):
+        """
+        初始化朋友圈动态条目。
+
+        Args:
+            moment: 关联的 Moment 实例。
+            runtime_id: UI Automation RuntimeId。
+            type: 动态类型（如 "文本"、"图片"、"视频"、"分享"）。
+            sender: 发送者昵称。
+            content: 正文内容。
+            raw_text: 原始 Name 属性文本。
+            timestamp: 时间戳文本。
+            image_count: 图片数量。
+            cell_type: 控件 ClassName。
+            scroll_offset: 该动态在列表中的累计滚动偏移（像素）。
+        """
+        self.moment = moment
+        self.runtime_id = runtime_id
+        self.type = type
+        self.sender = sender
+        self.content = content
+        self.raw_text = raw_text
+        self.timestamp = timestamp
+        self.image_count = image_count
+        self.cell_type = cell_type
+        self.scroll_offset = scroll_offset
+
+    def like(self) -> bool:
+        """
+        点赞此条动态。
+
+        如果已点赞则不重复操作，返回 True。
+        """
+        self.moment._ensure_ready()
+        ctrl = self._find_cell()
+        if not ctrl:
+            raise WxControlNotFoundError(f"未找到朋友圈动态: {self.sender}")
+        self._scroll_into_view(ctrl)
+
+        win = self.moment._win
+        if not self._open_action_bar(ctrl):
+            return False
+
+        # 已点赞时显示"取消"，未点赞时显示"赞"
+        # 先检查是否已点赞（"取消"按钮），避免重复点赞
+        for cls in ("mmui::XTextView", "mmui::XButton"):
+            cancel_btn = win.Control(Name=i_("取消"), ClassName=cls)
+            if cancel_btn.Exists(0, 0):
+                # 已点赞，关闭操作栏
+                input_wx.send_keys(None, "{Esc}")
+                time.sleep(0.2)
+                return True
+
+        # 未点赞，点击"赞"
+        btn = win.TextControl(Name=i_("赞"), ClassName="mmui::XTextView")
+        if btn.Exists(0, 0):
+            input_wx.click(btn)
+            time.sleep(0.3)
+            return True
+
+        return False
+
+    def unlike(self) -> bool:
+        """
+        取消点赞此条动态。
+
+        如果未点赞则不操作，返回 True。
+        """
+        self.moment._ensure_ready()
+        ctrl = self._find_cell()
+        if not ctrl:
+            raise WxControlNotFoundError(f"未找到朋友圈动态: {self.sender}")
+        self._scroll_into_view(ctrl)
+
+        win = self.moment._win
+        if not self._open_action_bar(ctrl):
+            return False
+
+        # 检查是否已点赞（"取消"按钮）
+        for cls in ("mmui::XTextView", "mmui::XButton"):
+            cancel_btn = win.Control(Name=i_("取消"), ClassName=cls)
+            if cancel_btn.Exists(0, 0):
+                input_wx.click(cancel_btn)
+                time.sleep(0.3)
+                return True
+
+        # 未点赞，关闭操作栏
+        input_wx.send_keys(None, "{Esc}")
+        time.sleep(0.2)
+        return True
+
+    def comment(self, content: str) -> bool:
+        """
+        评论此条动态。
+
+        Args:
+            content: 评论内容
+        """
+        if not content or not content.strip():
+            raise ValueError("评论内容不能为空")
+
+        self.moment._ensure_ready()
+        ctrl = self._find_cell()
+        if not ctrl:
+            raise WxControlNotFoundError(f"未找到朋友圈动态: {self.sender}")
+        self._scroll_into_view(ctrl)
+
+        if not self._click_action_button(ctrl, "评论"):
+            raise RuntimeError("未能打开评论输入框")
+
+        input_wx.paste(content)
+        time.sleep(0.5)
+
+        # 当前动态的下一个兄弟控件就是其评论区
+        comment_cell = ctrl.GetNextSiblingControl()
+        if (not comment_cell
+                or comment_cell.ClassName != "mmui::TimelineCommentCell"):
+            raise WxControlNotFoundError("未找到当前动态的评论区控件")
+
+        rect = comment_cell.BoundingRectangle
+        send_x = rect.right - 70
+        send_y = rect.bottom - 50
+        auto.MoveTo(send_x, send_y)
+        time.sleep(0.1)
+        auto.Click(send_x, send_y)
+        time.sleep(0.5)
+        return True
+
+    def scroll_to_visible(self) -> bool:
+        """将此条动态滚动到可见区域"""
+        self.moment._ensure_ready()
+        ctrl = self._find_cell()
+        if not ctrl:
+            raise WxControlNotFoundError(f"未找到朋友圈动态: {self.sender}")
+        return self._scroll_into_view(ctrl)
+
+    def _find_cell(self) -> Optional[auto.Control]:
+        """
+        在朋友圈列表中查找此条动态的控件。
+
+        利用 scroll_offset（前面所有朋友圈高度累加）快速定位：
+        1. 先在当前可见区域查找（命中直接返回）
+        2. 点击"刷新"回到列表顶部
+        3. 边滚动边匹配：每滚一小段就检查可见区域，命中立即返回
+        """
+        lc = self.moment._find_sns_list()
+
+        def _match_in_visible():
+            for ctrl, _ in auto.WalkControl(lc):
+                if ctrl.ControlType != auto.ControlType.ListItemControl:
+                    continue
+                cls_name = ctrl.ClassName or ""
+                if not cls_name.startswith(Moment.TIMELINE_CELL_PREFIX):
+                    continue
+                if cls_name in Moment.SKIP_CELL_CLASSES:
+                    continue
+                if (ctrl.Name
+                        and self.sender in ctrl.Name
+                        and self.content[:20] in ctrl.Name):
+                    return ctrl
+            return None
+
+        # 先在当前可见区域查找
+        result = _match_in_visible()
+        if result:
+            return result
+
+        # 回到顶部
+        refresh_btn = self.moment._win.ButtonControl(
+            ClassName="mmui::XTabBarItem",
+            Name=i_("刷新"),
+        )
+        if refresh_btn.Exists(maxSearchSeconds=2):
+            input_wx.click(refresh_btn)
+            time.sleep(2)
+
+        if self.scroll_offset <= 0:
+            return _match_in_visible()
+
+        # 边滚动边匹配
+        # 每次滚动约 500px（wheelTimes=5），滚完立即检查
+        scrolled = 0
+        step = 5
+        step_px = 500
+        while scrolled < self.scroll_offset + step_px:
+            result = _match_in_visible()
+            if result:
+                return result
+            lc.WheelDown(wheelTimes=step)
+            scrolled += step_px
+            time.sleep(0.15)
+
+        # 最后再检查一次
+        return _match_in_visible()
+
+    def _scroll_into_view(self, ctrl: auto.Control) -> bool:
+        """将控件滚动到朋友圈列表可见区域内"""
+        lc = self.moment._find_sns_list()
+        list_rect = lc.BoundingRectangle
+        for _ in range(30):
+            ctrl_rect = ctrl.BoundingRectangle
+            if ctrl_rect.bottom <= list_rect.bottom - 10:
+                return True
+            lc.WheelDown(wheelTimes=3)
+            time.sleep(0.3)
+        return False
+
+    def _open_action_bar(self, ctrl: auto.Control) -> bool:
+        """
+        触发朋友圈动态的操作栏（赞/评论按钮）。
+
+        从动态右下角逐步向左移动鼠标并点击，直到操作栏出现。
+        """
+        win = self.moment._win
+        distance = 30
+        while distance < 200:
+            ctrl_rect = ctrl.BoundingRectangle
+            auto.MoveTo(ctrl_rect.right - distance, ctrl_rect.bottom - 5)
+            time.sleep(0.1)
+            auto.Click(ctrl_rect.right - distance, ctrl_rect.bottom - 5)
+            time.sleep(0.3)
+
+            # 检查操作栏是否出现
+            if (win.TextControl(Name=i_("赞"), ClassName="mmui::XTextView").Exists(0, 0)
+                    or win.TextControl(Name=i_("评论"), ClassName="mmui::XTextView").Exists(0, 0)
+                    or win.Control(Name=i_("取消"), ClassName="mmui::XTextView").Exists(0, 0)
+                    or win.Control(Name=i_("取消"), ClassName="mmui::XButton").Exists(0, 0)):
+                return True
+
+            distance += 20
+        return False
+
+    def _click_action_button(self, ctrl: auto.Control, button_name: str) -> bool:
+        """触发操作栏后点击指定按钮（用于评论等）"""
+        win = self.moment._win
+        if not self._open_action_bar(ctrl):
+            return False
+
+        btn = win.TextControl(Name=button_name, ClassName="mmui::XTextView")
+        if btn.Exists(0, 0):
+            input_wx.click(btn)
+            time.sleep(0.3)
+            return True
+        return False
+
+    def __repr__(self) -> str:
+        return (f"MomentItem(type={self.type!r}, sender={self.sender!r}, "
+                f"content={self.content!r}, timestamp={self.timestamp!r})")
+
+    def __str__(self) -> str:
+        preview = self.content[:60] + "..." if len(self.content) > 60 else self.content
+        return f"[{self.type}] [{self.timestamp}] {self.sender}: {preview}"
+
+    def to_dict(self) -> dict:
+        """转换为字典"""
+        return {
+            "type": self.type,
+            "sender": self.sender,
+            "content": self.content,
+            "raw_text": self.raw_text,
+            "timestamp": self.timestamp,
+            "image_count": self.image_count,
+        }
+
+
+class Moment(WeixinWindow):
+    """
+    朋友圈（Moment）操作类。
+
+    继承自 WeixinWindow，复用通用窗口操作（activate、pin、unpin、
+    minimize、maximize、restore、close）。
+
+    微信 4.x 的朋友圈通过左侧导航栏的"朋友圈"标签页打开，
+    会弹出一个独立窗口。
+
+    关键控件信息（来自 desktop-ui-inspector 对微信 4.x 的实际检查）：
+    - 导航标签: ButtonControl, ClassName="mmui::XTabBarItem", Name="朋友圈"
+    - 独立窗口: WindowControl, ClassName="mmui::SNSWindow",
+                AutomationId="SNSWindow", Name="朋友圈"
+    - 列表容器: ListControl, ClassName="mmui::TimeLineListView",
+                AutomationId="sns_list", Name="朋友圈"
+    - 单条动态: ListItemControl, ClassName 前缀 "mmui::Timeline"
+      （如 mmui::TimelineGridImageCell 等）
+    - 动态的 Name 属性包含完整信息，格式示例：
+      "王芳 Ai漫剧的发展和出海的机遇[玫瑰] 包含2张图片 8小时前 "
+      即: "昵称 正文内容 [附件描述] 时间戳"
+    """
+
+    # 朋友圈独立窗口
+    SNS_WINDOW_CLASS = "mmui::SNSWindow"
+    SNS_WINDOW_ID = "SNSWindow"
+    # 朋友圈 feed 列表
+    SNS_LIST_CLASS = "mmui::TimeLineListView"
+    SNS_LIST_ID = "sns_list"
+    # 单条动态的 ClassName 前缀
+    TIMELINE_CELL_PREFIX = "mmui::Timeline"
+    # 需要跳过的非动态 Cell（评论区、辅助行等）
+    SKIP_CELL_CLASSES = {
+        "mmui::TimelineCommentCell",  # 评论区
+        "mmui::TimelineCell",         # 辅助行（如 "余下0条"）
+    }
+
+    # ---- 发布相关常量 ----
+    PUBLISH_PANEL_CLASS = "mmui::SnsPublishPanel"
+    PUBLISH_PANEL_ID = "SnsPublishPanel"
+    PUBLISH_INPUT_CLASS = "mmui::XValidatorTextEdit"
+    PUBLISH_BTN_CLASS = "mmui::XOutlineButton"
+    TOOLBAR_CLASS = "mmui::SNSWindowToolBar"
+    TOOLBAR_ID = "sns_window_tool_bar"
+
+    # ---- 隐私设置相关常量 ----
+    PRIVACY_BTN_CLASS = "mmui::PublishPrivacyView"
+    PRIVACY_SELECTION_CLASS = "mmui::PublishPrivacySelection"
+
+    def __init__(self, wx: Weixin):
+        """
+        初始化朋友圈操作实例。
+
+        Args:
+            wx: Weixin 实例。
+        """
+        self.wx = wx
+        self._win = auto.WindowControl(
+            ClassName=self.SNS_WINDOW_CLASS,
+            AutomationId=self.SNS_WINDOW_ID,
+            ProcessId=self.wx.pid,
+            searchDepth=1
+        )
+
+    def _ensure_ready(self) -> None:
+        """
+        打开朋友圈独立窗口。
+
+        如果窗口已存在则直接激活，否则通过导航栏点击"朋友圈"打开。
+
+        窗口: WindowControl, ClassName="mmui::SNSWindow",
+              AutomationId="SNSWindow", Name="朋友圈"
+        """
+        if self._win.Exists(maxSearchSeconds=1):
+            self.activate()
+            return
+
+        # 窗口不存在，通过导航栏打开
+        self.wx.activate()
+        self.wx.navigator.switch_to(i_("朋友圈"))
+
+        # 等待独立窗口出现
+        if not self._win.Exists(maxSearchSeconds=5):
+            raise RuntimeError("朋友圈窗口未打开")
+
+        self.activate()
+
+    def _find_sns_list(self) -> auto.ListControl:
+        """
+        在朋友圈窗口中查找 feed 列表控件。
+
+        列表: ListControl, ClassName="mmui::TimeLineListView",
+              AutomationId="sns_list"
+        """
+        lc = self._win.ListControl(
+            ClassName=self.SNS_LIST_CLASS,
+            AutomationId=self.SNS_LIST_ID,
+        )
+        if not lc.Exists(maxSearchSeconds=5):
+            raise WxControlNotFoundError("未找到朋友圈列表控件 (sns_list)")
+        return lc
+
+    def _parse_moment_name(self, runtime_id: tuple, raw_name: str,
+                           cls_name: str = "", scroll_offset: int = 0) -> Optional[MomentItem]:
+        """
+        解析单条朋友圈动态 ListItem 的 Name 属性。
+
+        Name 格式示例（空格分隔，末尾带时间戳）：
+          "王芳 Ai漫剧的发展和出海的机遇[玫瑰] 包含2张图片 8小时前 "
+          "张三 今天天气真好 3分钟前 "
+          "七夏 放大看看[太阳] 包含1张图片 5天前 "
+
+        已知 Cell ClassName 与类型的对应关系：
+          mmui::TimelineGridImageCell  — 多图（九宫格）
+          mmui::TimelineContentCell    — 单图/大图/内容
+          mmui::TimelineVideoCell      — 视频（推测）
+          mmui::TimelineLinkCell / mmui::TimelineUrlCell — 分享链接（推测）
+
+        解析策略：
+        1. 正则匹配末尾时间戳
+        2. 提取 "包含X张图片" 中的图片数量
+        3. 检测 Name 中的视频/链接关键词
+        4. 结合 ClassName 判断类型标识
+        5. 第一个空格前为昵称，中间为正文
+        """
+        if not raw_name or not raw_name.strip():
+            return None
+
+        text = raw_name.strip()
+
+        # 匹配末尾时间戳
+        ts_pattern = (
+            r'(\d+分钟前|\d+小时前|\d+天前|昨天|前天|刚刚'
+            r'|\d{1,2}月\d{1,2}日'
+            r'|\d{4}年\d{1,2}月\d{1,2}日'
+            r')\s*$'
+        )
+        ts_match = re.search(ts_pattern, text)
+        timestamp = ""
+        body = text
+        if ts_match:
+            timestamp = ts_match.group(1)
+            body = text[:ts_match.start()].strip()
+
+        if not body:
+            return None
+
+        # 提取图片数量
+        image_count = 0
+        img_match = re.search(r'包含(\d+)张图片', body)
+        if img_match:
+            image_count = int(img_match.group(1))
+            body = (body[:img_match.start()] + body[img_match.end():]).strip()
+
+        # 检测视频关键词
+        has_video_kw = False
+        video_match = re.search(r'包含\d*段?视频', body)
+        if video_match:
+            has_video_kw = True
+            body = (body[:video_match.start()] + body[video_match.end():]).strip()
+
+        # 检测链接/分享关键词
+        has_link_kw = bool(re.search(r'链接|网页|分享', body))
+
+        # 第一个空格前为昵称
+        parts = body.split(None, 1)
+        sender = parts[0] if parts else ""
+        content = parts[1].strip() if len(parts) > 1 else ""
+
+        # --- 判断类型标识（临时变量，不存入实例） ---
+        cls_lower = cls_name.lower()
+        has_image = image_count > 0 or "image" in cls_lower
+        has_video = "video" in cls_lower or has_video_kw
+        has_link = ("link" in cls_lower or "url" in cls_lower
+                    or has_link_kw)
+        has_text = bool(content)
+
+        # 生成类型文本
+        media = ""
+        if has_image:
+            media = "图片"
+        elif has_video:
+            media = "视频"
+        elif has_link:
+            media = "分享"
+
+        if has_text and media:
+            moment_type = f"文本{media}"
+        elif has_text:
+            moment_type = "文本"
+        elif media:
+            moment_type = media
+        else:
+            moment_type = "其他"
+
+        return MomentItem(
+            self, 
+            runtime_id,
+            type=moment_type,
+            sender=sender,
+            content=content,
+            raw_text=raw_name,
+            timestamp=timestamp,
+            image_count=image_count,
+            cell_type=cls_name,
+            scroll_offset=scroll_offset,
+        )
+
+    def _collect_moments(self, lc: auto.ListControl) -> List[Tuple[str, str, tuple, int]]:
+        """
+        收集当前可见的动态条目的 (raw_name, cls_name, runtime_id, ctrl_height) 列表。
+        跳过评论区、辅助行等非动态 Cell。
+        ctrl_height 为控件的高度（像素），用于累加计算滚动偏移。
+        """
+        items: List[Tuple[str, str, tuple, int]] = []
+        for ctrl, _ in auto.WalkControl(lc):
+            if ctrl.ControlType != auto.ControlType.ListItemControl:
+                continue
+            cls_name = ctrl.ClassName or ""
+            if not cls_name.startswith(self.TIMELINE_CELL_PREFIX):
+                continue
+            if cls_name in self.SKIP_CELL_CLASSES:
+                continue
+            raw = ctrl.Name
+            if raw:
+                try:
+                    rid = tuple(ctrl.GetRuntimeId())
+                except Exception:
+                    rid = ()
+                try:
+                    ctrl_height = ctrl.BoundingRectangle.height()
+                except Exception:
+                    ctrl_height = 0
+                items.append((raw, cls_name, rid, ctrl_height))
+        return items
+
+    @PIM.guard
+    def get_moments(self, count: int = 10, position: Literal["top", "current"] = "top") -> List[MomentItem]:
+        """
+        获取朋友圈动态列表。
+
+        持续滚动采集直到收集满 count 条动态才返回，
+        如果朋友圈动态不足 count 条则返回全部。
+
+        Args:
+            count:    要获取的动态条数，默认 10 条，收集满后立即返回
+            position: 起始位置
+                - "top":     先点击"刷新"回到顶部，再从头采集（默认）
+                - "current": 从当前滚动位置开始采集
+
+        Returns:
+            Moment 列表，长度 <= count
+        """
+        self._ensure_ready()
+
+        if position == "top":
+            refresh_btn = self._win.ButtonControl(
+                ClassName="mmui::XTabBarItem",
+                Name=i_("刷新"),
+            )
+            if refresh_btn.Exists(maxSearchSeconds=2):
+                input_wx.click(refresh_btn)
+                time.sleep(2)
+
+        lc = self._find_sns_list()
+
+        moments: List[MomentItem] = []
+        seen_keys: Set[tuple] = set()  # (runtime_id, raw_text) 组合去重
+        cumulative_height: int = 0  # 已采集朋友圈的高度累加
+
+        while len(moments) < count:
+            new_found = False
+            for raw, cls_name, rid, ctrl_height in self._collect_moments(lc):
+                key = (rid, raw) if rid else ((), raw)
+                if key in seen_keys:
+                    continue
+                item = self._parse_moment_name(
+                    rid, raw, cls_name, scroll_offset=cumulative_height,
+                )
+                if item:
+                    seen_keys.add(key)
+                    moments.append(item)
+                    cumulative_height += ctrl_height
+                    new_found = True
+                if len(moments) >= count:
+                    break
+
+            if len(moments) >= count:
+                break
+
+            if not new_found:
+                input_wx.focus(lc)
+                time.sleep(0.2)
+                input_wx.send_keys(lc, "{PageDown}")
+                time.sleep(1)
+                found_after_scroll = False
+                for raw, _, rid, _ in self._collect_moments(lc):
+                    key = (rid, raw) if rid else ((), raw)
+                    if key not in seen_keys:
+                        found_after_scroll = True
+                        break
+                if not found_after_scroll:
+                    break
+            else:
+                input_wx.focus(lc)
+                time.sleep(0.2)
+                input_wx.send_keys(lc, "{PageDown}")
+                time.sleep(0.5)
+
+        return moments[:count]
+
+    @PIM.guard
+    def iter_moments(self, count: int = 10, position: Literal["top", "current"] = "top"):
+        """
+        逐条获取朋友圈动态（生成器）。
+
+        与 get_moments 相同的采集逻辑，但每获取到一条新动态立即 yield，
+        适合边获取边操作的场景（如逐条点赞）。
+
+        注意：不使用 @PIM.guard 装饰器（装饰器与生成器不兼容），
+        在首次迭代时手动执行一次 guard 等待。
+
+        Args:
+            count:    要获取的动态条数，默认 10 条
+            position: "top" 从顶部开始，"current" 从当前位置
+
+        Yields:
+            Moment 实例
+
+        用法::
+
+            for item in wx.moment.iter_moments(10):
+                print(item)
+                wx.moment.like(item)
+        """
+        # 手动执行 guard 等待（替代 @PIM.guard）
+        if PIM._running and PIM.idle_wait > 0:
+            PIM.wait_for_idle(PIM.idle_wait)
+
+        self._ensure_ready()
+
+        if position == "top":
+            refresh_btn = self._win.ButtonControl(
+                ClassName="mmui::XTabBarItem",
+                Name=i_("刷新"),
+            )
+            if refresh_btn.Exists(maxSearchSeconds=2):
+                input_wx.click(refresh_btn)
+                time.sleep(2)
+
+        lc = self._find_sns_list()
+
+        yielded = 0
+        seen_keys: Set[tuple] = set()
+        cumulative_height: int = 0
+
+        while yielded < count:
+            new_found = False
+            for raw, cls_name, rid, ctrl_height in self._collect_moments(lc):
+                key = (rid, raw) if rid else ((), raw)
+                if key in seen_keys:
+                    continue
+                item = self._parse_moment_name(
+                    rid, raw, cls_name, scroll_offset=cumulative_height,
+                )
+                if item:
+                    seen_keys.add(key)
+                    cumulative_height += ctrl_height
+                    yield item
+                    yielded += 1
+                    new_found = True
+                if yielded >= count:
+                    return
+
+            if not new_found:
+                input_wx.focus(lc)
+                time.sleep(0.2)
+                input_wx.send_keys(lc, "{PageDown}")
+                time.sleep(1)
+                found_after_scroll = False
+                for raw, _, rid, _ in self._collect_moments(lc):
+                    key = (rid, raw) if rid else ((), raw)
+                    if key not in seen_keys:
+                        found_after_scroll = True
+                        break
+                if not found_after_scroll:
+                    return
+            else:
+                input_wx.focus(lc)
+                time.sleep(0.2)
+                input_wx.send_keys(lc, "{PageDown}")
+                time.sleep(0.5)
+
+    def like(self, moment_item: MomentItem) -> bool:
+        """对指定动态点赞"""
+        return moment_item.like()
+
+    def unlike(self, moment_item: MomentItem) -> bool:
+        """取消指定动态的点赞"""
+        return moment_item.unlike()
+
+    def comment(self, moment_item: MomentItem, content: str) -> bool:
+        """对指定动态评论"""
+        return moment_item.comment(content)
+
+    def scroll_into_visible(self, moment_item: MomentItem) -> bool:
+        """将指定动态滚动到可见区域"""
+        return moment_item.scroll_to_visible()
+
+    @PIM.guard
+    def like_when(self, func: callable,
+                  position: Literal["top", "current"] = "top") -> List[MomentItem]:
+        """
+        条件批量点赞：遍历朋友圈，回调返回 True 时点赞。
+
+        Args:
+            func:     回调函数，签名 func(liked_count: int, item: MomentItem) -> bool。
+                      liked_count 为当前已点赞数（从 0 开始），item 为当前动态。
+                      返回 True 点赞，返回 False 跳过。
+            position: 起始位置，"top" 从顶部开始，"current" 从当前位置。
+
+        Returns:
+            成功点赞的 MomentItem 列表
+
+        用法::
+
+            # 全部点赞
+            wx.moment.like_when(lambda c, item: True)
+
+            # 只点赞包含"旅行"的动态
+            wx.moment.like_when(lambda c, item: "旅行" in item.content)
+
+            # 只点赞"张三"发的
+            wx.moment.like_when(lambda c, item: "张三" in item.sender)
+
+            # 点赞前 5 条后停止（通过 liked_count 控制）
+            wx.moment.like_when(lambda c, item: c < 5)
+
+            # 复杂条件
+            wx.moment.like_when(
+                lambda c, item: item.image_count > 0 and "美食" in item.content,
+            )
+        """
+        liked: List[MomentItem] = []
+
+        for item in self.iter_moments(count=500, position=position):
+            try:
+                should = func(len(liked), item)
+            except Exception as e:
+                logger.warning(f"回调异常: {item.sender} - {e}")
+                continue
+
+            if not should:
+                continue
+
+            try:
+                if item.like():
+                    liked.append(item)
+                    logger.info(
+                        f"点赞 [{len(liked)}]: "
+                        f"{item.sender} - {item.content[:30] if item.content else '(无文字)'}"
+                    )
+            except Exception as e:
+                logger.warning(f"点赞失败: {item.sender} - {e}")
+                continue
+
+            time.sleep(0.5)
+
+        logger.info(f"批量点赞完成: 成功 {len(liked)} 条")
+        return liked
+
+    @PIM.guard
+    def comment_when(self, func: callable,
+                     position: Literal["top", "current"] = "top") -> List[MomentItem]:
+        """
+        条件批量评论：遍历朋友圈，回调返回评论内容时评论。
+
+        Args:
+            func:     回调函数，签名 func(commented_count: int, item: MomentItem) -> str | None。
+                      commented_count 为当前已评论数（从 0 开始），item 为当前动态。
+                      返回非空字符串时评论该动态，返回 None 或空字符串跳过。
+            position: 起始位置，"top" 从顶部开始，"current" 从当前位置。
+
+        Returns:
+            成功评论的 MomentItem 列表
+
+        用法::
+
+            # 对所有动态评论"好棒"
+            wx.moment.comment_when(lambda c, item: "好棒")
+
+            # 评论前 3 条后停止
+            wx.moment.comment_when(lambda c, item: "不错" if c < 3 else None)
+
+            # 只评论"张三"发的
+            wx.moment.comment_when(
+                lambda c, item: "赞一个" if "张三" in item.sender else None
+            )
+
+            # 根据内容生成不同评论
+            def gen_comment(count, item):
+                if "旅行" in item.content:
+                    return "风景真美！"
+                if "美食" in item.content:
+                    return "看起来好好吃"
+                return None  # 其他跳过
+
+            wx.moment.comment_when(gen_comment)
+        """
+        commented: List[MomentItem] = []
+
+        for item in self.iter_moments(count=500, position=position):
+            try:
+                content = func(len(commented), item)
+            except Exception as e:
+                logger.warning(f"回调异常: {item.sender} - {e}")
+                continue
+
+            if not content:
+                continue
+
+            try:
+                if item.comment(content):
+                    commented.append(item)
+                    logger.info(
+                        f"评论 [{len(commented)}]: "
+                        f"{item.sender} - {content[:30]!r}"
+                    )
+            except Exception as e:
+                logger.warning(f"评论失败: {item.sender} - {e}")
+                continue
+
+            time.sleep(0.5)
+
+        logger.info(f"批量评论完成: 成功 {len(commented)} 条")
+        return commented
+
+    # ---- 发布相关控件信息 ----
+    # 发布面板: GroupControl, ClassName="mmui::SnsPublishPanel",
+    #           AutomationId="SnsPublishPanel"
+    # 文本输入: EditControl, ClassName="mmui::XValidatorTextEdit"
+    #           位于 mmui::PublishInputView > mmui::ReplyTextView 内
+    # 表情按钮: ButtonControl, ClassName="mmui::XButton", Name="发送表情"
+    # 提醒谁看: GroupControl, ClassName="mmui::PublishComponent", Name=i_("提醒谁看")
+    # 谁可以看: ButtonControl, ClassName="mmui::PublishPrivacyView", Name 以 "谁可以看" 开头
+    # 发表按钮: ButtonControl, ClassName="mmui::XOutlineButton", Name="发表"
+    # 取消按钮: ButtonControl, ClassName="mmui::XOutlineButton", Name="取消"
+    # 工具栏发表: ButtonControl, ClassName="mmui::XTabBarItem", Name="发表"
+
+    def _open_publish_panel(self, text_only: bool = False) -> auto.Control:
+        """
+        打开发布面板并返回面板控件。
+
+        如果面板已打开则直接返回，否则通过工具栏"发表"按钮打开。
+
+        当 text_only=True 时，移动鼠标到"发表"按钮并长按 3 秒，
+        触发纯文本发布面板（微信通过长按相机图标进入文字发布模式）。
+
+        当 text_only=False 时，直接左键点击"发表"按钮打开默认发布面板。
+
+        面板: GroupControl, ClassName="mmui::SnsPublishPanel",
+              AutomationId="SnsPublishPanel"
+        """
+        panel = self._win.GroupControl(
+            ClassName=self.PUBLISH_PANEL_CLASS,
+            AutomationId=self.PUBLISH_PANEL_ID,
+        )
+        if panel.Exists(maxSearchSeconds=1):
+            return panel
+
+        # 查找工具栏
+        toolbar = self._win.ToolBarControl(
+            ClassName=self.TOOLBAR_CLASS,
+            AutomationId=self.TOOLBAR_ID,
+        )
+        if not toolbar.Exists(maxSearchSeconds=2):
+            raise WxControlNotFoundError("未找到朋友圈工具栏")
+
+        # 查找工具栏中的"发表"按钮
+        publish_tab = toolbar.ButtonControl(
+            ClassName="mmui::XTabBarItem",
+            Name=i_("发表"),
+        )
+        if not publish_tab.Exists(maxSearchSeconds=2):
+            raise WxControlNotFoundError("未找到工具栏'发表'按钮")
+
+        if text_only:
+            # 纯文本发布：移动鼠标到"发表"按钮，长按 3 秒触发文字发布面板
+            rect = publish_tab.BoundingRectangle
+            cx = rect.left + int(rect.width() * rand_ratio())
+            cy = rect.top + int(rect.height() * rand_ratio())
+            if not background:
+                win32api.SetCursorPos((cx, cy))
+                time.sleep(0.1)
+                win32api.mouse_event(win32con.MOUSEEVENTF_LEFTDOWN, cx, cy, 0, 0)
+                time.sleep(2)
+                win32api.mouse_event(win32con.MOUSEEVENTF_LEFTUP, cx, cy, 0, 0)
+            else:
+                hwnd_tmp = win32gui.WindowFromPoint((cx, cy))
+                if hwnd_tmp:
+                    client_x, client_y = win32gui.ScreenToClient(hwnd_tmp, (cx, cy))
+                    lparam = win32api.MAKELONG(client_x, client_y)
+                    win32gui.SendMessage(hwnd_tmp, win32con.WM_LBUTTONDOWN, win32con.MK_LBUTTON, lparam)
+                    time.sleep(2)
+                    win32gui.SendMessage(hwnd_tmp, win32con.WM_LBUTTONUP, 0, lparam)
+            time.sleep(1)
+        else:
+            # 默认发布：左键点击"发表"按钮
+            input_wx.click(publish_tab)
+            time.sleep(1)
+
+        # 等待发布面板出现
+        if not panel.Exists(maxSearchSeconds=5):
+            raise RuntimeError("发布面板未打开")
+
+        return panel
+
+    def _find_publish_input(self, panel: auto.Control) -> auto.EditControl:
+        """
+        在发布面板中查找文本输入框。
+
+        输入框: EditControl, ClassName="mmui::XValidatorTextEdit"
+        """
+        edit = panel.EditControl(
+            ClassName=self.PUBLISH_INPUT_CLASS,
+            searchDepth=10,
+        )
+        if not edit.Exists(maxSearchSeconds=3):
+            raise WxControlNotFoundError("未找到朋友圈文本输入框")
+        return edit
+
+    def _find_publish_button(self, panel: auto.Control) -> auto.ButtonControl:
+        """
+        在发布面板中查找"发表"按钮。
+
+        按钮: ButtonControl, ClassName="mmui::XOutlineButton", Name="发表"
+        """
+        btn = panel.ButtonControl(
+            ClassName=self.PUBLISH_BTN_CLASS,
+            Name=i_("发表"),
+            searchDepth=3,
+        )
+        if not btn.Exists(maxSearchSeconds=3):
+            raise WxControlNotFoundError("未找到'发表'按钮")
+        return btn
+
+    def _find_cancel_button(self, panel: auto.Control) -> auto.ButtonControl:
+        """
+        在发布面板中查找"取消"按钮。
+
+        按钮: ButtonControl, ClassName="mmui::XOutlineButton", Name="取消"
+        """
+        btn = panel.ButtonControl(
+            ClassName=self.PUBLISH_BTN_CLASS,
+            Name=i_("取消"),
+            searchDepth=10,
+        )
+        if not btn.Exists(maxSearchSeconds=3):
+            raise WxControlNotFoundError("未找到'取消'按钮")
+        return btn
+
+    def _select_file_in_dialog(self, file_path: str) -> None:
+        """
+        在系统文件选择对话框中选择文件。
+
+        等待 #32770 对话框出现，输入文件路径，按 Alt+O 打开。
+        """
+        file_dlg = self._win.WindowControl(ClassName="#32770")
+        if not file_dlg.Exists(maxSearchSeconds=5):
+            raise RuntimeError("文件选择对话框未弹出")
+
+        # 激活文件名输入框
+        input_wx.send_keys(file_dlg, "{Alt}N")
+        time.sleep(0.3)
+
+        # 输入文件路径
+        file_edit = file_dlg.PaneControl(AutomationId="1148").EditControl()
+        if not file_edit.Exists(maxSearchSeconds=3):
+            file_edit = file_dlg.EditControl(AutomationId="1148")
+        if not file_edit.Exists(maxSearchSeconds=3):
+            raise WxControlNotFoundError("未找到文件名输入框")
+
+        vp = file_edit.GetValuePattern()
+        if vp:
+            vp.SetValue(file_path)
+        else:
+            input_wx.paste(file_path)
+        time.sleep(0.3)
+
+        # Alt+O 打开
+        input_wx.send_keys(file_dlg, "{Alt}O")
+
+    def _set_remind_contacts(self, panel: auto.Control,
+                             contacts: List[str]) -> None:
+        """
+        在发布面板中设置"提醒谁看"的联系人。
+
+        流程:
+        1. 点击发布面板中的"提醒谁看"按钮
+        2. 等待 SessionPickerWindow（"微信提醒谁看"）弹出
+        3. 通过 _select_in_session_picker 搜索并勾选联系人
+        4. 点击"完成"关闭弹窗
+
+        Args:
+            panel:    发布面板控件
+            contacts: 联系人昵称列表
+        """
+        # 点击"提醒谁看"
+        remind_btn = panel.GroupControl(
+            ClassName="mmui::PublishComponent",
+            Name=i_("提醒谁看"),
+        )
+        if not remind_btn.Exists(maxSearchSeconds=2):
+            raise WxControlNotFoundError("未找到'提醒谁看'按钮")
+        input_wx.click(remind_btn)
+        time.sleep(0.5)
+
+        # 复用 SessionPickerWindow 选择逻辑
+        self._select_in_session_picker(i_("微信提醒谁看"), contacts=contacts)
+
+    def _set_privacy(self, panel: auto.Control, permission: str,
+                     permission_contacts: Optional[List[str]] = None,
+                     permission_labels: Optional[List[str]] = None) -> None:
+        """
+        在发布面板中设置"谁可以看"隐私权限。
+
+        流程:
+        1. 点击发布面板中的 mmui::PublishPrivacyView 按钮
+        2. 弹出隐私选择面板，包含 4 个 RadioButton:
+           "公开"、"私密"、"谁可以看"、"不给谁看"
+        3. 选择对应的 RadioButton
+        4. 若选择"谁可以看"或"不给谁看"，会弹出 SessionPickerWindow
+           （Name="微信谁可以看" 或 "微信不给谁看"），
+           包含"标签"和"朋友"两个 tab，可分别选择标签和联系人
+        5. 选完后点击"完成"关闭 SessionPickerWindow
+        6. 点击"确定"关闭隐私选择面板
+
+        控件结构:
+        - 隐私按钮: ButtonControl, ClassName="mmui::PublishPrivacyView"
+        - 隐私选项: RadioButtonControl, ClassName="mmui::PublishPrivacySelection"
+        - 确定按钮: ButtonControl, ClassName="mmui::XOutlineButton", Name="确定"
+        - SessionPickerWindow 内部结构同 _set_remind_contacts，
+          额外有"标签"/"朋友"两个 tab (mmui::XButton)
+
+        Args:
+            panel:               发布面板控件
+            permission:          隐私选项，"公开"/"私密"/"谁可以看"/"不给谁看"
+            permission_contacts: 联系人昵称列表（"谁可以看"/"不给谁看"时使用）
+            permission_labels:   标签名称列表（"谁可以看"/"不给谁看"时使用）
+        """
+        if permission not in (i_("公开"), i_("私密"), i_("谁可以看"), i_("不给谁看")):
+            raise ValueError(
+                f"无效的隐私选项 '{permission}'，"
+                f"有效值: {(i_('公开'), i_('私密'), i_('谁可以看'), i_('不给谁看'))}"
+            )
+
+        # 点击隐私按钮打开隐私选择面板
+        privacy_btn = panel.ButtonControl(
+            ClassName=self.PRIVACY_BTN_CLASS,
+            searchDepth=5,
+        )
+        if not privacy_btn.Exists(maxSearchSeconds=2):
+            raise WxControlNotFoundError("未找到'谁可以看'隐私按钮")
+        input_wx.click(privacy_btn)
+        time.sleep(0.5)
+
+        # 隐私选项面板覆盖在发布面板上方，但不在 panel 子树中，
+        # 需要在 SNSWindow 上搜索
+        # 选择对应的隐私选项 RadioButton
+        radio = self._win.RadioButtonControl(
+            ClassName=self.PRIVACY_SELECTION_CLASS,
+            Name=permission,
+            searchDepth=10,
+        )
+        if not radio.Exists(maxSearchSeconds=2):
+            raise WxControlNotFoundError(f"未找到隐私选项 '{permission}'")
+        input_wx.click(radio)
+        time.sleep(0.5)
+
+        # "谁可以看"和"不给谁看"需要选择联系人/标签
+        if permission in (i_("谁可以看"), i_("不给谁看")):
+            # 根据 permission 查找对应的 picker 窗口名称
+            if permission == i_("谁可以看"):
+                picker_name = i_("微信谁可以看")
+            else:
+                picker_name = i_("微信不给谁看")
+            self._select_in_session_picker(
+                picker_name, permission_contacts, permission_labels,
+            )
+
+        # 点击"确定"关闭隐私选择面板（同样在 SNSWindow 上搜索）
+        confirm_btn = self._win.ButtonControl(
+            ClassName=self.PUBLISH_BTN_CLASS,
+            Name=i_("确定"),
+            searchDepth=10,
+        )
+        if not confirm_btn.Exists(maxSearchSeconds=2):
+            raise WxControlNotFoundError("未找到隐私设置'确定'按钮")
+        input_wx.click(confirm_btn)
+
+    def _select_in_session_picker(
+        self,
+        picker_name: str,
+        contacts: Optional[List[str]] = None,
+        labels: Optional[List[str]] = None,
+    ) -> None:
+        """
+        在 SessionPickerWindow 中选择联系人和/或标签。
+
+        "谁可以看"/"不给谁看"/"提醒谁看"共用此方法。
+        SessionPickerWindow 内部结构:
+        - 搜索框: EditControl, Name=i_("搜索"), ClassName="mmui::XValidatorTextEdit"
+        - 搜索结果: CheckBoxControl, ClassName="mmui::SearchContactCellView"
+        - "标签" tab: ButtonControl, Name=i_("标签"), ClassName="mmui::XButton"
+        - "朋友" tab: ButtonControl, Name=i_("朋友"), ClassName="mmui::XButton"
+        - 标签列表项: CheckBoxControl, ClassName="mmui::SPSelectionContactRow"
+        - 完成按钮: ButtonControl, AutomationId="confirm_btn"
+
+        注意：picker 内部存在自引用控件，所有子控件查找必须限制 searchDepth。
+
+        Args:
+            picker_name: SessionPickerWindow 的 Name（如 "微信谁可以看"）
+            contacts:    联系人昵称列表
+            labels:      标签名称列表
+        """
+        picker = self._win.WindowControl(
+            ClassName="mmui::SessionPickerWindow",
+            Name=picker_name,
+        )
+        if not picker.Exists(maxSearchSeconds=3):
+            raise RuntimeError(f"'{picker_name}'弹窗未打开")
+
+        # 选择标签
+        if labels:
+            # 点击"标签" tab
+            label_tab = picker.ButtonControl(
+                ClassName="mmui::XButton",
+                Name=i_("标签"),
+                searchDepth=5,
+            )
+            if label_tab.Exists(maxSearchSeconds=2):
+                input_wx.click(label_tab)
+                time.sleep(0.5)
+
+                # 标签列表中直接勾选（标签数量通常不多，无需搜索）
+                contact_list = picker.ListControl(
+                    AutomationId="sp_to_select_contact_list",
+                    searchDepth=5,
+                )
+                if contact_list.Exists(maxSearchSeconds=2):
+                    for label_name in labels:
+                        label_item = contact_list.CheckBoxControl(
+                            Name=label_name,
+                            searchDepth=2,
+                        )
+                        if label_item.Exists(maxSearchSeconds=2):
+                            input_wx.click(label_item)
+                            time.sleep(0.3)
+                        else:
+                            logger.warning("未找到标签 '%s'", label_name)
+
+        # 选择联系人
+        if contacts:
+            # 点击"朋友" tab（如果有标签 tab 说明需要切换）
+            friend_tab = picker.ButtonControl(
+                ClassName="mmui::XButton",
+                Name=i_("朋友"),
+                searchDepth=5,
+            )
+            if friend_tab.Exists(maxSearchSeconds=2):
+                input_wx.click(friend_tab)
+                time.sleep(0.5)
+
+            # 通过搜索逐个选择联系人
+            search_edit = picker.EditControl(
+                ClassName="mmui::XValidatorTextEdit",
+                Name=i_("搜索"),
+                searchDepth=5,
+            )
+            if not search_edit.Exists(maxSearchSeconds=2):
+                raise WxControlNotFoundError("未找到搜索框")
+
+            not_found: List[str] = []
+
+            for contact in contacts:
+                input_wx.click(search_edit)
+                time.sleep(0.2)
+                input_wx.send_keys(search_edit, "{Ctrl}a{Del}")
+                time.sleep(0.2)
+                input_wx.paste(contact)
+                time.sleep(1)
+
+                result_list = picker.ListControl(
+                    AutomationId="sp_search_result_list",
+                    searchDepth=5,
+                )
+                if not result_list.Exists(maxSearchSeconds=2):
+                    logger.warning("搜索 '%s' 时未出现结果列表", contact)
+                    not_found.append(contact)
+                    continue
+
+                matched = result_list.CheckBoxControl(
+                    ClassName="mmui::SearchContactCellView",
+                    Name=contact,
+                    searchDepth=2,
+                )
+                if matched.Exists(maxSearchSeconds=2):
+                    input_wx.click(matched)
+                    time.sleep(0.3)
+                else:
+                    first_result = result_list.CheckBoxControl(
+                        ClassName="mmui::SearchContactCellView",
+                        searchDepth=2,
+                    )
+                    if first_result.Exists(maxSearchSeconds=1):
+                        logger.warning(
+                            "未精确匹配 '%s'，选择第一个结果: '%s'",
+                            contact, first_result.Name,
+                        )
+                        input_wx.click(first_result)
+                        time.sleep(0.3)
+                    else:
+                        logger.warning("搜索 '%s' 无结果", contact)
+                        not_found.append(contact)
+
+            if not_found:
+                logger.warning("以下联系人未找到: %s", not_found)
+
+        # 点击"完成"按钮
+        confirm_btn = picker.ButtonControl(
+            AutomationId="confirm_btn",
+            searchDepth=5,
+        )
+        if not confirm_btn.Exists(maxSearchSeconds=2):
+            raise WxControlNotFoundError("未找到'完成'按钮")
+        input_wx.click(confirm_btn)
+
+    @PIM.guard
+    def publish(self, text: Optional[str] = None, images: List[str] = None,
+                video: str = None, remind_contacts: List[str] = None,
+                permission: str = None,
+                permission_contacts: List[str] = None,
+                permission_labels: List[str] = None) -> bool:
+        """
+        发布朋友圈。
+
+        支持纯文字、图文、视频三种模式（图片和视频互斥）。
+
+        Args:
+            text:                 文本内容（纯文字模式必填，图文/视频模式可选）
+            images:               图片路径列表（与 video 互斥）
+            video:                视频路径（与 images 互斥）
+            remind_contacts:      提醒谁看的联系人昵称列表
+            permission:           隐私设置，可选值:
+                                  "公开"（默认）/ "私密" / "谁可以看" / "不给谁看"
+            permission_contacts:  隐私联系人列表（"谁可以看"/"不给谁看"时使用）
+            permission_labels:    隐私标签列表（"谁可以看"/"不给谁看"时使用）
+
+        Returns:
+            True 发布成功
+        """
+        # 参数校验
+        if images and video:
+            raise ValueError("images 和 video 只能指定其中一个参数")
+        if images and len(images) > 9:
+            raise ValueError("朋友圈最多发 9 张图片")
+        has_media = bool(images) or bool(video)
+        if not text and not has_media:
+            raise ValueError("text 和 images/video 至少指定一个")
+
+        self._ensure_ready()
+
+        # 右键"发表"按钮弹出菜单
+        publish_tab = self._find_toolbar_button(i_("发表"))
+        input_wx.click(publish_tab, button="right")
+        time.sleep(0.5)
+
+        if has_media:
+            # 点击"选照片或视频"
+            menu_item = self._win.MenuItemControl(
+                ClassName="mmui::XMenuView",
+                Name=i_("选照片或视频"),
+            )
+            if not menu_item.Exists(maxSearchSeconds=2):
+                raise WxControlNotFoundError("未找到'选照片或视频'菜单项")
+            input_wx.click(menu_item)
+            time.sleep(1)
+
+            # 选择第一个文件
+            first_file = images[0] if images else video
+            self._select_file_in_dialog(first_file)
+
+            # 等待发布面板出现
+            panel = self._win.GroupControl(
+                ClassName=self.PUBLISH_PANEL_CLASS,
+                AutomationId=self.PUBLISH_PANEL_ID,
+            )
+            if not panel.Exists(maxSearchSeconds=5):
+                raise RuntimeError("发布面板未打开")
+
+            # 多张图片：逐个点击"添加图片"格子添加
+            if images and len(images) > 1:
+                for img_path in images[1:]:
+                    # "添加图片"是 ListItemControl，ClassName="mmui::PublishImageAddGridCell"
+                    add_cell = panel.ListItemControl(
+                        ClassName="mmui::PublishImageAddGridCell",
+                        Name=i_("添加图片"),
+                        searchDepth=10,
+                    )
+                    if not add_cell.Exists(maxSearchSeconds=3):
+                        raise WxControlNotFoundError("未找到'添加图片'按钮")
+
+                    input_wx.click(add_cell)
+                    time.sleep(1)
+
+                    self._select_file_in_dialog(img_path)
+        else:
+            # 纯文字：点击"发表文字"
+            menu_item = self._win.MenuItemControl(
+                ClassName="mmui::XMenuView",
+                Name=i_("发表文字"),
+            )
+            if not menu_item.Exists(maxSearchSeconds=2):
+                raise WxControlNotFoundError("未找到'发表文字'菜单项")
+            input_wx.click(menu_item)
+            time.sleep(1)
+
+            panel = self._win.GroupControl(
+                ClassName=self.PUBLISH_PANEL_CLASS,
+                AutomationId=self.PUBLISH_PANEL_ID,
+            )
+            if not panel.Exists(maxSearchSeconds=5):
+                raise RuntimeError("发布面板未打开")
+
+        # 输入文字内容
+        if text:
+            edit = self._find_publish_input(panel)
+            edit.GetValuePattern().SetValue(text)
+            # input_wx.send_keys(edit, text)
+
+        # 设置提醒谁看
+        if remind_contacts:
+            self._set_remind_contacts(panel, remind_contacts)
+
+        # 设置隐私权限
+        if permission:
+            self._set_privacy(
+                panel, permission, permission_contacts, permission_labels,
+            )
+
+        # 点击"发表"
+        publish_btn = self._find_publish_button(panel)
+        input_wx.click(publish_btn)
+
+        # 等待发布面板消失
+        for _ in range(30):
+            if not panel.Exists(maxSearchSeconds=1):
+                logger.debug("朋友圈发布成功")
+                return True
+            time.sleep(1)
+
+        raise RuntimeError("发布超时，发布面板未关闭")
+
+    def _find_toolbar_button(self, name: str) -> auto.ButtonControl:
+        """
+        在朋友圈工具栏中查找指定名称的按钮。
+
+        工具栏: ToolBarControl, ClassName="mmui::SNSWindowToolBar",
+                AutomationId="sns_window_tool_bar"
+        按钮:   ButtonControl, ClassName="mmui::XTabBarItem"
+
+        Args:
+            name: 按钮名称（如 "刷新"、"发表"）
+
+        Returns:
+            ButtonControl 控件
+
+        Raises:
+            RuntimeError: 未找到工具栏或按钮时抛出
+        """
+        toolbar = self._win.ToolBarControl(
+            ClassName=self.TOOLBAR_CLASS,
+            AutomationId=self.TOOLBAR_ID,
+        )
+        if not toolbar.Exists(maxSearchSeconds=2):
+            raise WxControlNotFoundError("未找到朋友圈工具栏")
+
+        btn = toolbar.ButtonControl(
+            ClassName="mmui::XTabBarItem",
+            Name=name,
+        )
+        if not btn.Exists(maxSearchSeconds=2):
+            raise WxControlNotFoundError(f"未找到工具栏'{name}'按钮")
+        return btn
+
+    @PIM.guard
+    def refresh(self) -> None:
+        """
+        刷新朋友圈。
+
+        点击工具栏"刷新"按钮，回到列表顶部并加载最新动态。
+        """
+        self._ensure_ready()
+        btn = self._find_toolbar_button(i_("刷新"))
+        input_wx.click(btn)
+
+    def __str__(self) -> str:
+        return "Moment(朋友圈)"
+
+
+class ChatFile:
+    """聊天文件信息（来自"聊天文件"管理器窗口）"""
+
+    def __init__(self, file_manager: Optional[FileManager] = None, *, file_name: str = "",
+                 sender_name: str = "", source_name: str = "", source_type: str = "",
+                 file_date: str = "", file_status: str = "", file_size: str = "",
+                 raw_text: str = "", _cell: Optional[auto.Control] = None):
+        """
+        初始化聊天文件信息。
+
+        Args:
+            file_manager: 关联的 FileManager 实例。
+            file_name: 文件名。
+            sender_name: 发送人昵称。
+            source_name: 来源（群名或个人昵称）。
+            source_type: 来源类型，"contact"(私聊) 或 "room"(群聊)。
+            file_date: 日期文本。
+            file_status: 状态文本（空字符串表示已下载）。
+            file_size: 文件大小文本。
+            raw_text: 原始 Name 属性文本。
+            _cell: UI 控件引用（内部使用）。
+        """
+        self.file_manager = file_manager
+        self.file_name = file_name
+        self.sender_name = sender_name
+        self.source_name = source_name
+        self.source_type = source_type
+        self.file_date = file_date
+        self.file_status = file_status
+        self.file_size = file_size
+        self.raw_text = raw_text
+        self._cell = _cell
+
+    def __str__(self) -> str:
+        status = self.file_status if self.file_status else "已下载"
+        type_label = "联系人" if self.source_type == "contact" else "群聊"
+        return (f"[{self.file_date}] [{type_label}] {self.file_name} | "
+                f"发送人: {self.sender_name} | 来源: {self.source_name} | "
+                f"大小: {self.file_size} | 状态: {status}")
+
+    def _ensure_ready(self) -> None:
+        """确保 file_manager 和 _cell 可用，且文件管理器窗口已打开"""
+        if not self.file_manager:
+            raise RuntimeError("ChatFile 未关联 FileManager 实例")
+        if not self._cell:
+            raise RuntimeError("ChatFile 未关联 UI 控件（_cell 为空）")
+        if not self.file_manager.exists:
+            raise RuntimeError("聊天文件窗口未打开")
+
+    def _right_click_and_find_menu(self) -> auto.Control:
+        """右键点击文件项并返回弹出的菜单控件"""
+        self.file_manager.activate()
+        input_wx.click(self._cell, button="right")
+        menu = self.file_manager._find_context_menu_by_point()
+        if not menu:
+            raise WxControlNotFoundError("未找到右键菜单")
+        return menu
+
+    def _click_menu_item(self, menu: auto.Control, item_name: str) -> auto.Control:
+        """在菜单中查找并点击指定名称的菜单项"""
+        target = None
+        for child in menu.GetChildren():
+            if child.Name == item_name:
+                target = child
+                break
+        if not target:
+            raise WxControlNotFoundError(f"未找到'{item_name}'菜单项")
+        input_wx.click(target)
+        return target
+
+    def _context_action(self, menu_name: str) -> None:
+        """
+        通用右键菜单操作：确保就绪 → 右键点击 → 点击指定菜单项。
+
+        Args:
+            menu_name: 菜单项名称
+        """
+        self._ensure_ready()
+        menu = self._right_click_and_find_menu()
+        self._click_menu_item(menu, menu_name)
+
+    def _handle_save_dialog(self, file_path: str) -> bool:
+        """处理 Windows 文件保存对话框：填入路径并保存"""
+        save_dialog = self.file_manager._win.WindowControl(ClassName="#32770", searchDepth=3)
+        if not save_dialog.Exists(maxSearchSeconds=5):
+            raise WxControlNotFoundError("未找到 Windows 文件保存对话框")
+
+        file_name_edit = save_dialog.EditControl(AutomationId="1001", searchDepth=10)
+        if not file_name_edit.Exists(maxSearchSeconds=3):
+            raise WxControlNotFoundError("未找到文件名输入框")
+
+        input_wx.paste_or_type(file_name_edit, file_path)
+
+        # 如果目标文件已存在，先删除（避免覆盖确认弹窗）
+        if os.path.exists(file_path):
+            os.remove(file_path)
+
+        input_wx.send_keys(None, "{Alt}s")
+        if not save_dialog.Exists(maxSearchSeconds=2):
+            return True
+        else:
+            input_wx.send_keys(None, "{Esc}")
+            return False
+
+    @PIM.guard
+    def save_as(self, file_path: str) -> bool:
+        """
+        将文件另存为到指定路径。
+
+        流程:
+        1. 右键点击文件项 → 弹出微信右键菜单
+        2. 点击"另存为..."菜单项 → 弹出 Windows 文件保存对话框
+        3. 设置保存路径 → 按 Alt+S 保存
+
+        Args:
+            file_path: 完整的保存路径（含文件名），如 "C:\\download\\test.xlsx"
+
+        Returns:
+            True 保存成功，False 保存失败
+        """
+        dir_path = os.path.dirname(file_path)
+        if dir_path:
+            os.makedirs(dir_path, exist_ok=True)
+
+        self._context_action("另存为...")
+        return self._handle_save_dialog(file_path)
+
+    @PIM.guard
+    def download_to(self, file_path: str) -> bool:
+        """
+        将文件下载到指定路径。
+
+        流程:
+        1. 右键点击文件项 → 弹出微信右键菜单
+        2. 点击"下载到..."菜单项 → 弹出 Windows 文件保存对话框
+        3. 设置保存路径 → 按 Alt+S 保存
+
+        Args:
+            file_path: 完整的保存路径（含文件名），如 "C:\\download\\test.xlsx"
+
+        Returns:
+            True 下载成功，False 下载失败
+        """
+        dir_path = os.path.dirname(file_path)
+        if dir_path:
+            os.makedirs(dir_path, exist_ok=True)
+
+        self._context_action("下载到...")
+        return self._handle_save_dialog(file_path)
+
+    @PIM.guard
+    def download(self) -> bool:
+        """
+        下载文件（下载到微信默认路径）。
+
+        流程:
+        1. 获取当前文件控件的 RuntimeId 作为唯一标识
+        2. 右键点击文件项 → 弹出微信右键菜单
+        3. 点击"下载"菜单项 → 开始下载
+
+        Returns:
+            True 下载成功（状态变为已下载），False 下载超时
+        """
+        self._context_action(i_("下载"))
+
+    @PIM.guard
+    def delete(self) -> bool:
+        """
+        删除此文件。
+
+        流程:
+        1. 右键点击文件项 → 弹出微信右键菜单
+        2. 点击"删除"菜单项 → 弹出确认对话框
+        3. 点击"删除"确认按钮完成删除
+
+        Returns:
+            True 删除成功，False 删除失败
+        """
+        self._context_action(i_("删除"))
+
+        # 点击确认弹窗中的"删除"按钮
+        delete_btn = self.file_manager._win.ButtonControl(
+            ClassName="mmui::XOutlineButton", Name=i_("删除"),
+        )
+        if delete_btn.Exists(maxSearchSeconds=2):
+            input_wx.click(delete_btn)
+            return True
+        return False
+
+    @PIM.guard
+    def copy(self) -> str:
+        """
+        复制此文件到剪贴板并返回复制的文件路径。
+
+        右键点击文件项，在菜单中点击"复制"，
+        然后从剪贴板读取复制的内容。
+
+        Returns:
+            复制到剪贴板的文本内容（通常为文件路径或文件名）
+        """
+        self._context_action(i_("复制"))
+        return get_clipboard_file()
+
+    @PIM.guard
+    def collect(self) -> None:
+        """
+        收藏此文件。
+
+        右键点击文件项，在菜单中点击"收藏"。
+        """
+        self._context_action(i_("收藏"))
+
+    @PIM.guard
+    def switch_to_message(self) -> None:
+        """
+        定位到聊天位置。
+
+        右键点击文件项，在菜单中点击"定位到聊天位置"，
+        微信会跳转到该文件消息所在的聊天会话并滚动到对应位置。
+        """
+        self._context_action("定位到聊天位置")
+
+
+class FileManager(WeixinWindow):
+    """
+    微信"聊天文件"管理器窗口操作类。
+
+    通过微信主窗口的"更多 → 聊天文件"打开独立的 mmui::FileManagerWindow 窗口，
+    支持按文件类型筛选、获取文件列表、另存为等操作。
+
+    关键控件:
+    - 文件列表项: mmui::FileListCell
+    - 文件类型筛选: mmui::XTableCell (ListItemControl)
+    - 右键菜单: mmui::XMenu（浮动于桌面层级）
+    """
+
+    FILE_LIST_CELL_CLASS = "mmui::FileListCell"
+    FILE_TYPE_FILTER_CLASS = "mmui::XTableCell"
+    CONTEXT_MENU_WIN_CLASS = "mmui::XMenu"
+    # 确认对话框的类名（微信 v4 使用 mmui::XDialog，浮动于桌面层级）
+    CONFIRM_DIALOG_WIN_CLASS = "mmui::XDialog"
+
+    def __init__(self, wx: Weixin):
+        """
+        初始化聊天文件管理器。
+
+        Args:
+            wx: Weixin 实例。
+        """
+        self.wx = wx
+        self._win = auto.WindowControl(
+            Name=i_("聊天文件"),
+            ProcessId=self.wx.pid,
+            searchDepth=1,
+        )
+
+    @PIM.guard
+    def open(self, filter_type: Optional[str] = None) -> bool:
+        """
+        打开聊天文件管理器窗口。
+
+        Args:
+            filter_type: 文件类型筛选，可选值:
+                - "全部"、"文档"、"表格"、"图片"、"视频"等
+                - "": 不筛选（默认）
+        """
+        if not self.exists:
+            self.wx.navigator.switch_to(i_("更多"))
+            chat_file_btn = self.wx._win.ButtonControl(
+                Name=i_("聊天文件"), searchDepth=10
+            )
+            if not chat_file_btn.Exists(maxSearchSeconds=3):
+                raise WxControlNotFoundError("未找到'聊天文件'按钮")
+
+            input_wx.click(chat_file_btn)
+
+            if not self.exists:
+                raise RuntimeError("聊天文件窗口未能打开")
+        self.activate()
+
+        if filter_type:
+            self._click_filter(filter_type)
+
+        return True
+
+    def _click_filter(self, filter_name: str) -> bool:
+        """
+        点击聊天文件窗口中的文件类型筛选按钮。
+
+        已知的筛选选项: "全部"、"文档"、"表格"、"图片"、"视频"等。
+        """
+        if not self.exists:
+            raise RuntimeError("聊天文件窗口未打开")
+        self.activate()
+        filter_btn = self._win.ListItemControl(
+            Name=filter_name,
+            ClassName=self.FILE_TYPE_FILTER_CLASS,
+            searchDepth=10,
+        )
+        if not filter_btn.Exists(maxSearchSeconds=3):
+            raise WxControlNotFoundError(f"未找到'{filter_name}'筛选按钮")
+
+        input_wx.click(filter_btn)
+        return True
+
+    def _find_context_menu_by_point(self) -> Optional[auto.Control]:
+        """
+        通过 ControlFromPoint 定位右键菜单。
+
+        右键点击后鼠标指针停在菜单左上角，直接用当前鼠标坐标命中菜单，
+        然后沿 GetParentControl() 向上查找 mmui::XMenu 容器。
+        """
+        for _ in range(10):
+            x, y = auto.GetCursorPos()
+            ctrl = auto.ControlFromPoint(x, y)
+            if ctrl:
+                current = ctrl
+                for _ in range(10):
+                    if current.ClassName == self.CONTEXT_MENU_WIN_CLASS:
+                        return current
+                    parent = current.GetParentControl()
+                    if not parent:
+                        break
+                    current = parent
+            time.sleep(0.3)
+        return None
+
+    def _find_confirm_dialog(self, max_attempts: int = 10) -> Optional[auto.Control]:
+        """
+        通过 ControlFromPoint 定位确认对话框。
+
+        微信 v4 的确认对话框（mmui::XDialog）与右键菜单类似，
+        浮动于桌面层级，不是文件管理器窗口的子控件。
+        点击菜单项后鼠标指针停留在弹窗区域，
+        用当前鼠标坐标命中弹窗，然后沿父级向上查找。
+        """
+        for _ in range(max_attempts):
+            x, y = auto.GetCursorPos()
+            ctrl = auto.ControlFromPoint(x, y)
+            if ctrl:
+                current = ctrl
+                for _ in range(10):
+                    if current.ClassName == self.CONFIRM_DIALOG_WIN_CLASS:
+                        return current
+                    parent = current.GetParentControl()
+                    if not parent:
+                        break
+                    current = parent
+            time.sleep(0.3)
+        return None
+
+    @PIM.guard
+    def save_file_as(self, chat_file: ChatFile, file_path: str) -> bool:
+        """
+        对文件执行"另存为"操作。
+
+        Args:
+            chat_file: ChatFile 实例
+            file_path: 完整的保存路径（含文件名），如 "C:\\download\\test.xlsx"
+        """
+        return chat_file.save_as(file_path)
+
+    @PIM.guard
+    def download_to(self, chat_file: ChatFile, file_path: str) -> bool:
+        """
+        对文件执行"下载到"操作。
+
+        Args:
+            chat_file: ChatFile 实例
+            file_path: 完整的保存路径（含文件名），如 "C:\\download\\test.xlsx"
+        """
+        return chat_file.download_to(file_path)
+
+    @PIM.guard
+    def delete_file(self, chat_file: ChatFile) -> bool:
+        """
+        删除文件。
+
+        Args:
+            chat_file: ChatFile 实例
+
+        Returns:
+            True 删除成功，False 删除失败
+        """
+        return chat_file.delete()
+
+    @PIM.guard
+    def download_file(self, chat_file: ChatFile, timeout: int = 60) -> bool:
+        """
+        下载文件。
+
+        Args:
+            chat_file: ChatFile 实例
+            timeout:   等待下载完成的超时时间（秒），默认 60 秒
+
+        Returns:
+            True 下载成功（状态变为已下载），False 下载超时
+        """
+        return chat_file.download(timeout)
+
+    def parse_file_cell_text(self, cell_text: str) -> Optional[ChatFile]:
+        """
+        解析 mmui::FileListCell 的 Name 属性文本，提取文件信息。
+
+        文本格式: "文件名 发送人 | 来源 日期 状态 大小"
+        """
+        if not cell_text:
+            return None
+
+        separator = " | "
+        sep_idx = cell_text.rfind(separator)
+        if sep_idx <= 0:
+            return None
+
+        left_part = cell_text[:sep_idx].strip()
+        right_part = cell_text[sep_idx + len(separator):].strip()
+
+        # 解析右侧: 来源 日期 [状态] 大小
+        size_pattern = r'[\d.]+[BKMGT]'
+        right_tokens = right_part.split()
+
+        if len(right_tokens) < 2:
+            return None
+
+        file_size = right_tokens[-1] if re.match(size_pattern, right_tokens[-1]) else ""
+
+        # 日期格式:
+        #   - 今天: 只显示时间 "10:53"
+        #   - 昨天: "昨天"
+        #   - 本周: "星期X"
+        #   - 更早: "YYYY年M月D日"
+        date_str = ""
+        date_idx = -1
+        time_pattern = r'^\d{1,2}:\d{2}$'
+        for i, token in enumerate(right_tokens):
+            if re.match(time_pattern, token):
+                date_str = i_("今天")
+                date_idx = i
+                break
+            if token in (i_("今天"), i_("昨天")) or "星期" in token:
+                date_str = token
+                date_idx = i
+                break
+            if "年" in token and "月" in token:
+                date_str = token
+                date_idx = i
+                break
+
+        source_name = " ".join(right_tokens[:date_idx]) if date_idx > 0 else ""
+
+        if file_size and date_idx >= 0:
+            status_tokens = right_tokens[date_idx + 1:-1]
+            file_status = " ".join(status_tokens)
+        else:
+            file_status = ""
+
+        # 处理 source_name 以 " 未下载" 结尾的情况：
+        # 微信文件列表中未下载的文件，"未下载"会紧跟在来源名称后面，
+        # 被错误地解析为 source_name 的一部分。
+        # 例如: "泡泡马特发货群 未下载 18:20 ..." 中 source_name 会被解析为
+        # "泡泡马特发货群 未下载"，需要将 "未下载" 拆分到 file_status 中。
+        not_downloaded = i_("未下载")
+        if source_name.endswith(f" {not_downloaded}"):
+            source_name = source_name[:-len(f" {not_downloaded}")]
+            file_status = not_downloaded
+
+        left_tokens = left_part.rsplit(" ", 1)
+        if len(left_tokens) == 2:
+            file_name = left_tokens[0].strip()
+            sender_name = left_tokens[1].strip()
+        else:
+            file_name = left_part
+            sender_name = ""
+
+        source_type = "contact" if sender_name and sender_name == source_name else "room"
+
+        return ChatFile(
+            self,
+            file_name=file_name,
+            sender_name=sender_name,
+            source_name=source_name,
+            source_type=source_type,
+            file_date=date_str,
+            file_status=file_status,
+            file_size=file_size,
+            raw_text=cell_text,
+        )
+
+    def _find_all_file_cells(self, parent: auto.Control) -> List:
+        """递归查找所有 mmui::FileListCell 控件"""
+        results = []
+        try:
+            children = parent.GetChildren()
+            for child in children:
+                if child.ClassName == self.FILE_LIST_CELL_CLASS:
+                    results.append(child)
+                else:
+                    results.extend(self._find_all_file_cells(child))
+        except Exception:
+            pass
+        return results
+
+    def get_all_files(self) -> List[ChatFile]:
+        """获取聊天文件窗口中所有可见的文件列表"""
+        if not self.exists:
+            raise RuntimeError("聊天文件窗口未打开")
+        self.activate()
+
+        files = []
+        for cell in self._find_all_file_cells(self._win):
+            chat_file = self.parse_file_cell_text(cell.Name)
+            if chat_file:
+                chat_file._cell = cell
+                files.append(chat_file)
+        return files
+
+    def get_today_files(self) -> List[ChatFile]:
+        """获取今天的文件列表"""
+        all_files = self.get_all_files()
+        today_str = i_("今天")
+        today_date = date.today()
+        today_formatted = f"{today_date.year}年{today_date.month}月{today_date.day}日"
+        return [f for f in all_files
+                if f.file_date == today_str or f.file_date == today_formatted]
+
+    def __str__(self) -> str:
+        if self._win.Exists(0, 0):
+            return "FileManager(open)"
+        return "FileManager(closed)"
+
+
 class Weixin(WeixinWindow):
 
     WINDOW_CLASS = "mmui::MainWindow"
@@ -14274,14 +14276,14 @@ class Weixin(WeixinWindow):
     def __init__(
         self, 
         pid: Optional[int] = None,
-        on_login: "callable | None" = None,
+        on_login: Optional[callable] = None,
         default_login_timeout: float = 60,
         background: bool = False, 
         idle_wait: float = 0, 
         lock_input: bool = False, 
         resize: bool = False,
         install_path: Optional[str] = None,
-        ocr_engine: str = "wcocr",
+        ocr_engine: Literal["wcocr", "rapidocr"] = "wcocr",
         wxocr_weixin_install_path: Optional[str] = None, 
         wxocr_plugin_path: Optional[str] = None
     ):
@@ -14444,7 +14446,7 @@ class Weixin(WeixinWindow):
     def __del__(self):
         self.move_back()
 
-    def auto_detect_lang(self, pid):
+    def auto_detect_lang(self, pid: int) -> None:
         # 自动检测微信界面语言并设置全局语言
         detected_lang = _detect_language(pid)
         _set_language(detected_lang)
@@ -14567,7 +14569,7 @@ class Weixin(WeixinWindow):
             time.sleep(interval)
         return False
 
-    def _handle_login(self, login: "Login") -> None:
+    def _handle_login(self, login: Login) -> None:
         """
         处理登录窗口。
 
@@ -14630,14 +14632,14 @@ class Weixin(WeixinWindow):
         return None
 
     @property
-    def chats(self) -> list[Chat | SeparateChat]:
+    def chats(self) -> List[Union[Chat, SeparateChat]]:
         """
         获取所有已打开的聊天窗口对象。
 
         包括主窗口中的当前聊天（Chat）和所有独立聊天窗口（SeparateChat）。
         通过桌面顶层窗口按 PID 过滤，避免匹配到其他微信实例的窗口。
         """
-        result: list[Chat | SeparateChat] = []
+        result: List = []  # type: List[Union[Chat, SeparateChat]]
 
         # 主窗口中的当前聊天
         main_chat = self.chat
@@ -14662,38 +14664,38 @@ class Weixin(WeixinWindow):
         return self.session.open_session(nickname)
 
     @PIM.guard
-    def open_session_by_search(self, nickname: str, chat_type: Optional[list[str]] = None, force_search: bool = False) -> Chat:
+    def open_session_by_search(self, nickname: str, chat_type: Optional[List[str]] = None, force_search: bool = False) -> Chat:
         """通过搜索打开指定会话，返回 Chat 对象"""
         return self.session.open_session_by_search(nickname, chat_type, force_search)
 
     def close_session(self, nickname: str) -> None:
         return self.session.close(nickname)
 
-    def send_text(self, nickname: str, content: str, quote: "Message | int | None" = None, timeout: float = 0) -> MessageStatus:
+    def send_text(self, nickname: str, content: str, quote: Optional[Union[Message, int]] = None, timeout: float = 0) -> MessageStatus:
         """发送文本"""
         return self.chat_with(nickname).send_text(content, quote=quote, timeout=timeout)
 
-    def send_file(self, nickname: str, file_path: "str | list[str]", quote: "Message | int | None" = None, timeout: float = 0) -> MessageStatus:
+    def send_file(self, nickname: str, file_path: Union[str, List[str]], quote: Optional[Union[Message, int]] = None, timeout: float = 0) -> MessageStatus:
         """发送文件"""
         return self.chat_with(nickname).send_file(file_path, quote=quote, timeout=timeout)
 
-    def send_image(self, nickname: str, file_path: "str | list[str]", quote: "Message | int | None" = None, timeout: float = 0) -> MessageStatus:
+    def send_image(self, nickname: str, file_path: Union[str, List[str]], quote: Optional[Union[Message, int]] = None, timeout: float = 0) -> MessageStatus:
         """发送图片"""
         return self.chat_with(nickname).send_image(file_path, quote=quote, timeout=timeout)
 
-    def send_video(self, nickname: str, file_path: "str | list[str]", quote: "Message | int | None" = None, timeout: float = 0) -> MessageStatus:
+    def send_video(self, nickname: str, file_path: Union[str, List[str]], quote: Optional[Union[Message, int]] = None, timeout: float = 0) -> MessageStatus:
         """发送视频"""
         return self.chat_with(nickname).send_video(file_path, quote=quote, timeout=timeout)
 
-    def send_at(self, nickname: str, content: str, at_members: list[str], quote: "Message | int | None" = None, timeout: float = 0) -> MessageStatus:
+    def send_at(self, nickname: str, content: str, at_members: List[str], quote: Optional[Union[Message, int]] = None, timeout: float = 0) -> MessageStatus:
         """发送群@消息"""
         return self.chat_with(nickname).send_at(content, at_members, quote=quote, timeout=timeout)
 
-    def send_collection(self, nickname: str, keyword: str, quote: "Message | int | None" = None, timeout: float = 0) -> MessageStatus:
+    def send_collection(self, nickname: str, keyword: str, quote: Optional[Union[Message, int]] = None, timeout: float = 0) -> MessageStatus:
         """发送收藏内容"""
         return self.chat_with(nickname).send_collection(keyword, quote=quote, timeout=timeout)
 
-    def send_emotion(self, nickname: str, keyword: str = None, index: int = 1, quote: "Message | int | None" = None, timeout: float = 0) -> MessageStatus:
+    def send_emotion(self, nickname: str, keyword: str = None, index: int = 1, quote: Optional[Union[Message, int]] = None, timeout: float = 0) -> MessageStatus:
         """发送表情"""
         return self.chat_with(nickname).send_emotion(keyword, index, quote=quote, timeout=timeout)
 
@@ -14709,7 +14711,7 @@ class Weixin(WeixinWindow):
         """创建笔记并写入内容，完成后关闭笔记窗口。"""
         return self.session.create_note(content)
 
-    def create_room(self, nickname_list: list[str]) -> None:
+    def create_room(self, nickname_list: List[str]) -> None:
         """发起群聊。"""
         self.session.create_room(nickname_list)
 
@@ -14735,13 +14737,13 @@ class Weixin(WeixinWindow):
         except (WxWindowNotFoundError, ValueError):
             return None
 
-    def get_separate_chats(self) -> list[SeparateChat]:
+    def get_separate_chats(self) -> List[SeparateChat]:
         """
         获取所有已打开的独立聊天窗口（按 PID 过滤）。
 
         遍历桌面顶层窗口，返回属于当前微信进程的所有独立聊天窗口。
         """
-        result: list[SeparateChat] = []
+        result: List[SeparateChat] = []
         skip_names = {"微信", "Weixin"}
         for ctrl in auto.GetRootControl().GetChildren():
             try:
@@ -14754,8 +14756,8 @@ class Weixin(WeixinWindow):
                 pass
         return result
 
-    def chat_with(self, nickname: str, chat_type: Optional[list[str]] = None,
-                  force_search: bool = False) -> "Chat | SeparateChat":
+    def chat_with(self, nickname: str, chat_type: Optional[List[str]] = None,
+                  force_search: bool = False) -> Union[Chat, SeparateChat]:
         """
         获取与指定联系人/群聊的聊天窗口对象。
 
@@ -14795,11 +14797,11 @@ class Weixin(WeixinWindow):
         """设置联系人的备注名"""
         return self.chat_with(nickname).set_contact_remark(remark)
 
-    def set_contact_label(self, nickname: str, labels: list[str]) -> None:
+    def set_contact_label(self, nickname: str, labels: List[str]) -> None:
         """为联系人设置标签"""
         return self.chat_with(nickname).set_contact_info(labels=labels)
 
-    def set_contact_phone(self, nickname: str, phones: list[str]) -> None:
+    def set_contact_phone(self, nickname: str, phones: List[str]) -> None:
         """为联系人设置电话号码"""
         return self.chat_with(nickname).set_contact_info(phones=phones)
 
@@ -14807,39 +14809,39 @@ class Weixin(WeixinWindow):
         """设置联系人的描述信息"""
         return self.chat_with(nickname).set_contact_info(description=description)
 
-    def set_contact_image(self, nickname: str, images: list[str]) -> None:
+    def set_contact_image(self, nickname: str, images: List[str]) -> None:
         """设置联系人的备注图片（覆盖式）"""
         return self.chat_with(nickname).set_contact_info(images=images)
 
-    def add_contact_label(self, nickname: str, labels: list[str]) -> None:
+    def add_contact_label(self, nickname: str, labels: List[str]) -> None:
         """为联系人添加标签"""
         return self.chat_with(nickname).add_contact_label(labels)
 
-    def add_contact_phone(self, nickname: str, phones: list[str]) -> None:
+    def add_contact_phone(self, nickname: str, phones: List[str]) -> None:
         """为联系人添加电话号码"""
         return self.chat_with(nickname).add_contact_phone(phones)
 
-    def add_contact_image(self, nickname: str, images: list[str]) -> None:
+    def add_contact_image(self, nickname: str, images: List[str]) -> None:
         """为联系人添加备注图片"""
         return self.chat_with(nickname).add_contact_image(images)
 
-    def remove_contact_label(self, nickname: str, labels: list[str]) -> None:
+    def remove_contact_label(self, nickname: str, labels: List[str]) -> None:
         """移除联系人的标签"""
         return self.chat_with(nickname).remove_contact_label(labels)
 
-    def remove_contact_phone(self, nickname: str, phones: list[str]) -> None:
+    def remove_contact_phone(self, nickname: str, phones: List[str]) -> None:
         """移除联系人的电话号码"""
         return self.chat_with(nickname).remove_contact_phone(phones)
 
-    def remove_contact_image(self, nickname: str, images: list[int]) -> None:
+    def remove_contact_image(self, nickname: str, images: List[int]) -> None:
         """删除联系人的备注图片（按序号）"""
         return self.chat_with(nickname).remove_contact_image(images)
 
-    def collect_contact_image(self, nickname: str, images: list[int]) -> int:
+    def collect_contact_image(self, nickname: str, images: List[int]) -> int:
         """收藏联系人的指定备注图片"""
         return self.chat_with(nickname).collect_contact_image(images)
 
-    def save_contact_image(self, nickname: str, images: list[int], save_path: str) -> int:
+    def save_contact_image(self, nickname: str, images: List[int], save_path: str) -> int:
         """保存联系人的指定备注图片到指定目录"""
         return self.chat_with(nickname).save_contact_image(images, save_path)
 
@@ -14855,7 +14857,7 @@ class Weixin(WeixinWindow):
         """获取联系人的朋友权限设置"""
         return self.chat_with(nickname).get_friend_permission()
 
-    def set_friend_permission(self, nickname: str, permission: str = "all",
+    def set_friend_permission(self, nickname: str, permission: Literal["all", "chatonly"] = "all",
                               hide_my_posts: bool = False,
                               hide_their_posts: bool = False) -> None:
         """设置联系人的朋友权限"""
@@ -14889,11 +14891,11 @@ class Weixin(WeixinWindow):
         """退出指定群聊"""
         return self.chat_with(nickname).exit_room()
 
-    def add_room_members(self, nickname: str, members: list[str]) -> None:
+    def add_room_members(self, nickname: str, members: List[str]) -> None:
         """添加指定群聊的成员"""
         return self.chat_with(nickname).add_room_members(members)
 
-    def remove_room_members(self, nickname: str, members: list[str]) -> None:
+    def remove_room_members(self, nickname: str, members: List[str]) -> None:
         """移除指定群聊的成员"""
         return self.chat_with(nickname).remove_room_members(members)
 
@@ -15147,8 +15149,8 @@ class Weixin(WeixinWindow):
         self.activate()
         self.shortcut("发送消息")
 
-    def click(self, control, button: str = "left",
-              click: str = "once") -> None:
+    def click(self, control: auto.Control, button: Literal["left", "right", "middle"] = "left",
+              click: Literal["once", "double"] = "once") -> None:
         """
         点击 uiautomation 控件。
 
@@ -15163,23 +15165,23 @@ class Weixin(WeixinWindow):
         """
         input_wx.click(control, button=button, click=click)
 
-    def get_moments(self, count: int = 10, position: str = "top") -> list:
+    def get_moments(self, count: int = 10, position: Literal["top", "current"] = "top") -> list:
         """获取朋友圈动态列表，委托给 moment"""
         return self.moment.get_moments(count, position)
 
-    def iter_moments(self, count: int = 10, position: str = "top"):
+    def iter_moments(self, count: int = 10, position: Literal["top", "current"] = "top"):
         """逐条获取朋友圈动态（生成器），委托给 moment"""
         yield from self.moment.iter_moments(count, position)
 
-    def like_moment(self, moment_item: "MomentItem") -> bool:
+    def like_moment(self, moment_item: MomentItem) -> bool:
         """对指定动态点赞"""
         return self.moment.like(moment_item)
 
-    def unlike_moment(self, moment_item: "MomentItem") -> bool:
+    def unlike_moment(self, moment_item: MomentItem) -> bool:
         """取消指定动态的点赞"""
         return self.moment.unlike(moment_item)
 
-    def comment_moment(self, moment_item: "MomentItem", content: str) -> bool:
+    def comment_moment(self, moment_item: MomentItem, content: str) -> bool:
         """对指定动态评论"""
         return self.moment.comment(moment_item, content)
 
@@ -15191,7 +15193,7 @@ class Weixin(WeixinWindow):
         """关闭朋友圈窗口"""
         self.moment.close()
 
-    def ocr(self, image: bytes | str) -> dict:
+    def ocr(self, image: Union[bytes, str]) -> dict:
         """
         识别图片中的文本内容。
 
@@ -15207,7 +15209,7 @@ class Weixin(WeixinWindow):
         """
         return self.get_image_text(image)
 
-    def get_image_text(self, image: bytes | str) -> dict:
+    def get_image_text(self, image: Union[bytes, str]) -> dict:
         """
         识别图片中的文本内容。
 
@@ -15227,7 +15229,7 @@ class Weixin(WeixinWindow):
             return self._get_image_text_rapidocr(image)
         return self._get_image_text_wcocr(image)
 
-    def _get_image_text_rapidocr(self, image: bytes | str) -> dict:
+    def _get_image_text_rapidocr(self, image: Union[bytes, str]) -> dict:
         """使用 RapidOCR 识别图片"""
         if isinstance(image, str):
             with open(image, "rb") as f:
@@ -15248,7 +15250,7 @@ class Weixin(WeixinWindow):
             }
         return data
 
-    def _get_image_text_wcocr(self, image: bytes | str) -> dict:
+    def _get_image_text_wcocr(self, image: Union[bytes, str]) -> dict:
         """使用微信 OCR 识别图片"""
         if isinstance(image, str):
             result = wcocr.ocr(image)
@@ -15285,7 +15287,7 @@ class Weixin(WeixinWindow):
             }
         return data
 
-    def _register_handler(self, events: "Event | list[Event] | None",
+    def _register_handler(self, events: Optional[Union[Event, List[Event]]],
                          func: callable, once: bool = False) -> callable:
         """内部方法：注册事件处理器到 pyee EventEmitter"""
         if not events:
@@ -15300,7 +15302,7 @@ class Weixin(WeixinWindow):
             listen(event, func)
         return func
 
-    def on(self, events: "Event | list[Event] | None" = None) -> "callable":
+    def on(self, events: Optional[Union[Event, List[Event]]] = None) -> callable:
         """
         注册消息事件处理器（装饰器）。
 
@@ -15322,7 +15324,7 @@ class Weixin(WeixinWindow):
             return self._register_handler(events, func, once=False)
         return decorator
 
-    def once(self, events: "Event | list[Event] | None" = None) -> "callable":
+    def once(self, events: Optional[Union[Event, List[Event]]] = None) -> callable:
         """
         注册一次性消息事件处理器（装饰器）。
 
@@ -15338,7 +15340,7 @@ class Weixin(WeixinWindow):
             return self._register_handler(events, func, once=True)
         return decorator
 
-    def off(self, events: "Event | list[Event] | None" = None, func: "callable | None" = None) -> None:
+    def off(self, events: Optional[Union[Event, List[Event]]] = None, func: Optional[callable] = None) -> None:
         """
         移除事件处理器。
 
@@ -15361,7 +15363,7 @@ class Weixin(WeixinWindow):
             else:
                 self._ee.remove_listener(event, func)
 
-    def _emit(self, message: "Message") -> None:
+    def _emit(self, message: Message) -> None:
         """
         触发消息事件，通过 pyee EventEmitter 分发到所有匹配的处理器。
 
@@ -15382,7 +15384,7 @@ class Weixin(WeixinWindow):
         """是否注册了任何事件处理器"""
         return bool(self._ee.event_names())
 
-    def add_chat_listen(self, names: "str | list[str] | None" = None) -> list[SeparateChat]:
+    def add_chat_listen(self, names: Optional[Union[str, List[str]]] = None) -> List[SeparateChat]:
         """
         注册要监听的聊天窗口。
 
@@ -15397,7 +15399,7 @@ class Weixin(WeixinWindow):
             后台模式下窗口会自动移到屏幕外，前台模式下保持原位。
         """
         if not hasattr(self, '_chat_listeners'):
-            self._chat_listeners: dict[str, SeparateChat] = {}
+            self._chat_listeners: Dict[str, SeparateChat] = {}
         self._offscreen = background
 
         # names 为 None 时，自动发现所有已打开的独立聊天窗口
@@ -15426,7 +15428,7 @@ class Weixin(WeixinWindow):
             names = [names]
 
         if isinstance(names, Iterable):
-            result: list[SeparateChat] = []
+            result: List[SeparateChat] = []
             for name in names:
                 if not name:
                     continue
@@ -15453,7 +15455,7 @@ class Weixin(WeixinWindow):
 
             return result
 
-    def remove_chat_listen(self, names: "str | list[str] | None" = None) -> None:
+    def remove_chat_listen(self, names: Optional[Union[str, List[str]]] = None) -> None:
         """
         移除聊天监听。
 
@@ -15461,7 +15463,7 @@ class Weixin(WeixinWindow):
             names: 要移除的联系人/群聊名称。
                 - None: 移除所有监听
                 - str: 移除单个监听
-                - list[str]: 移除列表中的监听
+                - List[str]: 移除列表中的监听
 
         移除后如果窗口在屏幕外（offscreen），会自动移回原位。
         """
@@ -15526,15 +15528,15 @@ class Weixin(WeixinWindow):
 
         self._stop_event = threading.Event()
         stop_event = self._stop_event
-        msg_queue: Queue[tuple[SeparateChat, Message]] = Queue()
-        threads: dict[str, threading.Thread] = {}
+        msg_queue: Queue[Tuple[SeparateChat, Message]] = Queue()
+        threads: Dict[str, threading.Thread] = {}
 
         def _watch_chat(chat: SeparateChat, name: str) -> None:
             # 滑动窗口：保留最近 N 条消息的 msg_id，N = 当前可见消息数量
-            known_msg_ids: deque[int] = deque()
-            known_msg_id_set: set[int] = set()
+            known_msg_ids: Deque[int] = deque()
+            known_msg_id_set: Set[int] = set()
             # 发送者缓存：{msg_id: (sender, source, bubble_rect, headimg_rect, nickname_rect, content_rect)}
-            sender_cache: dict[int, tuple] = {}
+            sender_cache: Dict[int, tuple] = {}
             first_scan = True
 
             # 监听前滚动到最新消息
@@ -15714,7 +15716,7 @@ class WeixinManager:
         idle_wait: float = 0,
         lock_input: bool = False,
         resize: bool = False,
-        ocr_engine: str = "wcocr",
+        ocr_engine: Literal["wcocr", "rapidocr"] = "wcocr",
         wxocr_weixin_install_path: Optional[str] = None,
         wxocr_plugin_path: Optional[str] = None,
     ):
@@ -15735,7 +15737,7 @@ class WeixinManager:
             wxocr_weixin_install_path: 微信 OCR 安装路径，None 时自动检测
             wxocr_plugin_path:         微信 OCR 插件路径，None 时自动检测
         """
-        self._instances: dict[int, Weixin] = {}
+        self._instances: Dict[int, Weixin] = {}
         self._default_kwargs = {
             "background": background,
             "idle_wait": idle_wait,
@@ -15751,7 +15753,7 @@ class WeixinManager:
 
     # ---- 客户端管理 ----
 
-    def open(self, on_login: "callable | None" = None,
+    def open(self, on_login: Optional[callable] = None,
              install_path: Optional[str] = None, timeout: float = 30,
              **kwargs) -> int:
         """
@@ -15808,7 +15810,7 @@ class WeixinManager:
         time.sleep(2)
         return self.connect(pid, on_login=on_login, **kwargs)
 
-    def connect(self, pid: int, on_login: "callable | None" = None, **kwargs) -> int:
+    def connect(self, pid: int, on_login: Optional[callable] = None, **kwargs) -> int:
         """
         连接已运行的微信客户端。
 
@@ -15834,15 +15836,15 @@ class WeixinManager:
         self._instances[pid] = weixin
         return pid
 
-    def connect_all(self, on_login: "callable | None" = None, **kwargs) -> list[int]:
+    def connect_all(self, on_login: Optional[callable] = None, **kwargs) -> List[int]:
         """
         连接所有已运行的微信客户端。
 
         Returns:
             所有已连接的 PID 列表
         """
-        connected: list[int] = []
-        seen_pids: set[int] = set()
+        connected: List[int] = []
+        seen_pids: Set[int] = set()
 
         for ctrl in auto.GetRootControl().GetChildren():
             try:
@@ -15910,12 +15912,12 @@ class WeixinManager:
         return self._instances[pid]
 
     @property
-    def pids(self) -> list[int]:
+    def pids(self) -> List[int]:
         """所有已连接的 PID 列表"""
         return list(self._instances.keys())
 
     @property
-    def instances(self) -> dict[int, Weixin]:
+    def instances(self) -> Dict[int, Weixin]:
         """所有已连接的 {pid: Weixin} 字典"""
         return dict(self._instances)
 
@@ -15930,31 +15932,31 @@ class WeixinManager:
 
     # ---- 消息发送 ----
 
-    def send_text(self, pid: int, nickname: str, content: str, quote: "Message | int | None" = None, timeout: float = 0) -> "MessageStatus":
+    def send_text(self, pid: int, nickname: str, content: str, quote: Optional[Union[Message, int]] = None, timeout: float = 0) -> MessageStatus:
         """发送文本"""
         return self.get_weixin(pid).send_text(nickname, content, quote=quote, timeout=timeout)
 
-    def send_file(self, pid: int, nickname: str, file_path: "str | list[str]", quote: "Message | int | None" = None, timeout: float = 0) -> "MessageStatus":
+    def send_file(self, pid: int, nickname: str, file_path: Union[str, List[str]], quote: Optional[Union[Message, int]] = None, timeout: float = 0) -> MessageStatus:
         """发送文件"""
         return self.get_weixin(pid).send_file(nickname, file_path, quote=quote, timeout=timeout)
 
-    def send_image(self, pid: int, nickname: str, file_path: "str | list[str]", quote: "Message | int | None" = None, timeout: float = 0) -> "MessageStatus":
+    def send_image(self, pid: int, nickname: str, file_path: Union[str, List[str]], quote: Optional[Union[Message, int]] = None, timeout: float = 0) -> MessageStatus:
         """发送图片"""
         return self.get_weixin(pid).send_image(nickname, file_path, quote=quote, timeout=timeout)
 
-    def send_video(self, pid: int, nickname: str, file_path: "str | list[str]", quote: "Message | int | None" = None, timeout: float = 0) -> "MessageStatus":
+    def send_video(self, pid: int, nickname: str, file_path: Union[str, List[str]], quote: Optional[Union[Message, int]] = None, timeout: float = 0) -> MessageStatus:
         """发送视频"""
         return self.get_weixin(pid).send_video(nickname, file_path, quote=quote, timeout=timeout)
 
-    def send_at(self, pid: int, nickname: str, content: str, at_members: list[str], quote: "Message | int | None" = None, timeout: float = 0) -> "MessageStatus":
+    def send_at(self, pid: int, nickname: str, content: str, at_members: List[str], quote: Optional[Union[Message, int]] = None, timeout: float = 0) -> MessageStatus:
         """发送群@消息"""
         return self.get_weixin(pid).send_at(nickname, content, at_members, quote=quote, timeout=timeout)
 
-    def send_emotion(self, pid: int, nickname: str, keyword: str = None, index: int = 1, quote: "Message | int | None" = None, timeout: float = 0) -> "MessageStatus":
+    def send_emotion(self, pid: int, nickname: str, keyword: str = None, index: int = 1, quote: Optional[Union[Message, int]] = None, timeout: float = 0) -> MessageStatus:
         """发送表情"""
         return self.get_weixin(pid).send_emotion(nickname, keyword, index, quote=quote, timeout=timeout)
 
-    def send_collection(self, pid: int, nickname: str, keyword: str, quote: "Message | int | None" = None, timeout: float = 0) -> "MessageStatus":
+    def send_collection(self, pid: int, nickname: str, keyword: str, quote: Optional[Union[Message, int]] = None, timeout: float = 0) -> MessageStatus:
         """发送收藏内容"""
         return self.get_weixin(pid).send_collection(nickname, keyword, quote=quote, timeout=timeout)
 
@@ -15964,11 +15966,11 @@ class WeixinManager:
 
     # ---- 会话管理 ----
 
-    def open_session(self, pid: int, nickname: str) -> "Chat":
+    def open_session(self, pid: int, nickname: str) -> Chat:
         """打开会话"""
         return self.get_weixin(pid).open_session(nickname)
 
-    def open_session_by_search(self, pid: int, nickname: str, chat_type: Optional[list[str]] = None, force_search: bool = False) -> "Chat":
+    def open_session_by_search(self, pid: int, nickname: str, chat_type: Optional[List[str]] = None, force_search: bool = False) -> Chat:
         """通过搜索打开会话"""
         return self.get_weixin(pid).open_session_by_search(nickname, chat_type, force_search)
 
@@ -15976,7 +15978,7 @@ class WeixinManager:
         """关闭会话"""
         return self.get_weixin(pid).close_session(nickname)
 
-    def create_room(self, pid: int, nickname_list: list[str]) -> None:
+    def create_room(self, pid: int, nickname_list: List[str]) -> None:
         """发起群聊"""
         return self.get_weixin(pid).create_room(nickname_list)
 
@@ -16008,11 +16010,11 @@ class WeixinManager:
         """设置联系人备注"""
         return self.get_weixin(pid).set_contact_remark(nickname, remark)
 
-    def add_contact_label(self, pid: int, nickname: str, labels: list[str]) -> None:
+    def add_contact_label(self, pid: int, nickname: str, labels: List[str]) -> None:
         """添加联系人标签"""
         return self.get_weixin(pid).add_contact_label(nickname, labels)
 
-    def remove_contact_label(self, pid: int, nickname: str, labels: list[str]) -> None:
+    def remove_contact_label(self, pid: int, nickname: str, labels: List[str]) -> None:
         """移除联系人标签"""
         return self.get_weixin(pid).remove_contact_label(nickname, labels)
 
@@ -16046,11 +16048,11 @@ class WeixinManager:
         """设置群公告"""
         return self.get_weixin(pid).set_room_announcement(nickname, content)
 
-    def add_room_members(self, pid: int, nickname: str, members: list[str]) -> None:
+    def add_room_members(self, pid: int, nickname: str, members: List[str]) -> None:
         """添加群成员"""
         return self.get_weixin(pid).add_room_members(nickname, members)
 
-    def remove_room_members(self, pid: int, nickname: str, members: list[str]) -> None:
+    def remove_room_members(self, pid: int, nickname: str, members: List[str]) -> None:
         """移除群成员"""
         return self.get_weixin(pid).remove_room_members(nickname, members)
 
@@ -16086,18 +16088,18 @@ class WeixinManager:
 
     # ---- 朋友圈 ----
 
-    def get_moments(self, pid: int, count: int = 10, position: str = "top") -> list:
+    def get_moments(self, pid: int, count: int = 10, position: Literal["top", "current"] = "top") -> list:
         """获取朋友圈动态"""
         return self.get_weixin(pid).get_moments(count, position)
 
-    def publish(self, pid: int, text: Optional[str] = None, images: list[str] = None,
+    def publish(self, pid: int, text: Optional[str] = None, images: List[str] = None,
                 video: str = None, **kwargs) -> bool:
         """发布朋友圈"""
         return self.get_weixin(pid).moment.publish(text=text, images=images, video=video, **kwargs)
 
     # ---- 统一消息监听 ----
 
-    def on(self, events: "Event | list[Event] | None" = None) -> "callable":
+    def on(self, events: Optional[Union[Event, List[Event]]] = None) -> callable:
         """
         注册消息事件处理器（装饰器）。
 
@@ -16126,7 +16128,7 @@ class WeixinManager:
             return func
         return decorator
 
-    def once(self, events: "Event | list[Event] | None" = None) -> "callable":
+    def once(self, events: Optional[Union[Event, List[Event]]] = None) -> callable:
         """
         注册一次性消息事件处理器（装饰器）。
 
@@ -16144,7 +16146,7 @@ class WeixinManager:
             return func
         return decorator
 
-    def off(self, events: "Event | list[Event] | None" = None, func: "callable | None" = None) -> None:
+    def off(self, events: Optional[Union[Event, List[Event]]] = None, func: Optional[callable] = None) -> None:
         """移除事件处理器"""
         if events is None:
             if func is None:
@@ -16160,7 +16162,7 @@ class WeixinManager:
             else:
                 self._ee.remove_listener(event, func)
 
-    def _emit(self, pid: int, weixin: Weixin, chat: "SeparateChat", message: "Message") -> None:
+    def _emit(self, pid: int, weixin: Weixin, chat: SeparateChat, message: Message) -> None:
         """触发消息事件，回调签名: callback(weixin, chat, message)"""
         event_type = _MSG_CLASS_TO_EVENT.get(type(message), Event.OTHER)
         self._ee.emit(event_type, weixin, chat, message)
@@ -16171,7 +16173,7 @@ class WeixinManager:
         """是否注册了任何事件处理器"""
         return bool(self._ee.event_names())
 
-    def add_chat_listen(self, pid: int, names: "str | list[str] | None" = None) -> list["SeparateChat"]:
+    def add_chat_listen(self, pid: int, names: Optional[Union[str, List[str]]] = None) -> List[SeparateChat]:
         """
         为指定客户端注册聊天监听。
 
@@ -16185,21 +16187,21 @@ class WeixinManager:
         weixin = self.get_weixin(pid)
         return weixin.add_chat_listen(names)
 
-    def add_all_chats_listen(self) -> dict[int, list["SeparateChat"]]:
+    def add_all_chats_listen(self) -> Dict[int, List[SeparateChat]]:
         """
         为所有已连接的客户端注册聊天监听（自动发现所有独立窗口）。
 
         Returns:
             {pid: [SeparateChat, ...]} 字典
         """
-        result: dict[int, list["SeparateChat"]] = {}
+        result: Dict[int, List[SeparateChat]] = {}
         for pid, weixin in self._instances.items():
             chats = weixin.add_chat_listen(None)
             if chats:
                 result[pid] = chats
         return result
 
-    def remove_chat_listen(self, pid: int, names: "str | list[str] | None" = None) -> None:
+    def remove_chat_listen(self, pid: int, names: Optional[Union[str, List[str]]] = None) -> None:
         """
         移除指定客户端的聊天监听。
 
@@ -16232,7 +16234,7 @@ class WeixinManager:
             )
 
         # 收集所有有监听的客户端
-        listen_instances: dict[int, Weixin] = {}
+        listen_instances: Dict[int, Weixin] = {}
         for pid, weixin in self._instances.items():
             if hasattr(weixin, '_chat_listeners') and weixin._chat_listeners:
                 listen_instances[pid] = weixin
@@ -16242,15 +16244,15 @@ class WeixinManager:
 
         self._stop_event = threading.Event()
         stop_event = self._stop_event
-        msg_queue: Queue[tuple[int, Weixin, SeparateChat, Message]] = Queue()
-        threads: dict[str, threading.Thread] = {}
+        msg_queue: Queue[Tuple[int, Weixin, SeparateChat, Message]] = Queue()
+        threads: Dict[str, threading.Thread] = {}
 
-        def _watch_chat(pid: int, weixin: Weixin, chat: "SeparateChat", name: str) -> None:
+        def _watch_chat(pid: int, weixin: Weixin, chat: SeparateChat, name: str) -> None:
             from collections import deque
             # 滑动窗口：保留最近 N 条消息的 msg_id，N = 当前可见消息数量
-            known_msg_ids: deque[int] = deque()
-            known_msg_id_set: set[int] = set()
-            sender_cache: dict[int, tuple] = {}
+            known_msg_ids: Deque[int] = deque()
+            known_msg_id_set: Set[int] = set()
+            sender_cache: Dict[int, tuple] = {}
             first_scan = True
             offscreen = weixin.background
 
