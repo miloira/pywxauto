@@ -1068,28 +1068,6 @@ def run(droplet_token, device_id, send_offline_msg):
     # 用列表包装 task_mgr 引用，供闭包内使用
     _api_task_mgr_ref = [None]
 
-    @api.post("/siyu/wxrpa/msg/send_text")
-    def send_text_callback(req: SendTextRequest):
-        """接收发送文本消息的推送通知，保存到任务表"""
-        task = _api_task_mgr_ref[0].create(
-            task_type="send_text",
-            task_name=f"发送文本到 {req.to}",
-            to=req.to,
-            content=req.content,
-            at_members=req.at_members,
-            msg_id=req.msg_id,
-            bot_id=req.bot_id or "",
-        )
-        return {
-            "code": 0,
-            "msg": "任务已创建",
-            "data": {
-                "task_id": task.id,
-                "status": task.status.value,
-                "created_at": task.created_at.isoformat(),
-            },
-        }
-
     @api.post("/droplet/call")
     def siyu_cmd_callback(req: SiyuCmdRequest):
         """接收 WxService 服务端推送的统一命令，解析后生成对应任务。"""
