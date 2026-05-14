@@ -1033,7 +1033,7 @@ def run(droplet_token, device_id, send_offline_msg):
     # FastAPI 回调服务
     # ==============================
 
-    api = FastAPI(title="聚协云智能私域机器人RPA版本", version="0.0.1")
+    api = FastAPI(title="聚协云私域社群智能机器人RPA版本", version="0.0.1")
 
     class SendTextRequest(BaseModel):
         """发送文本消息的回调请求体"""
@@ -1272,7 +1272,7 @@ def run(droplet_token, device_id, send_offline_msg):
     os.makedirs(TEMP_DIR, exist_ok=True)
 
     print("=" * 55)
-    print("  聚协云智能私域机器人RPA版本")
+    print("  聚协云私域社群智能机器人RPA版本")
     print("=" * 55)
 
     # 初始化微信
