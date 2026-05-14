@@ -7261,7 +7261,7 @@ class Moment(WeixinWindow):
         if permission not in (i_("公开"), i_("私密"), i_("谁可以看"), i_("不给谁看")):
             raise ValueError(
                 f"无效的隐私选项 '{permission}'，"
-                f"有效值: {(i_("公开"), i_("私密"), i_("谁可以看"), i_("不给谁看"))}"
+                f"有效值: {(i_('公开'), i_('私密'), i_('谁可以看'), i_('不给谁看'))}"
             )
 
         # 点击隐私按钮打开隐私选择面板
