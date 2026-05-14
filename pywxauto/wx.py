@@ -14971,8 +14971,11 @@ class Weixin(WeixinWindow):
                    hide_their_posts: bool = False) -> None:
         """添加朋友。"""
         self.session.add_friend(
-            keyword, message=message, remark=remark,
-            permission=permission, hide_my_posts=hide_my_posts,
+            keyword, 
+            message=message, 
+            remark=remark,
+            permission=permission, 
+            hide_my_posts=hide_my_posts,
             hide_their_posts=hide_their_posts,
         )
 
@@ -15041,8 +15044,13 @@ class Weixin(WeixinWindow):
                          description: str = None,
                          images: list = None) -> None:
         """一次性设置联系人的备注、标签、电话、描述、图片"""
-        return self.chat_with(nickname).set_contact_info(remark=remark, labels=labels, phones=phones,
-                              description=description, images=images)
+        return self.chat_with(nickname).set_contact_info(
+            remark=remark, 
+            labels=labels,
+            phones=phones,
+            description=description, 
+            images=images,
+        )
 
     def set_contact_remark(self, nickname: str, remark: str) -> None:
         """设置联系人的备注名"""
@@ -15190,11 +15198,15 @@ class Weixin(WeixinWindow):
                       fold: bool = None) -> None:
         """一次性设置指定群聊的多项信息"""
         return self.chat_with(nickname).set_room_info(
-            name=name, announcement=announcement, remark=remark,
-            my_nickname=my_nickname, mute=mute, pin=pin,
+            name=name, 
+            announcement=announcement, 
+            remark=remark,
+            my_nickname=my_nickname, 
+            mute=mute, 
+            pin=pin,
             save_address_book=save_address_book,
             display_member_nickname=display_member_nickname,
-            fold=fold,
+            fold=fold
         )
 
     def fold_room_chat(self, nickname: str) -> None:
