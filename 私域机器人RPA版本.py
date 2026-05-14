@@ -493,11 +493,10 @@ def run(droplet_token, device_id, send_offline_msg):
             raise RuntimeError("未找到活跃的微信数据目录（xwechat_files/wxid_*）")
         return str(max(results, key=lambda x: x[1])[0])
 
-    WECHAT_DATA_DIR = get_latest_wxid_dir()
-    print(f"📁 微信数据目录: {WECHAT_DATA_DIR}")
+    WECHAT_DATA_DIR = None
     IDLE_FILE_SCAN_SECONDS = 600
     ENABLE_IDLE_FILE_SCAN = True
-    WECHAT_FILE_ROOT = rf"{WECHAT_DATA_DIR}\msg\file"
+    WECHAT_FILE_ROOT = None
     TEMP_DIR = os.path.join(os.environ.get("TEMP", r"C:\Temp"), "jxysy")
     EXCEL_EXTS = {".xls", ".xlsx", ".csv"}
     STABLE_CHECK_INTERVAL = 1
@@ -1272,7 +1271,7 @@ def run(droplet_token, device_id, send_offline_msg):
     print("=" * 55)
 
     # 初始化微信
-    wx = Weixin()
+    wx = Weixin(idle_wait=3)
     print("✅ 微信已连接")
     self_info = wx.get_self_info()
     bot_nickname_local = self_info.get("nickname", "")
@@ -1302,6 +1301,12 @@ def run(droplet_token, device_id, send_offline_msg):
     startup_time = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
     wx.send_text("文件传输助手", f"[{startup_time}] 机器人启动成功！")
     print("📨 已发送启动通知到文件传输助手")
+
+    # 发送消息后获取微信数据目录（发送消息会触发 db-wal 更新）
+    time.sleep(1)
+    WECHAT_DATA_DIR = get_latest_wxid_dir()
+    WECHAT_FILE_ROOT = rf"{WECHAT_DATA_DIR}\msg\file"
+    print(f"📁 微信数据目录: {WECHAT_DATA_DIR}")
 
     # 初始化任务管理器
     _db_dir = os.path.join(DROPLET_CLIENT_PATH, "GrpcMsg")
