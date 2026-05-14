@@ -6682,7 +6682,7 @@ class Chat:
             input_wx.send_keys(field, "{Ctrl}a{Del}")
 
     @PIM.guard
-    def cancel_reply(self) -> bool:
+    def cancel_quote(self) -> bool:
         """
         取消当前输入框中的引用消息。
 
