@@ -10888,7 +10888,6 @@ class Chat:
             )
             if btn.Exists(0, 0):
                 input_wx.click(btn)
-                time.sleep(0.2)
         except Exception:
             pass
 
