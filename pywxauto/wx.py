@@ -1096,7 +1096,11 @@ def get_wechat_install_path(version: Optional[int] = None) -> Optional[str]:
 def get_wechat_wxocr_path() -> Optional[str]:
     appdata_path = os.getenv("APPDATA")
     if not appdata_path:
-        return None
+        user_profile = os.getenv("USERPROFILE", "")
+        if user_profile:
+            appdata_path = os.path.join(user_profile, "AppData", "Roaming")
+        else:
+            return None
 
     ocr_dir = os.path.join(appdata_path, r"Tencent\xwechat\XPlugin\Plugins\WeChatOcr")
     if not os.path.exists(ocr_dir):
