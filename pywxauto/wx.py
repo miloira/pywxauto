@@ -7550,10 +7550,7 @@ class Chat:
         self._add_at_members(field, at_members)
 
         if content:
-            if background:
-                input_wx.paste_or_type(field, content)
-            else:
-                input_wx.paste(content)
+            input_wx.paste_or_type(field, content)
 
         send_btn = self._win.ButtonControl(RegexName=i_("发送按钮正则"))
         input_wx.click(send_btn)
