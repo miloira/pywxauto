@@ -1871,22 +1871,22 @@ def _classify_contour_rects(
         content_rect = remaining[0]
 
     # 保存分类调试图
-    if image_bytes:
-        try:
-            img = Image.open(io.BytesIO(image_bytes)).convert("RGB")
-            draw = ImageDraw.Draw(img)
-            if headimg_rect:
-                draw.rectangle(headimg_rect, outline="green", width=2)
-                draw.text((headimg_rect[0], headimg_rect[1] - 12), "headimg", fill="green")
-            if nickname_rect:
-                draw.rectangle(nickname_rect, outline="blue", width=2)
-                draw.text((nickname_rect[0], nickname_rect[1] - 12), "nickname", fill="blue")
-            if content_rect:
-                draw.rectangle(content_rect, outline="red", width=2)
-                draw.text((content_rect[0], content_rect[1] - 12), "content", fill="red")
-            img.save("classify_debug.png")
-        except Exception:
-            pass
+    # if image_bytes:
+    #     try:
+    #         img = Image.open(io.BytesIO(image_bytes)).convert("RGB")
+    #         draw = ImageDraw.Draw(img)
+    #         if headimg_rect:
+    #             draw.rectangle(headimg_rect, outline="green", width=2)
+    #             draw.text((headimg_rect[0], headimg_rect[1] - 12), "headimg", fill="green")
+    #         if nickname_rect:
+    #             draw.rectangle(nickname_rect, outline="blue", width=2)
+    #             draw.text((nickname_rect[0], nickname_rect[1] - 12), "nickname", fill="blue")
+    #         if content_rect:
+    #             draw.rectangle(content_rect, outline="red", width=2)
+    #             draw.text((content_rect[0], content_rect[1] - 12), "content", fill="red")
+    #         img.save("classify_debug.png")
+    #     except Exception:
+    #         pass
 
     return headimg_rect, nickname_rect, content_rect
 
