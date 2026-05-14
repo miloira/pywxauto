@@ -1673,7 +1673,6 @@ def rand_ratio() -> float:
     """返回 0.2~0.6 之间的随机比例，用于模拟人类点击偏移"""
     return random.uniform(0.2, 0.6)
 
-
 def _find_contour_rects(
     image_bytes: bytes,
     threshold: int = 1,
@@ -1759,7 +1758,6 @@ def _find_contour_rects(
     buf = io.BytesIO()
     img.save(buf, format="PNG")
     return buf.getvalue(), result_rects
-
 
 def _classify_contour_rects(
     rects: List[Tuple[int, int, int, int]],
@@ -1889,7 +1887,6 @@ def _classify_contour_rects(
     #         pass
 
     return headimg_rect, nickname_rect, content_rect
-
 
 def _get_hwnd(control: auto.Control) -> int:
     """从 uiautomation 控件获取所属窗口句柄，向上遍历父控件查找。"""
