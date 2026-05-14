@@ -673,77 +673,77 @@ def run(droplet_token, device_id, send_offline_msg):
                 for i, f in enumerate(reversed(today_files), 1):
                     print(f)
                     if not f._cell:
-                        print(f"  ⚠️ [{i}] 跳过（无控件引用）: {f.file_name}")
+                        print(f"  ⚠️ [{i}] 跳过（无控件引用）: {f.name}")
                         continue
 
                     # 机器人自己发的文件直接删除，不下载
-                    if f.sender_name == bot_nickname:
+                    if f.sender == bot_nickname:
                         try:
                             self._wx.file_manager.delete_file(f)
-                            print(f"  🗑️ [{i}/{len(today_files)}] 机器人自身文件直接删除: {f.file_name}")
+                            print(f"  🗑️ [{i}/{len(today_files)}] 机器人自身文件直接删除: {f.name}")
                         except Exception as e:
-                            print(f"  ⚠️ 删除异常: {f.file_name} - {e}")
+                            print(f"  ⚠️ 删除异常: {f.name} - {e}")
                         continue
 
                     # 联系人发的表格直接删除，不下载
                     if f.source_type == "contact":
                         try:
                             self._wx.file_manager.delete_file(f)
-                            print(f"  🗑️ [{i}/{len(today_files)}] 联系人文件直接删除: {f.file_name}")
+                            print(f"  🗑️ [{i}/{len(today_files)}] 联系人文件直接删除: {f.name}")
                         except Exception as e:
-                            print(f"  ⚠️ 删除异常: {f.file_name} - {e}")
+                            print(f"  ⚠️ 删除异常: {f.name} - {e}")
                         continue
 
                     # 超过 2MB 的文件直接删除，不下载
-                    if parse_file_size(f.file_size) > EXCEL_FILE_MAX_SIZE:
+                    if parse_file_size(f.size) > EXCEL_FILE_MAX_SIZE:
                         try:
                             self._wx.file_manager.delete_file(f)
-                            print(f"  🗑️ [{i}/{len(today_files)}] 文件超过2M直接删除: {f.file_name} ({f.file_size})")
+                            print(f"  🗑️ [{i}/{len(today_files)}] 文件超过2M直接删除: {f.name} ({f.size})")
                         except Exception as e:
-                            print(f"  ⚠️ 删除异常: {f.file_name} - {e}")
+                            print(f"  ⚠️ 删除异常: {f.name} - {e}")
                         continue
 
                     # 消息预校验
                     if self._siyu:
                         try:
                             precheck = self._siyu.message_precheck(
-                                room_nickname=f.source_name,
-                                sender_nickname=f.sender_name,
+                                room_nickname=f.room,
+                                sender_nickname=f.sender,
                             )
                             if not precheck.get("should_process", True):
                                 reason = precheck.get("reason", "服务端拒绝")
                                 try:
                                     self._wx.file_manager.delete_file(f)
-                                    print(f"  🚫 [{i}/{len(today_files)}] 预校验跳过并删除: {f.file_name} ({reason})")
+                                    print(f"  🚫 [{i}/{len(today_files)}] 预校验跳过并删除: {f.name} ({reason})")
                                 except Exception as e:
-                                    print(f"  ⚠️ 删除异常: {f.file_name} - {e}")
+                                    print(f"  ⚠️ 删除异常: {f.name} - {e}")
                                 continue
                         except Exception as e:
-                            print(f"  ⚠️ 预校验异常（继续处理）: {f.file_name} - {e}")
+                            print(f"  ⚠️ 预校验异常（继续处理）: {f.name} - {e}")
 
                     # 文件名校验
                     if self._siyu:
                         try:
-                            file_size_bytes = int(parse_file_size(f.file_size))
+                            file_size_bytes = int(parse_file_size(f.size))
                             validate = self._siyu.file_validate(
-                                room_nickname=f.source_name,
-                                file_name=f.file_name,
+                                room_nickname=f.room,
+                                file_name=f.name,
                                 file_size=file_size_bytes,
                             )
                             if not validate.get("valid", True):
                                 reason = validate.get("reason", "文件名无效")
                                 try:
                                     self._wx.file_manager.delete_file(f)
-                                    print(f"  🚫 [{i}/{len(today_files)}] 文件校验不通过并删除: {f.file_name} ({reason})")
+                                    print(f"  🚫 [{i}/{len(today_files)}] 文件校验不通过并删除: {f.name} ({reason})")
                                 except Exception as e:
-                                    print(f"  ⚠️ 删除异常: {f.file_name} - {e}")
+                                    print(f"  ⚠️ 删除异常: {f.name} - {e}")
                                 continue
                         except Exception as e:
-                            print(f"  ⚠️ 文件校验异常（继续处理）: {f.file_name} - {e}")
+                            print(f"  ⚠️ 文件校验异常（继续处理）: {f.name} - {e}")
 
                     # 未下载的文件先触发下载
-                    if f.file_status == "未下载":
-                        print(f"  📥 [{i}/{len(today_files)}] 下载中: {f.file_name}")
+                    if f.status == "未下载":
+                        print(f"  📥 [{i}/{len(today_files)}] 下载中: {f.name}")
                         try:
                             f.download()
                             time.sleep(3)
@@ -756,35 +756,35 @@ def run(droplet_token, device_id, send_offline_msg):
                                 except Exception:
                                     time.sleep(3)
                             if not downloaded:
-                                print(f"  ❌ 下载超时: {f.file_name}")
+                                print(f"  ❌ 下载超时: {f.name}")
                                 continue
-                            print(f"  ✅ 下载完成: {f.file_name}")
+                            print(f"  ✅ 下载完成: {f.name}")
                         except Exception as e:
-                            print(f"  ❌ 下载异常: {f.file_name} - {e}")
+                            print(f"  ❌ 下载异常: {f.name} - {e}")
                             continue
 
                     # 通过右键复制获取文件的本地路径
-                    print(f"  📋 [{i}/{len(today_files)}] 获取文件路径: {f.file_name}")
+                    print(f"  📋 [{i}/{len(today_files)}] 获取文件路径: {f.name}")
                     try:
                         file_path = f.copy()
                         time.sleep(0.5)
                         if not file_path or not os.path.exists(file_path):
-                            print(f"  ❌ 获取文件路径失败: {f.file_name} (path={file_path})")
+                            print(f"  ❌ 获取文件路径失败: {f.name} (path={file_path})")
                             continue
                         print(f"  ✅ 文件路径: {file_path}")
                     except Exception as e:
-                        print(f"  ❌ 复制获取路径异常: {f.file_name} - {e}")
+                        print(f"  ❌ 复制获取路径异常: {f.name} - {e}")
                         continue
 
                     # 上传文件到服务端
                     upload_success = False
                     if self._siyu:
-                        print(f"  📤 [{i}/{len(today_files)}] 上传服务端: {f.file_name}")
+                        print(f"  📤 [{i}/{len(today_files)}] 上传服务端: {f.name}")
                         try:
                             result = self._siyu.file_upload_raw(
                                 file_path=file_path,
-                                room_nickname=f.source_name,
-                                sender_nickname=f.sender_name or "",
+                                room_nickname=f.room,
+                                sender_nickname=f.sender or "",
                             )
                             file_id = result.get("file_id", "")
                             row_count = result.get("row_count", 0)
@@ -792,28 +792,28 @@ def run(droplet_token, device_id, send_offline_msg):
                             print(f"  ✅ 上传成功: file_id={file_id}, 总行数={row_count}, 有效行数={valid_row_count}")
                             upload_success = True
                         except SiyuError as e:
-                            print(f"  ❌ 上传失败: {f.file_name} - {e}")
+                            print(f"  ❌ 上传失败: {f.name} - {e}")
                         except Exception as e:
-                            print(f"  ❌ 上传异常: {f.file_name} - {e}")
+                            print(f"  ❌ 上传异常: {f.name} - {e}")
                             traceback.print_exc()
 
                     # 上传成功后，定位到聊天位置并引用回复确认消息，然后删除文件
                     if upload_success:
                         try:
                             f.switch_to_message()
-                            self._wx.chat.send_at(f"【Excel下单】\n您的文件已收到：{f.file_name}，订单正在处理中，请耐心等待。", at_members=[f.sender_name])
-                            print(f"  ✅ 已回复（未匹配到消息引用）: {f.file_name}")
+                            self._wx.chat.send_at(f"【Excel下单】\n您的文件已收到：{f.name}，订单正在处理中，请耐心等待。", at_members=[f.sender])
+                            print(f"  ✅ 已回复（未匹配到消息引用）: {f.name}")
                         except Exception as e:
-                            print(f"  ⚠️ 回复异常（不影响删除）: {f.file_name} - {e}")
+                            print(f"  ⚠️ 回复异常（不影响删除）: {f.name} - {e}")
 
                         try:
                             time.sleep(0.5)
                             self._wx.file_manager.delete_file(f)
-                            print(f"  🗑️ 已删除: {f.file_name}")
+                            print(f"  🗑️ 已删除: {f.name}")
                         except Exception as e:
-                            print(f"  ⚠️ 删除异常: {f.file_name} - {e}")
+                            print(f"  ⚠️ 删除异常: {f.name} - {e}")
                     else:
-                        print(f"  ⚠️ 上传未成功，保留文件不删除: {f.file_name}")
+                        print(f"  ⚠️ 上传未成功，保留文件不删除: {f.name}")
 
                 self._wx.file_manager.close()
                 print(f"  ✅ 全部处理完成")

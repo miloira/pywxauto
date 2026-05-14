@@ -13730,42 +13730,42 @@ class Moment(WeixinWindow):
 class ChatFile:
     """聊天文件信息（来自"聊天文件"管理器窗口）"""
 
-    def __init__(self, file_manager: Optional[FileManager] = None, *, file_name: str = "",
-                 sender_name: str = "", source_name: str = "", source_type: str = "",
-                 file_date: str = "", file_status: str = "", file_size: str = "",
+    def __init__(self, file_manager: Optional[FileManager] = None, *, name: str = "",
+                 sender: str = "", room: str = "", chat_type: str = "",
+                 date: str = "", status: str = "", size: str = "",
                  raw_text: str = "", _cell: Optional[auto.Control] = None):
         """
         初始化聊天文件信息。
 
         Args:
             file_manager: 关联的 FileManager 实例。
-            file_name: 文件名。
-            sender_name: 发送人昵称。
-            source_name: 来源（群名或个人昵称）。
-            source_type: 来源类型，"contact"(私聊) 或 "room"(群聊)。
-            file_date: 日期文本。
-            file_status: 状态文本（空字符串表示已下载）。
-            file_size: 文件大小文本。
+            name: 文件名。
+            sender: 发送人昵称。
+            room: 来源（群名或个人昵称）。
+            chat_type: 来源类型，"contact"(私聊) 或 "room"(群聊)。
+            date: 日期文本。
+            status: 状态文本（空字符串表示已下载）。
+            size: 文件大小文本。
             raw_text: 原始 Name 属性文本。
             _cell: UI 控件引用（内部使用）。
         """
         self.file_manager = file_manager
-        self.file_name = file_name
-        self.sender_name = sender_name
-        self.source_name = source_name
-        self.source_type = source_type
-        self.file_date = file_date
-        self.file_status = file_status
-        self.file_size = file_size
+        self.name = name
+        self.sender = sender
+        self.room = room
+        self.chat_type = chat_type
+        self.date = date
+        self.status = status
+        self.size = size
         self.raw_text = raw_text
         self._cell = _cell
 
     def __str__(self) -> str:
-        status = self.file_status if self.file_status else "已下载"
-        type_label = "联系人" if self.source_type == "contact" else "群聊"
-        return (f"[{self.file_date}] [{type_label}] {self.file_name} | "
-                f"发送人: {self.sender_name} | 来源: {self.source_name} | "
-                f"大小: {self.file_size} | 状态: {status}")
+        status = self.status if self.status else "已下载"
+        type_label = "联系人" if self.chat_type == "contact" else "群聊"
+        return (f"[{self.date}] [{type_label}] {self.name} | "
+                f"发送人: {self.sender} | 来源: {self.room} | "
+                f"大小: {self.size} | 状态: {status}")
 
     def _ensure_ready(self) -> None:
         """确保 file_manager 和 _cell 可用，且文件管理器窗口已打开"""
@@ -14201,17 +14201,17 @@ class FileManager(WeixinWindow):
             file_name = left_part
             sender_name = ""
 
-        source_type = "contact" if sender_name and sender_name == source_name else "room"
+        chat_type = "contact" if sender_name and sender_name == source_name else "room"
 
         return ChatFile(
             self,
-            file_name=file_name,
-            sender_name=sender_name,
-            source_name=source_name,
-            source_type=source_type,
-            file_date=date_str,
-            file_status=file_status,
-            file_size=file_size,
+            name=file_name,
+            sender=sender_name,
+            room=source_name,
+            chat_type=chat_type,
+            date=date_str,
+            status=file_status,
+            size=file_size,
             raw_text=cell_text,
         )
 
@@ -14250,7 +14250,7 @@ class FileManager(WeixinWindow):
         today_date = date.today()
         today_formatted = f"{today_date.year}年{today_date.month}月{today_date.day}日"
         return [f for f in all_files
-                if f.file_date == today_str or f.file_date == today_formatted]
+                if f.date == today_str or f.date == today_formatted]
 
     def __str__(self) -> str:
         if self._win.Exists(0, 0):
