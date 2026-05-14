@@ -467,6 +467,13 @@ def run(droplet_token, device_id, send_offline_msg):
     # ==============================
     # 配置常量
     # ==============================
+
+    appdata_path = os.getenv("APPDATA")
+    if appdata_path is None:
+        DROPLET_CLIENT_PATH = os.path.join(os.getenv("USERPROFILE"), "AppData", "Roaming", "droplet-client")
+    else:
+        DROPLET_CLIENT_PATH = os.path.join(appdata_path, "droplet-client")
+
     WECHAT_DATA_DIR = r"C:\Users\张明明\xwechat_files\wxid_g7leryvu7kqm22_a246"
     IDLE_FILE_SCAN_SECONDS = 120
     ENABLE_IDLE_FILE_SCAN = True
@@ -1308,7 +1315,9 @@ def run(droplet_token, device_id, send_offline_msg):
     print("📨 已发送启动通知到文件传输助手")
 
     # 初始化任务管理器
-    task_mgr = SiYuTask()
+    _db_dir = os.path.join(DROPLET_CLIENT_PATH, "GrpcMsg")
+    os.makedirs(_db_dir, exist_ok=True)
+    task_mgr = SiYuTask(db_path=os.path.join(_db_dir, "syrpa.db"))
     print("✅ 任务数据库已就绪")
 
     # 启动 FastAPI 回调服务（后台线程）
@@ -1371,12 +1380,3 @@ def run(droplet_token, device_id, send_offline_msg):
         print("\n\n🛑 已停止")
     observer.join()
     # CODE END
-
-
-
-if __name__ == "__main__":
-    run(
-        droplet_token="eyJ0eXAiOiJKV1QiLCJhbGciOiJIUzI1NiJ9.eyJpc3MiOiJKc3QiLCJhdWQiOiJKeHkiLCJzdWIiOiJKd3QiLCJpYXQiOjE3Nzg2MzY1NTMsImV4cCI6MTc3OTI0MTM1MywiY29faWQiOjEwMDAwMDMwMzgsImNvX25hbWUiOiLogZrljY_kupEiLCJ1X2lkIjo0MDA1NSwidV9uYW1lIjoi6IGa5Y2P5LqRMTEiLCJwZXJtaXNzaW9uIjpbMTAwMDAwMDVdLCJ0aW1lb3V0IjoxNzc5MjQxMzUzLCJlX2NvaWQiOjEzMjAwMjYzLCJlX3VpZCI6MTc0MjYxMTN9.yP-aO9IB1aC1u_1bHnXRxFS511FY4LYbCdULupbM6qc",
-        device_id="rpa_DESKTOP-6512490_10111",
-        send_offline_msg=None,
-    )
