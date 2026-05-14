@@ -4604,11 +4604,7 @@ class Login(WeixinWindow):
         time.sleep(0.2)
         input_wx.send_keys(edit, "{Ctrl}a{Del}")
         time.sleep(0.1)
-        vp = edit.GetValuePattern()
-        if vp:
-            vp.SetValue(value)
-        else:
-            input_wx.paste_or_type(edit, value)
+        input_wx.paste_or_type(edit, value)
 
     def _get_proxy_field(self, name: str) -> str:
         """获取代理表单字段的值"""
@@ -7265,11 +7261,8 @@ class Chat:
         field = self._input_field
         if not field.Exists(maxSearchSeconds=2):
             raise WxControlNotFoundError("未找到聊天输入框")
-        
-        if background:
-            input_wx.paste_or_type(field, content)
-        else:
-            input_wx.paste(content)
+
+        input_wx.paste_or_type(field, content)
 
         send_btn = self._win.ButtonControl(RegexName=i_("发送按钮正则"))
         input_wx.click(send_btn)
@@ -8157,19 +8150,15 @@ class Chat:
         try:
             # 1. 点击"聊天信息"按钮
             self._click_chat_info_button()
-            time.sleep(0.5)
 
             # 2. 点击联系人头像
             self._click_contact_avatar()
-            time.sleep(0.5)
 
             # 3. 点击资料面板"更多"按钮
             self._click_profile_more_button()
-            time.sleep(0.3)
 
             # 4. 点击"把他推荐给朋友"
             self._click_recommend_contact()
-            time.sleep(0.5)
 
             # 5. 在弹窗中搜索、勾选接收者并点击发送
             self._search_and_select_receiver(receiver_nickname)
@@ -8254,11 +8243,8 @@ class Chat:
 
         # 输入接收者昵称（通过剪贴板粘贴，确保触发搜索）
         input_wx.click(search_edit)
-        time.sleep(0.3)
         input_wx.send_keys(search_edit, "{Ctrl}a{Del}")
-        time.sleep(0.2)
         input_wx.paste_or_type(search_edit, receiver_nickname)
-        time.sleep(1.5)
 
         # 重新获取 picker_win，避免控件缓存问题
         fresh_picker = auto.WindowControl(
@@ -9523,11 +9509,8 @@ class Chat:
                     raise WxControlNotFoundError("未找到搜索框")
 
                 input_wx.click(search_edit)
-                time.sleep(0.3)
                 input_wx.send_keys(search_edit, "{Ctrl}a{Del}")
-                time.sleep(0.3)
                 input_wx.paste_or_type(search_edit, nickname)
-                time.sleep(1.5)
 
                 # 添加群成员窗口搜索后使用 SearchContactView
                 search_view = fresh_picker.GroupControl(
@@ -9689,11 +9672,8 @@ class Chat:
                     raise WxControlNotFoundError("未找到搜索框")
 
                 input_wx.click(search_edit)
-                time.sleep(0.3)
                 input_wx.send_keys(search_edit, "{Ctrl}a{Del}")
-                time.sleep(0.3)
                 input_wx.paste_or_type(search_edit, nickname)
-                time.sleep(1.5)
 
                 # 移除群成员窗口使用 SearchGroupMemberView 而非 SearchContactNewChatView
                 search_view = fresh_picker.GroupControl(
@@ -11702,7 +11682,6 @@ class Chat:
                     raise WxControlNotFoundError("未找到文件名输入框")
 
                 abs_path = os.path.abspath(img_path)
-                # edit.GetValuePattern().SetValue(abs_path)
                 input_wx.paste_or_type(edit, abs_path)
                 time.sleep(0.3)
 
