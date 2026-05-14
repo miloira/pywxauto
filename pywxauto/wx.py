@@ -3029,6 +3029,14 @@ class TextMessage(Message):
     def type_label(self) -> str:
         return "文本消息"
 
+    def __repr__(self) -> str:
+        return (f"TextMessage(msg_id={self.msg_id}, chat_type={self.chat_type!r}, "
+                f"room={self.room!r}, sender={self.sender!r}, "
+                f"source={self.source.value}, content={self.content!r})")
+
+    def __str__(self) -> str:
+        return self.__repr__()
+
 
 class QuoteMessage(Message):
     """引用消息"""
@@ -3049,6 +3057,15 @@ class QuoteMessage(Message):
     @property
     def type_label(self) -> str:
         return "引用消息"
+
+    def __repr__(self) -> str:
+        return (f"QuoteMessage(msg_id={self.msg_id}, chat_type={self.chat_type!r}, "
+                f"room={self.room!r}, sender={self.sender!r}, "
+                f"source={self.source.value}, reply_content={self.reply_content!r}, "
+                f"quote_sender={self.quote_sender!r}, quote_content={self.quote_content!r})")
+
+    def __str__(self) -> str:
+        return self.__repr__()
 
     @staticmethod
     def _get_quote_re() -> re.Pattern:
@@ -3088,6 +3105,15 @@ class VoiceMessage(Message):
     @property
     def type_label(self) -> str:
         return "语音消息"
+
+    def __repr__(self) -> str:
+        return (f"VoiceMessage(msg_id={self.msg_id}, chat_type={self.chat_type!r}, "
+                f"room={self.room!r}, sender={self.sender!r}, "
+                f"source={self.source.value}, duration={self.duration}s, "
+                f"played={self.played}, content={self.content!r})")
+
+    def __str__(self) -> str:
+        return self.__repr__()
 
     @staticmethod
     def parse(raw_name: str) -> Tuple[str, int, bool]:
@@ -3336,12 +3362,28 @@ class ImageMessage(Message):
     def type_label(self) -> str:
         return "图片消息"
 
+    def __repr__(self) -> str:
+        return (f"ImageMessage(msg_id={self.msg_id}, chat_type={self.chat_type!r}, "
+                f"room={self.room!r}, sender={self.sender!r}, "
+                f"source={self.source.value}, status={self.status.value})")
+
+    def __str__(self) -> str:
+        return self.__repr__()
+
 
 class VideoMessage(Message):
     """视频消息"""
     @property
     def type_label(self) -> str:
         return "视频消息"
+
+    def __repr__(self) -> str:
+        return (f"VideoMessage(msg_id={self.msg_id}, chat_type={self.chat_type!r}, "
+                f"room={self.room!r}, sender={self.sender!r}, "
+                f"source={self.source.value}, status={self.status.value})")
+
+    def __str__(self) -> str:
+        return self.__repr__()
 
 
 class FileMessage(Message):
@@ -3353,19 +3395,39 @@ class FileMessage(Message):
         file_name: str = "",
         file_size: str = "",
         file_status: str = "",
+        file_progress: str = "",
         **kw,
     ):
         super().__init__(**kw)
         self.file_name: str = file_name
         self.file_size: str = file_size
         self.file_status: str = file_status
+        self.file_progress: str = file_progress
 
     @property
     def type_label(self) -> str:
         return "文件消息"
 
+    def __repr__(self) -> str:
+        parts = [
+            f"FileMessage(msg_id={self.msg_id}",
+            f"chat_type={self.chat_type!r}",
+            f"room={self.room!r}",
+            f"sender={self.sender!r}",
+            f"source={self.source.value}",
+            f"file_name={self.file_name!r}",
+            f"file_size={self.file_size!r}",
+            f"file_status={self.file_status!r}",
+        ]
+        if self.file_progress:
+            parts.append(f"file_progress={self.file_progress!r}")
+        return ", ".join(parts) + ")"
+
+    def __str__(self) -> str:
+        return self.__repr__()
+
     @staticmethod
-    def parse(raw_name: str) -> Tuple[str, str, str, str]:
+    def parse(raw_name: str) -> Tuple[str, str, str, str, str]:
         """
         解析文件消息的 raw_name。
 
@@ -3373,17 +3435,18 @@ class FileMessage(Message):
         - "文件\\n{文件名}\\n{大小}"                → 已下载/已发送
         - "文件\\n{文件名}\\n{大小}\\n未下载"       → 未下载
         - "文件\\n{文件名}\\n{大小}\\n对方上传中"   → 对方上传中
-        - "文件\\n进度: {N}%\\n{文件名}\\n..."      → 自己发送中（由状态检测处理）
+        - "文件\\n进度: {N}%\\n{文件名}\\n上传中\\n{来源}" → 自己发送中/上传中
 
         Returns:
-            (content, file_name, file_size, file_status)
+            (content, file_name, file_size, file_status, file_progress)
             content: 显示用的摘要文本
             file_name: 文件名
             file_size: 文件大小文本（如 "5.5K"、"1.2M"）
-            file_status: 状态文本（""=正常, "未下载", "对方上传中" 等）
+            file_status: 状态文本（""=正常, "未下载", "对方上传中", "上传中" 等）
+            file_progress: 上传/下载进度百分比文本（如 "10%"），无进度时为空字符串
         """
         if not raw_name:
-            return raw_name, "", "", ""
+            return raw_name, "", "", "", ""
 
         parts = [p.strip() for p in raw_name.split("\n") if p.strip()]
 
@@ -3393,9 +3456,17 @@ class FileMessage(Message):
         if parts and parts[0] == file_kw:
             parts = parts[1:]
 
-        # 跳过 "进度: XX%" 行（发送中状态）
-        if parts and re.match(rf'^{re.escape(progress_kw)}[:：]\s*\d+%', parts[0]):
-            parts = parts[1:]
+        # 提取 "进度: XX%" 行中的百分比
+        file_progress = ""
+        progress_match = None
+        new_parts = []
+        for p in parts:
+            m = re.match(rf'^{re.escape(progress_kw)}[:：]\s*(\d+%)', p)
+            if m:
+                file_progress = m.group(1)
+            else:
+                new_parts.append(p)
+        parts = new_parts
 
         file_name = ""
         file_size = ""
@@ -3404,7 +3475,7 @@ class FileMessage(Message):
         # 文件大小的正则：数字+单位（B/K/KB/M/MB/G/GB/T/TB）
         size_pattern = re.compile(r'^[\d.]+\s*[BKMGT][B]?$', re.IGNORECASE)
         # 已知状态文本
-        status_texts = {i_("未下载"), i_("对方上传中"), i_("发送中断"), i_("已过期"), i_("已取消")}
+        status_texts = {i_("未下载"), i_("对方上传中"), i_("发送中断"), i_("已过期"), i_("已取消"), i_("上传中")}
 
         # 逐个解析 parts：第一个非大小非状态的是文件名，
         # 匹配大小正则的是文件大小，在状态集合中的是状态
@@ -3417,13 +3488,15 @@ class FileMessage(Message):
                 file_name = p
 
         # 生成 content 摘要
-        if file_status:
+        if file_progress:
+            content = f"{file_name} ({file_size}) [{file_status or i_('上传中')}] {file_progress}" if file_size else f"{file_name} [{file_status or i_('上传中')}] {file_progress}"
+        elif file_status:
             content = f"{file_name} ({file_size}) [{file_status}]"
         else:
             file_status = i_("已下载")
             content = f"{file_name} ({file_size})" if file_size else file_name
 
-        return content, file_name, file_size, file_status
+        return content, file_name, file_size, file_status, file_progress
 
     def get_status(self) -> str:
         """
@@ -3468,8 +3541,9 @@ class FileMessage(Message):
             return self.file_status
 
         # 解析最新 Name 获取状态
-        _, _, _, new_status = FileMessage.parse(current_name)
+        _, _, _, new_status, new_progress = FileMessage.parse(current_name)
         self.file_status = new_status
+        self.file_progress = new_progress
         return new_status
 
 
@@ -3483,6 +3557,14 @@ class LocationMessage(Message):
     @property
     def type_label(self) -> str:
         return "位置消息"
+
+    def __repr__(self) -> str:
+        return (f"LocationMessage(msg_id={self.msg_id}, chat_type={self.chat_type!r}, "
+                f"room={self.room!r}, sender={self.sender!r}, "
+                f"source={self.source.value}, address={self.address!r})")
+
+    def __str__(self) -> str:
+        return self.__repr__()
 
     @staticmethod
     def parse(raw_name: str) -> Tuple[str, str]:
@@ -3508,6 +3590,15 @@ class LinkMessage(Message):
     @property
     def type_label(self) -> str:
         return "链接消息"
+
+    def __repr__(self) -> str:
+        return (f"LinkMessage(msg_id={self.msg_id}, chat_type={self.chat_type!r}, "
+                f"room={self.room!r}, sender={self.sender!r}, "
+                f"source={self.source.value}, title={self.title!r}, "
+                f"link_source={self.link_source!r})")
+
+    def __str__(self) -> str:
+        return self.__repr__()
 
     @staticmethod
     def parse(raw_name: str) -> Tuple[str, str, str]:
@@ -3545,6 +3636,14 @@ class EmotionMessage(Message):
     def type_label(self) -> str:
         return "表情消息"
 
+    def __repr__(self) -> str:
+        return (f"EmotionMessage(msg_id={self.msg_id}, chat_type={self.chat_type!r}, "
+                f"room={self.room!r}, sender={self.sender!r}, "
+                f"source={self.source.value}, emoji_name={self.emoji_name!r})")
+
+    def __str__(self) -> str:
+        return self.__repr__()
+
     @staticmethod
     def parse(raw_name: str) -> Tuple[str, str]:
         m = EmotionMessage._EMOJI_NAME_RE.search(raw_name)
@@ -3558,6 +3657,14 @@ class MergeMessage(Message):
     def type_label(self) -> str:
         return "合并消息"
 
+    def __repr__(self) -> str:
+        return (f"MergeMessage(msg_id={self.msg_id}, chat_type={self.chat_type!r}, "
+                f"room={self.room!r}, sender={self.sender!r}, "
+                f"source={self.source.value}, content={self.content!r})")
+
+    def __str__(self) -> str:
+        return self.__repr__()
+
 
 class PersonalCardMessage(Message):
     """名片消息"""
@@ -3569,6 +3676,14 @@ class PersonalCardMessage(Message):
     @property
     def type_label(self) -> str:
         return "名片消息"
+
+    def __repr__(self) -> str:
+        return (f"PersonalCardMessage(msg_id={self.msg_id}, chat_type={self.chat_type!r}, "
+                f"room={self.room!r}, sender={self.sender!r}, "
+                f"source={self.source.value}, card_name={self.card_name!r})")
+
+    def __str__(self) -> str:
+        return self.__repr__()
 
     @staticmethod
     def parse(raw_name: str) -> Tuple[str, str]:
@@ -3585,6 +3700,14 @@ class NoteMessage(Message):
     @property
     def type_label(self) -> str:
         return "笔记消息"
+
+    def __repr__(self) -> str:
+        return (f"NoteMessage(msg_id={self.msg_id}, chat_type={self.chat_type!r}, "
+                f"room={self.room!r}, sender={self.sender!r}, "
+                f"source={self.source.value}, content={self.content!r})")
+
+    def __str__(self) -> str:
+        return self.__repr__()
 
 
 class MusicMessage(Message):
@@ -3611,6 +3734,15 @@ class MusicMessage(Message):
     @property
     def type_label(self) -> str:
         return "音乐消息"
+
+    def __repr__(self) -> str:
+        return (f"MusicMessage(msg_id={self.msg_id}, chat_type={self.chat_type!r}, "
+                f"room={self.room!r}, sender={self.sender!r}, "
+                f"source={self.source.value}, music_source={self.music_source!r}, "
+                f"song_name={self.song_name!r}, artist={self.artist!r})")
+
+    def __str__(self) -> str:
+        return self.__repr__()
 
     @staticmethod
     def match(raw_name: str) -> bool:
@@ -3646,6 +3778,15 @@ class CardMessage(Message):
     def type_label(self) -> str:
         return "卡片消息"
 
+    def __repr__(self) -> str:
+        return (f"CardMessage(msg_id={self.msg_id}, chat_type={self.chat_type!r}, "
+                f"room={self.room!r}, sender={self.sender!r}, "
+                f"source={self.source.value}, title={self.title!r}, "
+                f"description={self.description!r})")
+
+    def __str__(self) -> str:
+        return self.__repr__()
+
     @staticmethod
     def parse(raw_name: str) -> Tuple[str, str, str]:
         parts = [p.strip() for p in raw_name.split("\n") if p.strip()]
@@ -3669,6 +3810,14 @@ class SystemMessage(Message):
     def type_label(self) -> str:
         return "系统消息"
 
+    def __repr__(self) -> str:
+        return (f"SystemMessage(msg_id={self.msg_id}, chat_type={self.chat_type!r}, "
+                f"room={self.room!r}, content={self.content!r}, "
+                f"timestamp={self.timestamp!r})")
+
+    def __str__(self) -> str:
+        return self.__repr__()
+
 
 class VoipMessage(Message):
     """语音/视频通话消息"""
@@ -3687,6 +3836,15 @@ class VoipMessage(Message):
     @property
     def type_label(self) -> str:
         return "通话消息"
+
+    def __repr__(self) -> str:
+        return (f"VoipMessage(msg_id={self.msg_id}, chat_type={self.chat_type!r}, "
+                f"room={self.room!r}, sender={self.sender!r}, "
+                f"source={self.source.value}, call_type={self.call_type!r}, "
+                f"call_status={self.call_status!r})")
+
+    def __str__(self) -> str:
+        return self.__repr__()
 
     @staticmethod
     def parse(raw_name: str) -> Tuple[str, str, str]:
@@ -3716,6 +3874,15 @@ class TransferMessage(Message):
     @property
     def type_label(self) -> str:
         return "转账消息"
+
+    def __repr__(self) -> str:
+        return (f"TransferMessage(msg_id={self.msg_id}, chat_type={self.chat_type!r}, "
+                f"room={self.room!r}, sender={self.sender!r}, "
+                f"source={self.source.value}, amount={self.amount!r}, "
+                f"remark={self.remark!r})")
+
+    def __str__(self) -> str:
+        return self.__repr__()
 
     def accept(self) -> bool:
         return self._click_transfer_button(i_("收款"))
@@ -3767,6 +3934,14 @@ class RedPacketMessage(Message):
     @property
     def type_label(self) -> str:
         return "红包消息"
+
+    def __repr__(self) -> str:
+        return (f"RedPacketMessage(msg_id={self.msg_id}, chat_type={self.chat_type!r}, "
+                f"room={self.room!r}, sender={self.sender!r}, "
+                f"source={self.source.value}, greeting={self.greeting!r})")
+
+    def __str__(self) -> str:
+        return self.__repr__()
 
     def open(self) -> dict:
         """
@@ -3869,6 +4044,14 @@ class OtherMessage(Message):
     @property
     def type_label(self) -> str:
         return "其他消息"
+
+    def __repr__(self) -> str:
+        return (f"OtherMessage(msg_id={self.msg_id}, chat_type={self.chat_type!r}, "
+                f"room={self.room!r}, sender={self.sender!r}, "
+                f"source={self.source.value}, content={self.content!r})")
+
+    def __str__(self) -> str:
+        return self.__repr__()
 
 
 # ---- 消息类 -> 事件类型映射 ----
@@ -9003,9 +9186,10 @@ class Chat:
             return VoiceMessage(**base, content=content, duration=duration, played=played)
 
         if msg_cls is FileMessage:
-            content, file_name, file_size, file_status = FileMessage.parse(actual_name)
+            content, file_name, file_size, file_status, file_progress = FileMessage.parse(actual_name)
             return FileMessage(**base, content=content, file_name=file_name,
-                               file_size=file_size, file_status=file_status)
+                               file_size=file_size, file_status=file_status,
+                               file_progress=file_progress)
 
         if msg_cls is LocationMessage:
             content, address = LocationMessage.parse(actual_name)
