@@ -5270,18 +5270,101 @@ def _parse_session_name(raw: str, session: Optional[Session] = None) -> SessionI
     """
     解析会话 ListItem 的 Name 属性。
 
-    典型格式（换行分隔）：
-      "雕虫小技 一群\\n...\\n17:15\\n消息免打扰\\n"
+    微信会话 Name 格式（换行分隔）：
+      "{name}\\n{已置顶}\\n{[N条] }\\n{last_msg}\\n{msg_time}\\n{消息免打扰}\\n"
+
+    各行可能出现的标记行（非消息内容）：
+      - "已置顶": 置顶标记
+      - "消息免打扰": 免打扰标记
+      - "[N条] " 或 "[N条]": 未读消息数（可能独占一行，也可能在消息行开头）
+
+    示例：
+      "马新才\\n已置顶\\n[1条] \\n你这边企微协议封号吗？\\n2025/11/25\\n"
+      "雕虫小技 一群\\n🥬🐶: 绷不住了\\n12:07\\n消息免打扰\\n"
+      "公众号\\n[11条] 监利发布: ...\\n14:03\\n"
+
+    解析策略：
+    1. 第一行固定为 name
+    2. 从末尾向前扫描，跳过标记行，找到时间行
+    3. name 和时间行之间过滤掉标记行，剩余拼接为 last_msg
+    4. 从所有中间行中提取 [N条] 未读标记
     """
     parts = [p for p in raw.split("\n") if p.strip()]
     item = SessionItem(session)
-    item.name = parts[0] if parts else ""
-    item.last_msg = parts[1] if len(parts) > 1 else ""
-    item.msg_time = parts[2] if len(parts) > 2 else ""
+    item.raw_text = raw
+
+    if not parts:
+        return item
+
+    item.name = parts[0]
+
+    # 已知标记（整行匹配时过滤）
+    mark_set = {i_("消息免打扰"), "已置顶"}
+
+    # 未读数正则：独占一行的 "[N条]" 或 "[N条] "
+    unread_line_re = re.compile(r"^\[(\d+)条\]\s*$")
+    # 未读数正则：行首的 "[N条] " 前缀
+    unread_prefix_re = re.compile(r"^\[(\d+)条\]\s*")
+
+    # 时间正则
+    time_re = re.compile(
+        r'^('
+        r'\d{1,2}:\d{2}'
+        r'|昨天\s*\d{1,2}:\d{2}'
+        r'|前天\s*\d{1,2}:\d{2}'
+        r'|星期[一二三四五六日]\s*\d{1,2}:\d{2}'
+        r'|\d{1,2}/\d{1,2}'
+        r'|\d{4}/\d{1,2}/\d{1,2}'
+        r'|\d{4}年\d{1,2}月\d{1,2}日'
+        r')$'
+    )
+
+    # 从末尾向前找时间行（跳过标记行）
+    time_idx = -1
+    for i in range(len(parts) - 1, 0, -1):
+        if parts[i] in mark_set:
+            continue
+        if unread_line_re.match(parts[i]):
+            continue
+        if time_re.match(parts[i]):
+            time_idx = i
+            break
+        break
+
+    # 确定中间行范围
+    if time_idx > 0:
+        item.msg_time = parts[time_idx]
+        middle = parts[1:time_idx]
+    else:
+        middle = parts[1:]
+
+    # 从中间行中提取未读数、过滤标记行、拼接 last_msg
+    msg_lines = []
+    for line in middle:
+        # 跳过标记行
+        if line in mark_set:
+            continue
+        # 独占一行的未读标记
+        um = unread_line_re.match(line)
+        if um:
+            item.unread_count = int(um.group(1))
+            continue
+        # 行首未读前缀
+        pm = unread_prefix_re.match(line)
+        if pm:
+            item.unread_count = int(pm.group(1))
+            line = line[pm.end():]
+            if not line:
+                continue
+        msg_lines.append(line)
+
+    item.last_msg = "\n".join(msg_lines)
+
+    # 免打扰标记
     item.muted = i_("消息免打扰") in raw
-    m = re.search(r"\[(\d+)条\]", raw)
-    if m:
-        item.unread = m.group(0)
+
+    return item
+
     return item
 
 
@@ -5574,9 +5657,10 @@ class SessionItem:
         name: str = "",
         last_msg: str = "",
         msg_time: str = "",
-        unread: str = "",
+        unread_count: int = 0,
         muted: bool = False,
         is_active: bool = False,
+        raw_text: str = "",
         runtime_id: tuple = (),
         control: Optional[auto.Control] = None,
     ):
@@ -5588,9 +5672,10 @@ class SessionItem:
             name: 会话名称。
             last_msg: 最后一条消息摘要。
             msg_time: 消息时间文本。
-            unread: 未读条数文本，如 "[9条]"。
+            unread_count: 未读消息条数，0 表示无未读。
             muted: 是否消息免打扰。
             is_active: 是否为当前选中（激活）的会话。
+            raw_text: 控件 Name 属性原始文本。
             runtime_id: UI Automation RuntimeId，用于唯一标识控件。
             control: UI Automation 控件引用，用于直接操作。
         """
@@ -5598,9 +5683,10 @@ class SessionItem:
         self.name = name
         self.last_msg = last_msg
         self.msg_time = msg_time
-        self.unread = unread
+        self.unread_count = unread_count
         self.muted = muted
         self.is_active = is_active
+        self.raw_text = raw_text
         self.runtime_id = runtime_id
         self.control = control
 
@@ -5629,19 +5715,10 @@ class SessionItem:
 
     def scroll_to_visible(self) -> bool:
         """
-        确保会话项在会话列表的可见区域内。
+        确保会话项在会话列表的可见区域内（可被点击）。
 
-        会话列表（session_list）有固定的可见区域（BoundingRectangle），
-        只有在该区域内的 SessionItem 控件才能被正确操作（点击、右键等）。
-        如果会话项不在可见区域内，通过滚动将其带入可见范围。
-
-        策略：
-        1. 获取会话列表控件的可见区域坐标
-        2. 获取当前会话项控件的坐标
-        3. 如果会话项完全在可见区域内，直接返回 True
-        4. 如果会话项在可见区域上方，向上滚动
-        5. 如果会话项在可见区域下方，向下滚动
-        6. 最多尝试 30 次滚动
+        前置条件：控件已通过 _get_control() 找到（存在于 UIA 树中）。
+        本方法通过滚动将控件带入列表的可视矩形范围内。
 
         Returns:
             True 会话项已在可见区域内，False 滚动失败
@@ -5658,24 +5735,19 @@ class SessionItem:
             try:
                 ctrl_rect = ctrl.BoundingRectangle
             except Exception:
-                # 控件失效，重新查找
                 self.control = None
                 ctrl = self._get_control()
                 ctrl_rect = ctrl.BoundingRectangle
 
-            # 检查是否完全在可见区域内
             if ctrl_rect.top >= list_rect.top and ctrl_rect.bottom <= list_rect.bottom:
                 return True
 
-            # 计算滚动方向
             cx = (list_rect.left + list_rect.right) // 2
             cy = (list_rect.top + list_rect.bottom) // 2
 
             if ctrl_rect.top < list_rect.top:
-                # 会话项在可见区域上方，向上滚动
                 scroll_at(cx, cy, 120)
             elif ctrl_rect.bottom > list_rect.bottom:
-                # 会话项在可见区域下方，向下滚动
                 scroll_at(cx, cy, -120)
             else:
                 return True
@@ -5684,107 +5756,160 @@ class SessionItem:
 
         return False
 
+    def _ensure_operable(self) -> auto.Control:
+        """
+        确保会话项可操作：先通过 _get_control 找到控件，再 scroll_to_visible 滚动到可见。
+
+        Returns:
+            可操作的 ListItemControl 控件
+        """
+        ctrl = self._get_control()
+        self.scroll_to_visible()
+        return ctrl
+
     def _right_click(self) -> None:
         """右键点击此会话项，弹出上下文菜单"""
         if self.session.wx:
             self.session.wx.activate()
-        self.scroll_to_visible()
-        ctrl = self._get_control()
+        ctrl = self._ensure_operable()
         input_wx.click(ctrl, button="right")
 
     def _context_action(self, menu_name: str) -> None:
-        """对此会话项执行右键菜单操作"""
+        """对此会话项执行右键菜单操作，菜单项不存在时抛异常"""
         self.session._ensure_ready()
         self._right_click()
         self.session._click_context_menu_item(menu_name)
+        # 操作后会话位置可能变化，清除缓存强制下次重新查找
+        self.control = None
 
-    def pin(self) -> None:
-        """置顶会话"""
-        self._context_action(i_("置顶"))
+    def _try_context_action(self, menu_name: str) -> bool:
+        """
+        尝试执行右键菜单操作。
 
-    def unpin(self) -> None:
-        """取消置顶会话"""
-        self._context_action(i_("取消置顶"))
+        菜单项存在则点击并返回 True，不存在则关闭菜单返回 False（不抛异常）。
+        用于幂等操作：如果目标菜单项不存在，说明已经是目标状态。
+        """
+        self.session._ensure_ready()
+        self._right_click()
+        menu_win = self.session._win.WindowControl(ClassName="mmui::XMenu")
+        if not menu_win.Exists(maxSearchSeconds=2):
+            return False
+        menu_item = menu_win.MenuItemControl(
+            ClassName="mmui::XMenuView",
+            AutomationId="XMenuItem",
+            Name=menu_name,
+        )
+        if not menu_item.Exists(maxSearchSeconds=1):
+            input_wx.send_keys(self.session._win, "{Esc}")
+            return False
+        input_wx.click(menu_item)
+        # 操作后会话位置可能变化，清除缓存强制下次重新查找
+        self.control = None
+        return True
 
-    def mark_as_unread(self) -> None:
-        """标为未读"""
-        self._context_action(i_("标为未读"))
+    def pin(self) -> SessionItem:
+        """置顶会话（已置顶则跳过）"""
+        self._try_context_action(i_("置顶"))
+        return self
 
-    def mark_as_read(self) -> None:
-        """标为已读"""
-        self._context_action(i_("标为已读"))
+    def unpin(self) -> SessionItem:
+        """取消置顶会话（未置顶则跳过）"""
+        self._try_context_action(i_("取消置顶"))
+        return self
 
-    def mute(self) -> None:
-        """消息免打扰"""
-        self._context_action(i_("消息免打扰"))
+    def mark_as_unread(self) -> SessionItem:
+        """标为未读（已未读则跳过）"""
+        self._try_context_action(i_("标为未读"))
+        return self
 
-    def unmute(self) -> None:
-        """允许消息通知"""
-        self._context_action(i_("允许消息通知"))
+    def mark_as_read(self) -> SessionItem:
+        """标为已读（已已读则跳过）"""
+        self._try_context_action(i_("标为已读"))
+        return self
 
-    def separate(self) -> None:
+    def mute(self) -> SessionItem:
+        """消息免打扰（已免打扰则跳过）"""
+        self._try_context_action(i_("消息免打扰"))
+        return self
+
+    def unmute(self) -> SessionItem:
+        """允许消息通知（已允许则跳过）"""
+        self._try_context_action(i_("允许消息通知"))
+        return self
+
+    def separate(self) -> SessionItem:
         """独立窗口显示"""
         self._context_action(i_("独立窗口显示"))
+        return self
 
     def separate_by_click(self) -> SeparateChat:
         """双击打开独立窗口，返回 SeparateChat 实例"""
         session = self.session
         if session.wx:
             session.wx.activate()
-        self.scroll_to_visible()
-        ctrl = self._get_control()
+        ctrl = self._ensure_operable()
         input_wx.click(ctrl, click="double")
         return SeparateChat(session.wx, self.name)
 
-    def hide(self) -> None:
+    def hide(self) -> SessionItem:
         """不显示该会话"""
         self._context_action(i_("不显示"))
+        return self
 
-    def delete(self) -> None:
+    def delete(self) -> SessionItem:
         """删除会话（危险操作，会清除聊天记录）"""
         self._context_action(i_("删除"))
         confirm_btn = self.session._win.ButtonControl(Name=i_("删除"), ClassName="mmui::XOutlineButton")
         if not confirm_btn.Exists(maxSearchSeconds=2):
             raise WxControlNotFoundError("未找到删除确认弹窗")
         input_wx.click(confirm_btn)
+        return self
 
-    def open(self) -> None:
+    def open(self) -> SessionItem:
         """激活会话（直接点击控件）"""
         self.session._ensure_ready()
-        self.scroll_to_visible()
-        ctrl = self._get_control()
+        ctrl = self._ensure_operable()
         try:
             pattern = ctrl.GetSelectionItemPattern()
             if pattern and pattern.IsSelected:
-                # 已选中，验证聊天区域标题是否匹配
                 for aid in Chat.TITLE_LABEL_IDS:
                     title = self.session._win.TextControl(AutomationId=aid)
                     if title.Exists(0, 0) and title.Name == self.name:
-                        return
-                # 标题不匹配，点击刷新
+                        return self
                 input_wx.click(ctrl)
-                return
+                return self
         except Exception:
             pass
         input_wx.click(ctrl)
+        return self
 
-    def close(self) -> None:
+    def close(self) -> SessionItem:
         """取消激活（如果处于激活状态则取消选中）"""
         self.session._ensure_ready()
-        self.scroll_to_visible()
-        ctrl = self._get_control()
+        ctrl = self._ensure_operable()
         try:
             pattern = ctrl.GetSelectionItemPattern()
             if not pattern or not pattern.IsSelected:
-                return
+                return self
         except Exception:
-            return
+            return self
         input_wx.click(ctrl)
+        return self
 
     def __repr__(self) -> str:
-        muted_tag = " [免打扰]" if self.muted else ""
-        active_tag = " [激活]" if self.is_active else ""
-        return f"SessionItem({self.name!r}, {self.msg_time}{muted_tag}{active_tag})"
+        return (f"SessionItem(name={self.name!r}, last_msg={self.last_msg!r}, "
+                f"msg_time={self.msg_time!r}, unread_count={self.unread_count}, "
+                f"muted={self.muted}, is_active={self.is_active})")
+
+    def to_dict(self) -> dict:
+        return {
+            "name": self.name,
+            "last_msg": self.last_msg,
+            "msg_time": self.msg_time,
+            "unread_count": self.unread_count,
+            "muted": self.muted,
+            "is_active": self.is_active,
+        }
 
 
 class Session:
@@ -6028,6 +6153,124 @@ class Session:
 
         return all_sessions
 
+    def get_sessions(self, count: Optional[int] = None) -> List[SessionItem]:
+        """
+        获取会话列表。
+
+        通过选中第一条会话，然后逐条按 Down 键遍历，
+        每次获取当前激活的 SessionItem。
+        当按 Down 后激活项不变时说明已到最后一条。
+
+        Args:
+            count: 要获取的会话数量，None 获取全部
+
+        Returns:
+            按出现顺序排列的会话列表
+        """
+        return list(self.iter_sessions(count=count))
+
+    def iter_sessions(self, count: Optional[int] = None) -> None:
+        """
+        逐条获取会话列表（生成器）。
+
+        与 get_sessions 相同的遍历逻辑，但每获取到一条新会话立即 yield，
+        适合边获取边操作的场景。
+
+        Args:
+            count: 要获取的会话数量，None 获取全部
+
+        Yields:
+            SessionItem 实例
+        """
+        self._ensure_ready()
+        lc = self._list_control
+        if not lc.Exists(maxSearchSeconds=3):
+            raise WxControlNotFoundError("未找到会话列表控件")
+
+        input_wx.focus(lc)
+
+        # 回到顶部
+        input_wx.send_keys(lc, "{Home}")
+
+        # 点击第一条会话使其激活（如果已激活则跳过）
+        first_item = None
+        for ctrl, _ in auto.WalkControl(lc):
+            if ctrl.ControlType == auto.ControlType.ListItemControl and ctrl.Name:
+                first_item = ctrl
+                break
+        if not first_item:
+            return
+        try:
+            pattern = first_item.GetSelectionItemPattern()
+            if not pattern or not pattern.IsSelected:
+                input_wx.click(first_item)
+        except Exception:
+            input_wx.click(first_item)
+
+        list_rect = lc.BoundingRectangle
+        last_rid: tuple = ()
+        bottom_same_rid_count = 0
+        yielded = 0
+        deadline = time.monotonic() + 60
+
+        while time.monotonic() < deadline:
+            item = self._get_selected_item(lc)
+            if item is None:
+                break
+
+            if item.runtime_id != last_rid:
+                bottom_same_rid_count = 0
+                yield item
+                yielded += 1
+
+                if count is not None and yielded >= count:
+                    return
+
+            try:
+                ctrl_rect = item.control.BoundingRectangle
+                if abs(ctrl_rect.bottom - list_rect.bottom) <= 2 and item.runtime_id == last_rid:
+                    bottom_same_rid_count += 1
+                    if bottom_same_rid_count >= 2:
+                        return
+            except Exception:
+                pass
+
+            last_rid = item.runtime_id
+            input_wx.send_keys(self._win, "{Down}")
+
+    def _get_selected_item(self, lc: auto.ListControl) -> Optional[SessionItem]:
+        """
+        获取会话列表中当前被选中（激活）的 SessionItem。
+
+        通过 SelectionItemPattern.IsSelected 判断选中状态，
+        解析控件 Name 属性构造 SessionItem。
+
+        Args:
+            lc: 会话列表 ListControl
+
+        Returns:
+            当前选中的 SessionItem，未找到返回 None
+        """
+        for ctrl, _ in auto.WalkControl(lc):
+            if ctrl.ControlType != auto.ControlType.ListItemControl:
+                continue
+            if not ctrl.Name:
+                continue
+            try:
+                pattern = ctrl.GetSelectionItemPattern()
+                if pattern and pattern.IsSelected:
+                    item = _parse_session_name(ctrl.Name, session=self)
+                    item.control = ctrl
+                    item.is_active = True
+                    try:
+                        item.runtime_id = tuple(ctrl.GetRuntimeId())
+                    except Exception:
+                        pass
+                    return item
+            except Exception:
+                continue
+        return None
+
     def _ensure_session_visible(self, name: str) -> auto.ListItemControl:
         """
         确保指定会话在可见区域内，返回对应的 ListItemControl。
@@ -6049,14 +6292,9 @@ class Session:
         time.sleep(0.2)
 
         # 先滚动到顶部
-        scroll_pattern = lc.GetScrollPattern()
-        if scroll_pattern:
-            scroll_pattern.SetScrollPercent(-1, 0)
-        else:
-            input_wx.send_keys(lc, "{Home}")
+        input_wx.send_keys(lc, "{Home}")
         time.sleep(0.3)
 
-        # 检查顶部是否可见
         if item.Exists(0, 0):
             return item
 
@@ -6064,14 +6302,10 @@ class Session:
         step = 5
         no_new_count = 0
         prev_names: Set[str] = set()
-        for _ in range(500):
-            sp = lc.GetScrollPattern()
-            if sp:
-                v = sp.VerticalScrollPercent
-                if v >= 100 or v < 0:
-                    break
-
+        deadline = time.monotonic() + 30
+        while time.monotonic() < deadline:
             input_wx.send_keys(lc, "{Down}" * step)
+            time.sleep(0.1)
 
             if item.Exists(0, 0):
                 return item
@@ -6540,44 +6774,44 @@ class Session:
         note.close()
 
     @PIM.guard
-    def pin(self, name: str) -> None:
+    def pin(self, name: str) -> SessionItem:
         """置顶会话"""
-        self._get_session_item(name).pin()
+        return self._get_session_item(name).pin()
 
     @PIM.guard
-    def unpin(self, name: str) -> None:
+    def unpin(self, name: str) -> SessionItem:
         """取消置顶会话"""
-        self._get_session_item(name).unpin()
+        return self._get_session_item(name).unpin()
 
     @PIM.guard
-    def mark_as_unread(self, name: str) -> None:
+    def mark_as_unread(self, name: str) -> SessionItem:
         """标为未读"""
-        self._get_session_item(name).mark_as_unread()
+        return self._get_session_item(name).mark_as_unread()
 
     @PIM.guard
-    def mark_as_read(self, name: str) -> None:
+    def mark_as_read(self, name: str) -> SessionItem:
         """标为已读"""
-        self._get_session_item(name).mark_as_read()
+        return self._get_session_item(name).mark_as_read()
 
     @PIM.guard
-    def mute(self, name: str) -> None:
+    def mute(self, name: str) -> SessionItem:
         """消息免打扰"""
-        self._get_session_item(name).mute()
+        return self._get_session_item(name).mute()
 
     @PIM.guard
-    def unmute(self, name: str) -> None:
+    def unmute(self, name: str) -> SessionItem:
         """允许消息通知"""
-        self._get_session_item(name).unmute()
+        return self._get_session_item(name).unmute()
 
     @PIM.guard
-    def separate(self, name: str) -> None:
+    def separate(self, name: str) -> SessionItem:
         """独立窗口显示"""
-        self._get_session_item(name).separate()
+        return self._get_session_item(name).separate()
 
     @PIM.guard
-    def hide(self, name: str) -> None:
+    def hide(self, name: str) -> SessionItem:
         """不显示该会话"""
-        self._get_session_item(name).hide()
+        return self._get_session_item(name).hide()
 
     @PIM.guard
     def separate_by_click(self, name: str) -> SeparateChat:
@@ -6585,19 +6819,19 @@ class Session:
         return self._get_session_item(name).separate_by_click()
 
     @PIM.guard
-    def close(self, name: str) -> None:
+    def close(self, name: str) -> SessionItem:
         """关闭指定会话：如果该会话处于激活状态，点击一下取消选中"""
-        self._get_session_item(name).close()
+        return self._get_session_item(name).close()
 
     @PIM.guard
-    def open(self, name: str) -> None:
-        """通过在会话列表中查找并点击来打开指定会话，如果已激活则不操作"""
-        self._get_session_item(name).open()
+    def open(self, name: str) -> SessionItem:
+        """通过在会话列表中查找并点击来打开指定会话，如果已激活则不操作，返回 SessionItem"""
+        return self._get_session_item(name).open()
 
     @PIM.guard
-    def delete(self, name: str) -> None:
+    def delete(self, name: str) -> SessionItem:
         """删除会话（危险操作，会清除聊天记录）"""
-        self._get_session_item(name).delete()
+        return self._get_session_item(name).delete()
 
     def __str__(self) -> str:
         try:
