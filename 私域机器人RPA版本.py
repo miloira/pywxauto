@@ -690,8 +690,7 @@ def run(droplet_token, device_id, send_offline_msg):
                 print(f"  📋 今天共 {len(today_files)} 个表格文件，开始处理...")
 
                 for i, f in enumerate(reversed(today_files), 1):
-                    print(f)
-                    if not f._cell:
+                    if not f.control:
                         print(f"  ⚠️ [{i}] 跳过（无控件引用）: {f.name}")
                         continue
 
@@ -705,7 +704,7 @@ def run(droplet_token, device_id, send_offline_msg):
                         continue
 
                     # 联系人发的表格直接删除，不下载
-                    if f.source_type == "contact":
+                    if f.chat_type == "contact":
                         try:
                             self._wx.file_manager.delete_file(f)
                             print(f"  🗑️ [{i}/{len(today_files)}] 联系人文件直接删除: {f.name}")
