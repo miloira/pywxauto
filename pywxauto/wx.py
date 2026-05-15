@@ -15622,19 +15622,23 @@ class Weixin(WeixinWindow):
         with open(save_path, "wb") as f:
             f.write(png_bytes)
 
-    def check_new_msg(self) -> int:
+    def check_new_msg(self) -> bool:
         """
-        通过对导航栏微信图标截图 OCR 识别未读消息数量。
+        通过对导航栏微信图标截图，扫描红色角标像素判断是否有新消息。
 
-        对导航栏的"微信"按钮进行截图，识别红色角标上的数字。
-        截图保存为 _debug_check_new_msg.png 方便调试。
+        红色角标像素值：(250, 81, 81)。
+        检测到该像素即表示有未读消息。
 
         Returns:
-            未读消息数量，0 表示无新消息
+            True 有新消息，False 无新消息
+
+        Raises:
+            RuntimeError: 无法获取窗口句柄
+            WxControlNotFoundError: 未找到微信按钮控件
         """
         hwnd = self._win.NativeWindowHandle
         if not hwnd:
-            return 0
+            raise RuntimeError("无法获取微信窗口句柄")
 
         # 获取导航栏微信按钮控件
         tabbar = self.navigator._tabbar
@@ -15644,30 +15648,21 @@ class Weixin(WeixinWindow):
             searchDepth=5,
         )
         if not wx_btn.Exists(0, 0):
-            return 0
+            raise WxControlNotFoundError("未找到导航栏'微信'按钮")
 
         # 截图微信按钮区域
-        try:
-            png_bytes = capture_control(hwnd, wx_btn, mode="print_window")
-        except Exception:
-            return 0
+        png_bytes = capture_control(hwnd, wx_btn, mode="print_window")
 
-        # OCR 识别角标数字
-        try:
-            ocr_result = self.get_image_text(png_bytes)
-        except Exception:
-            return 0
+        # 扫描红色角标像素
+        img = Image.open(io.BytesIO(png_bytes)).convert("RGB")
+        w, h = img.size
+        for y in range(h):
+            for x in range(w):
+                r, g, b = img.getpixel((x, y))
+                if r == 250 and g == 81 and b == 81:
+                    return True
 
-        # 从 OCR 结果中提取数字
-        for text in ocr_result:
-            text = text.strip()
-            if text.isdigit():
-                return int(text)
-            # 处理 "99+" 等格式
-            if text.rstrip("+").isdigit():
-                return int(text.rstrip("+"))
-
-        return 0
+        return False
 
     def get_self_profile(self) -> dict:
         """获取当前登录账号的个人资料（昵称、微信号）"""
