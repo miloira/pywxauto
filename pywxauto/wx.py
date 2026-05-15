@@ -2074,7 +2074,6 @@ def scroll_at(x: int, y: int, delta: int) -> None:
     """
     if not background:
         win32api.SetCursorPos((x, y))
-        time.sleep(0.1)
         win32api.mouse_event(win32con.MOUSEEVENTF_WHEEL, x, y, delta, 0)
     else:
         hwnd = win32gui.WindowFromPoint((x, y))
@@ -2461,15 +2460,24 @@ class Message:
         return None
 
     @property
-    def is_visible(self) -> bool:
+    def is_in_list(self) -> bool:
         """
-        判断消息是否在聊天可见区域内。
-
-        通过消息控件的 BoundingRectangle 与 chat.message_view_rect 比较，
-        消息控件的顶部和底部都在可见区域内则视为可见。
+        消息控件是否在消息列表的 UIA 树中（能通过 runtime_id 找到）。
 
         Returns:
-            True 消息在可见区域内，False 不在或无法判断
+            True 控件存在于列表中，False 不存在
+        """
+        return self._find_ctrl() is not None
+
+    @property
+    def is_in_view(self) -> bool:
+        """
+        消息控件是否在 message_view 的可视矩形范围内（能被看到/点击）。
+
+        前提：控件必须先在列表中（is_in_list=True）。
+
+        Returns:
+            True 消息完全在可视范围内，False 不在或无法判断
         """
         if not self.chat:
             return False
@@ -2486,13 +2494,140 @@ class Message:
             return False
 
     @property
+    def is_visible(self) -> bool:
+        """判断消息是否在 message_view 可视范围内（is_in_view 的别名）"""
+        return self.is_in_view
+
+    def scroll_into_view(self) -> bool:
+        """
+        将消息微调滚动到 message_view 可视范围内。
+
+        前提：消息控件已在列表中（is_in_list=True），但可能不在可视矩形内。
+        通过小幅滚动将其带入可视范围。
+
+        Returns:
+            True 成功滚动到可视范围，False 失败
+        """
+        if not self.chat:
+            return False
+        view_rect = self.chat.message_view_rect
+        if not view_rect:
+            return False
+
+        ctrl = self._find_ctrl()
+        if not ctrl:
+            return False
+
+        cx = (view_rect[0] + view_rect[2]) // 2
+        cy = (view_rect[1] + view_rect[3]) // 2
+
+        for _ in range(20):
+            try:
+                ctrl_rect = ctrl.BoundingRectangle
+            except Exception:
+                return False
+
+            if ctrl_rect.top >= view_rect[1] and ctrl_rect.bottom <= view_rect[3]:
+                return True
+
+            if ctrl_rect.top < view_rect[1]:
+                scroll_at(cx, cy, 120)  # 向上滚动
+            elif ctrl_rect.bottom > view_rect[3]:
+                scroll_at(cx, cy, -120)  # 向下滚动
+            time.sleep(0.1)
+
+        return False
+
+    def _detect_regions(self) -> None:
+        """
+        对消息控件截图并识别 headimg_rect、nickname_rect、content_rect。
+
+        通过轮廓检测识别消息中的头像、昵称、内容区域的相对坐标，
+        同时判断发送者（头像在左=对方，头像在右=自己）。
+
+        前提：消息控件必须在 message_view 可视范围内（is_in_view=True）。
+        """
+        if not self.chat:
+            return
+        ctrl = self._find_ctrl()
+        if not ctrl:
+            return
+
+        hwnd = self.chat._win.NativeWindowHandle or 0
+        chat_name = self.chat.chat_name or "对方"
+
+        sender, source, bubble_rect, headimg_rect, nickname_rect, content_rect = \
+            Chat._detect_sender(hwnd, ctrl, chat_name)
+
+        self.headimg_rect = headimg_rect
+        self.nickname_rect = nickname_rect
+        self.content_rect = content_rect
+        self.bubble_rect = bubble_rect
+        if source != Source.UNKNOWN:
+            self.source = source
+            self.sender = sender
+
+    def refresh(self) -> Message:
+        """
+        刷新消息属性：确保消息在视野内，截图识别区域坐标和发送者信息。
+
+        调用后 headimg_rect、nickname_rect、content_rect、source、sender
+        等属性会被更新为最新的识别结果。
+
+        Returns:
+            self（支持链式调用）
+
+        Raises:
+            RuntimeError: 消息未关联 chat 或无法定位到消息
+        """
+        self._ensure_operable()
+        return self
+
+    def _ensure_operable(self) -> auto.Control:
+        """
+        确保消息可操作：在列表中 → 在视野内 → 截图识别区域坐标。
+
+        流程：
+        1. 确认消息在列表中（_find_ctrl），找不到则 scroll_to_visible
+        2. 确认消息在 message_view 视野内，不在则 scroll_into_view 微调
+        3. 如果 content_rect 为空，截图识别各区域坐标
+
+        Returns:
+            可操作的消息控件
+
+        Raises:
+            RuntimeError: 无法定位到消息
+        """
+        if not self.chat:
+            raise RuntimeError("消息未关联聊天窗口")
+
+        # 1. 确保在列表中
+        ctrl = self._find_ctrl()
+        if not ctrl:
+            if not self.scroll_to_visible():
+                raise RuntimeError("无法将消息滚动到可见区域")
+            ctrl = self._find_ctrl()
+            if not ctrl:
+                raise RuntimeError("滚动后仍无法找到消息控件")
+
+        # 2. 确保在 message_view 视野内
+        if not self.is_in_view:
+            if not self.scroll_into_view():
+                raise RuntimeError("无法将消息微调到可视范围内")
+
+        # 3. 如果没有 content_rect，截图识别
+        if not self.content_rect:
+            self._detect_regions()
+
+        return self._find_ctrl()
+
+    @property
     def center(self) -> Optional[Tuple[int, int]]:
         """
         获取消息内容区域的屏幕中心点坐标。
 
-        x 使用 content_rect（相对于控件截图的坐标）计算，
-        y 使用控件实时的 BoundingRectangle 中心并向上偏移 10px，
-        因为消息滚动时 y 会变动，content_rect 的 y 是截图时的静态值。
+        content_rect 存储的是相对于控件截图的坐标 (x1, y1, x2, y2)，
+        通过控件实时的 BoundingRectangle 左上角偏移转换为屏幕坐标。
 
         Returns:
             (x, y) 屏幕坐标，无法计算时返回 None
@@ -2502,24 +2637,25 @@ class Message:
             return None
         try:
             rect = ctrl.BoundingRectangle
-            x1, _, x2, _ = self.content_rect
-            cx = rect.left + (x1 + x2) // 2
-            cy = (rect.top + rect.bottom) // 2 - 8
-            return (cx, cy)
         except Exception:
-            rect = ctrl.BoundingRectangle
-            cy = (rect.top + rect.bottom) // 2 - 8 # 向上偏移10px保证引用消息悬浮位置正确
-            if self.bubble_rect:
-                bl, bt, br, bb = self.bubble_rect
-                # bubble_rect 的 x 坐标不变，y 坐标从控件实时位置重新计算
-                cx = (bl + br) // 2
-            elif self.source == Source.SELF:
-                cx = rect.right - rect.width() // 4
-            elif self.source == Source.OTHERS:
-                cx = rect.left + rect.width() // 4
-            else:
-                cx = (rect.left + rect.right) // 2
+            return None
+
+        # 优先使用 content_rect（相对于控件截图的坐标）
+        if self.content_rect:
+            x1, y1, x2, y2 = self.content_rect
+            cx = rect.left + (x1 + x2) // 2
+            cy = rect.top + (y1 + y2) // 2
             return (cx, cy)
+
+        # 回退：使用控件中心估算
+        if self.source == Source.SELF:
+            cx = rect.right - rect.width() // 4
+        elif self.source == Source.OTHERS:
+            cx = rect.left + rect.width() // 4
+        else:
+            cx = (rect.left + rect.right) // 2
+        cy = (rect.top + rect.bottom) // 2
+        return (cx, cy)
 
     @PIM.guard
     def scroll_to_visible(self, max_scroll: int = 30) -> bool:
@@ -2621,15 +2757,31 @@ class Message:
 
     @PIM.guard
     def hover(self) -> bool:
+        """
+        悬浮鼠标到消息内容区域中心。
+
+        流程：
+        1. _ensure_operable 确保消息在视野内并识别区域坐标
+        2. 通过 center 获取 content 区域的屏幕中心坐标
+        3. 移动鼠标到该坐标
+
+        Returns:
+            True 悬浮成功，False 失败
+        """
         if not self.chat:
             return False
 
         self.chat._activate_window()
 
-        if not self.scroll_to_visible():
+        try:
+            self._ensure_operable()
+        except RuntimeError:
             return False
 
-        cx, cy = self.center
+        pos = self.center
+        if not pos:
+            return False
+        cx, cy = pos
 
         if not background:
             auto.SetCursorPos(cx, cy)
@@ -8916,6 +9068,164 @@ class Chat:
         self._activate_window()
         input_wx.focus(lc)
         input_wx.send_keys(lc, "{End}")
+
+    def iter_recently_messages(self, count: Optional[int] = None):
+        """
+        逐条获取最近的聊天消息（惰性生成器，从底部开始向上采集）。
+
+        从消息列表底部开始，先 yield 当前页最底部的消息，
+        然后逐步向上翻页继续采集。
+        yield 顺序：从最新到最旧（底部 → 顶部）。
+
+        消息是惰性的：yield 时只解析基本信息（类型、raw_name、runtime_id），
+        不做截图识别。调用 hover() 等操作时才会通过 _ensure_operable()
+        自动完成：滚动到视野 → 截图识别 headimg_rect/nickname_rect/content_rect。
+
+        停止条件：按 PageUp 后第一条消息的 top 仍与 message_view 的 top 重合，
+        说明已经到顶无法再翻页。
+
+        Args:
+            count: 要获取的消息数量，None 获取所有消息（滚动到顶部）
+
+        Yields:
+            Message 实例（从最新到最旧，惰性加载区域坐标）
+        """
+        self._activate_window()
+
+        lc = self._message_list
+        if not lc.Exists(maxSearchSeconds=2):
+            return
+
+        view_rect = self.message_view_rect
+        if not view_rect:
+            return
+
+        # 先滚动到底部
+        self.page_end()
+        time.sleep(0.3)
+
+        seen_ids: Set[int] = set()
+        top_count = 0
+        yielded = 0
+
+        while True:
+            # 获取当前可见消息（轻量模式，不做截图识别）
+            visible = self._get_visible_messages_lazy()
+
+            # 收集本页新消息，倒序 yield（从底部/最新的开始）
+            new_msgs = [msg for msg in visible if msg.msg_id not in seen_ids]
+            for msg in reversed(new_msgs):
+                seen_ids.add(msg.msg_id)
+                yield msg
+                yielded += 1
+                if count is not None and yielded >= count:
+                    return
+
+            # 检查是否到顶：第一条消息 top 与 message_view top 重合
+            is_at_top = False
+            if visible:
+                try:
+                    first_ctrl = visible[0].control
+                    if first_ctrl:
+                        first_rect = first_ctrl.BoundingRectangle
+                        if abs(first_rect.top - view_rect[1]) <= 2:
+                            is_at_top = True
+                except Exception:
+                    pass
+
+            if is_at_top:
+                top_count += 1
+                if top_count >= 2:
+                    return
+            else:
+                top_count = 0
+
+            # 向上滚动
+            cx = (view_rect[0] + view_rect[2]) // 2
+            cy = (view_rect[1] + view_rect[3]) // 2
+            scroll_at(cx, cy, 120 * 5)
+
+    def _get_visible_messages_lazy(self) -> List[Message]:
+        """
+        轻量获取当前可见消息列表（不做截图识别）。
+
+        只解析控件的 ClassName、Name、RuntimeId，构造消息对象，
+        不调用 _detect_sender（不截图、不 OCR）。
+        headimg_rect/nickname_rect/content_rect 留空，
+        等调用 hover() 时通过 _ensure_operable() → _detect_regions() 惰性填充。
+        """
+        lc = self._message_list
+        if not lc.Exists(maxSearchSeconds=2):
+            return []
+
+        # ClassName -> 消息子类映射
+        cls_map: Dict[str, type] = {
+            "mmui::ChatTextItemView": TextMessage,
+            "mmui::ChatImageItemView": ImageMessage,
+            "mmui::ChatFileItemView": FileMessage,
+            "mmui::ChatVoiceItemView": VoiceMessage,
+            "mmui::ChatVideoItemView": VideoMessage,
+            "mmui::ChatPersonalCardItemView": PersonalCardMessage,
+            "mmui::ChatBubbleReferItemView": QuoteMessage,
+            "mmui::ChatEmojiItemView": EmotionMessage,
+            "mmui::ChatMusicItemView": MusicMessage,
+            "mmui::ChatMiniProgramItemView": LinkMessage,
+            "mmui::ChatItemView": SystemMessage,
+        }
+
+        chat_name = self.chat_name or "对方"
+        is_room = self.chat_type == "群聊"
+
+        messages: List[Message] = []
+        for ctrl, _ in auto.WalkControl(lc):
+            if ctrl.ControlType != auto.ControlType.ListItemControl:
+                continue
+
+            ui_cls = ctrl.ClassName or ""
+            raw_name = ctrl.Name or ""
+
+            if not raw_name and ui_cls not in cls_map:
+                continue
+
+            try:
+                rid = tuple(ctrl.GetRuntimeId())
+            except Exception:
+                rid = ()
+
+            msg_cls = cls_map.get(ui_cls)
+
+            if QuoteMessage.match(raw_name):
+                msg_cls = QuoteMessage
+            elif ui_cls == "mmui::ChatBubbleItemView":
+                msg_cls = self._classify_bubble(raw_name)
+            elif ui_cls == "mmui::ChatBubbleReferItemView":
+                msg_cls = self._classify_bubble_refer(raw_name)
+
+            if msg_cls is None:
+                msg_cls = OtherMessage
+
+            if msg_cls is SystemMessage:
+                sys_msg = SystemMessage(
+                    content=raw_name, timestamp=raw_name,
+                    raw_name=raw_name, ui_cls=ui_cls, runtime_id=rid,
+                    room=chat_name if is_room else None,
+                    chat=self, control=ctrl,
+                )
+                messages.append(sys_msg)
+                continue
+
+            # 惰性构造：不检测 sender/source，不截图
+            msg = self._build_message(
+                msg_cls, raw_name,
+                sender="", source=Source.UNKNOWN,
+                runtime_id=rid, bubble_rect=(),
+                room=chat_name if is_room else None,
+                chat=self, control=ctrl,
+                headimg_rect=(), nickname_rect=(), content_rect=(),
+                ui_cls=ui_cls,
+            )
+            messages.append(msg)
+        return messages
 
     def get_visible_messages(self, sender_cache: Dict[int, tuple] = None) -> List[Message]:
         """
