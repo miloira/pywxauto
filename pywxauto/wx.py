@@ -8681,9 +8681,7 @@ class Chat:
             return
         self._activate_window()
         input_wx.focus(lc)
-        time.sleep(0.1)
         input_wx.send_keys(lc, "{End}")
-        time.sleep(0.3)
 
     def get_visible_messages(self, sender_cache: Dict[int, tuple] = None) -> List[Message]:
         """
@@ -10970,7 +10968,6 @@ class Chat:
         time.sleep(0.5)
 
         self._click_contact_avatar()
-        time.sleep(0.5)
 
     def _click_profile_menu_item(self, menu_name: str) -> None:
         """
@@ -11449,6 +11446,7 @@ class Chat:
 
             input_wx.click(remark_edit)
             time.sleep(0.2)
+
             input_wx.send_keys(remark_edit, "{Ctrl}a{Del}")
             time.sleep(0.1)
 
@@ -11462,7 +11460,6 @@ class Chat:
             if not ok_btn.Exists(maxSearchSeconds=2):
                 raise WxControlNotFoundError("未找到'完成'按钮")
             input_wx.click(ok_btn)
-            time.sleep(0.3)
 
             logger.debug(f"设置备注成功: {self.chat_name} -> {remark}")
 
@@ -11633,7 +11630,6 @@ class Chat:
                 Name=i_("完成"),
             )
             input_wx.click(ok_btn)
-            time.sleep(0.3)
             logger.debug(f"移除标签成功: {self.chat_name} -> {labels}")
 
         except Exception:
@@ -11739,7 +11735,6 @@ class Chat:
                 Name=i_("完成"),
             )
             input_wx.click(ok_btn)
-            time.sleep(0.3)
             logger.debug(f"添加电话号码成功: {self.chat_name} -> {phones}")
 
         except Exception:
@@ -11819,8 +11814,6 @@ class Chat:
             if not ok_btn.Exists(maxSearchSeconds=2):
                 raise WxControlNotFoundError("未找到'完成'按钮")
             input_wx.click(ok_btn)
-            time.sleep(0.3)
-
             logger.debug(f"添加备注图片成功: {self.chat_name} -> {images}")
 
         except Exception:
@@ -11906,7 +11899,6 @@ class Chat:
                 Name=i_("完成"),
             )
             input_wx.click(ok_btn)
-            time.sleep(0.3)
             logger.debug(f"移除电话号码成功: {self.chat_name} -> {phones}")
 
         except Exception:
@@ -12049,7 +12041,6 @@ class Chat:
                 input_wx.send_keys(self._win, "{Esc}")
                 raise WxControlNotFoundError("未找到'设为星标朋友'菜单项")
             input_wx.click(menu_item)
-            time.sleep(0.3)
             logger.debug(f"设为星标朋友成功: {self.chat_name}")
         except Exception:
             self._cleanup_profile()
@@ -12082,7 +12073,6 @@ class Chat:
                 input_wx.send_keys(self._win, "{Esc}")
                 raise WxControlNotFoundError("未找到'不再设为星标朋友'菜单项")
             input_wx.click(menu_item)
-            time.sleep(0.3)
             logger.debug(f"取消星标朋友成功: {self.chat_name}")
         except Exception:
             self._cleanup_profile()
@@ -12120,7 +12110,6 @@ class Chat:
             confirm_btn = self._win.ButtonControl(Name=i_("确定"))
             if confirm_btn.Exists(maxSearchSeconds=3):
                 input_wx.click(confirm_btn)
-                time.sleep(0.3)
                 logger.debug(f"加入黑名单成功: {self.chat_name}")
             else:
                 logger.warning(f"未找到确认按钮，加入黑名单可能未完成: {self.chat_name}")
@@ -12156,7 +12145,6 @@ class Chat:
                 input_wx.send_keys(self._win, "{Esc}")
                 raise WxControlNotFoundError("未找到'移出黑名单'菜单项")
             input_wx.click(menu_item)
-            time.sleep(0.3)
             logger.debug(f"移出黑名单成功: {self.chat_name}")
         except Exception:
             self._cleanup_profile()
@@ -12176,7 +12164,6 @@ class Chat:
             confirm_btn = self._win.ButtonControl(Name=i_("删除"))
             if confirm_btn.Exists(maxSearchSeconds=3):
                 input_wx.click(confirm_btn)
-                time.sleep(0.3)
                 logger.debug(f"删除联系人成功: {self.chat_name}")
             else:
                 logger.warning(f"未找到'删除'确认按钮，删除联系人可能未完成: {self.chat_name}")
@@ -12253,7 +12240,6 @@ class Chat:
             cancel_btn = perm_pop.ButtonControl(Name=i_("取消"))
             if cancel_btn.Exists(maxSearchSeconds=1):
                 input_wx.click(cancel_btn)
-            time.sleep(0.3)
 
             logger.debug(f"获取朋友权限成功: {self.chat_name} -> {result}")
             return result
@@ -12350,12 +12336,10 @@ class Chat:
                 )
                 if ok_btn.Exists(maxSearchSeconds=2):
                     input_wx.click(ok_btn)
-                    time.sleep(0.3)
             else:
                 cancel_btn = perm_pop.ButtonControl(Name=i_("取消"))
                 if cancel_btn.Exists(maxSearchSeconds=1):
                     input_wx.click(cancel_btn)
-                    time.sleep(0.2)
 
             logger.debug(f"设置朋友权限成功: {self.chat_name} -> permission={permission}, "
                         f"hide_my={hide_my_posts}, hide_their={hide_their_posts}")
@@ -12805,7 +12789,6 @@ class MomentItem:
 
         # 未点赞，关闭操作栏
         input_wx.send_keys(None, "{Esc}")
-        time.sleep(0.2)
         return True
 
     def comment(self, content: str) -> bool:
@@ -13448,8 +13431,6 @@ class Moment(WeixinWindow):
                 logger.warning(f"点赞失败: {item.sender} - {e}")
                 continue
 
-            time.sleep(0.5)
-
         logger.info(f"批量点赞完成: 成功 {len(liked)} 条")
         return liked
 
@@ -13513,8 +13494,6 @@ class Moment(WeixinWindow):
             except Exception as e:
                 logger.warning(f"评论失败: {item.sender} - {e}")
                 continue
-
-            time.sleep(0.5)
 
         logger.info(f"批量评论完成: 成功 {len(commented)} 条")
         return commented
