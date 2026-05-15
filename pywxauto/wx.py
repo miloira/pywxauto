@@ -2074,7 +2074,6 @@ def scroll_at(x: int, y: int, delta: int) -> None:
     """
     if not background:
         win32api.SetCursorPos((x, y))
-        time.sleep(0.1)
         win32api.mouse_event(win32con.MOUSEEVENTF_WHEEL, x, y, delta, 0)
     else:
         hwnd = win32gui.WindowFromPoint((x, y))
@@ -2461,15 +2460,24 @@ class Message:
         return None
 
     @property
-    def is_visible(self) -> bool:
+    def is_in_list(self) -> bool:
         """
-        判断消息是否在聊天可见区域内。
-
-        通过消息控件的 BoundingRectangle 与 chat.message_view_rect 比较，
-        消息控件的顶部和底部都在可见区域内则视为可见。
+        消息控件是否在消息列表的 UIA 树中（能通过 runtime_id 找到）。
 
         Returns:
-            True 消息在可见区域内，False 不在或无法判断
+            True 控件存在于列表中，False 不存在
+        """
+        return self._find_ctrl() is not None
+
+    @property
+    def is_in_view(self) -> bool:
+        """
+        消息控件是否在 message_view 的可视矩形范围内（能被看到/点击）。
+
+        前提：控件必须先在列表中（is_in_list=True）。
+
+        Returns:
+            True 消息完全在可视范围内，False 不在或无法判断
         """
         if not self.chat:
             return False
@@ -2486,13 +2494,140 @@ class Message:
             return False
 
     @property
+    def is_visible(self) -> bool:
+        """判断消息是否在 message_view 可视范围内（is_in_view 的别名）"""
+        return self.is_in_view
+
+    def scroll_into_view(self) -> bool:
+        """
+        将消息微调滚动到 message_view 可视范围内。
+
+        前提：消息控件已在列表中（is_in_list=True），但可能不在可视矩形内。
+        通过小幅滚动将其带入可视范围。
+
+        Returns:
+            True 成功滚动到可视范围，False 失败
+        """
+        if not self.chat:
+            return False
+        view_rect = self.chat.message_view_rect
+        if not view_rect:
+            return False
+
+        ctrl = self._find_ctrl()
+        if not ctrl:
+            return False
+
+        cx = (view_rect[0] + view_rect[2]) // 2
+        cy = (view_rect[1] + view_rect[3]) // 2
+
+        for _ in range(20):
+            try:
+                ctrl_rect = ctrl.BoundingRectangle
+            except Exception:
+                return False
+
+            if ctrl_rect.top >= view_rect[1] and ctrl_rect.bottom <= view_rect[3]:
+                return True
+
+            if ctrl_rect.top < view_rect[1]:
+                scroll_at(cx, cy, 120)  # 向上滚动
+            elif ctrl_rect.bottom > view_rect[3]:
+                scroll_at(cx, cy, -120)  # 向下滚动
+            time.sleep(0.1)
+
+        return False
+
+    def _detect_regions(self) -> None:
+        """
+        对消息控件截图并识别 headimg_rect、nickname_rect、content_rect。
+
+        通过轮廓检测识别消息中的头像、昵称、内容区域的相对坐标，
+        同时判断发送者（头像在左=对方，头像在右=自己）。
+
+        前提：消息控件必须在 message_view 可视范围内（is_in_view=True）。
+        """
+        if not self.chat:
+            return
+        ctrl = self._find_ctrl()
+        if not ctrl:
+            return
+
+        hwnd = self.chat._win.NativeWindowHandle or 0
+        chat_name = self.chat.chat_name or "对方"
+
+        sender, source, bubble_rect, headimg_rect, nickname_rect, content_rect = \
+            Chat._detect_sender(hwnd, ctrl, chat_name)
+
+        self.headimg_rect = headimg_rect
+        self.nickname_rect = nickname_rect
+        self.content_rect = content_rect
+        self.bubble_rect = bubble_rect
+        if source != Source.UNKNOWN:
+            self.source = source
+            self.sender = sender
+
+    def refresh(self) -> Message:
+        """
+        刷新消息属性：确保消息在视野内，截图识别区域坐标和发送者信息。
+
+        调用后 headimg_rect、nickname_rect、content_rect、source、sender
+        等属性会被更新为最新的识别结果。
+
+        Returns:
+            self（支持链式调用）
+
+        Raises:
+            RuntimeError: 消息未关联 chat 或无法定位到消息
+        """
+        self._ensure_operable()
+        return self
+
+    def _ensure_operable(self) -> auto.Control:
+        """
+        确保消息可操作：在列表中 → 在视野内 → 截图识别区域坐标。
+
+        流程：
+        1. 确认消息在列表中（_find_ctrl），找不到则 scroll_to_visible
+        2. 确认消息在 message_view 视野内，不在则 scroll_into_view 微调
+        3. 如果 content_rect 为空，截图识别各区域坐标
+
+        Returns:
+            可操作的消息控件
+
+        Raises:
+            RuntimeError: 无法定位到消息
+        """
+        if not self.chat:
+            raise RuntimeError("消息未关联聊天窗口")
+
+        # 1. 确保在列表中
+        ctrl = self._find_ctrl()
+        if not ctrl:
+            if not self.scroll_to_visible():
+                raise RuntimeError("无法将消息滚动到可见区域")
+            ctrl = self._find_ctrl()
+            if not ctrl:
+                raise RuntimeError("滚动后仍无法找到消息控件")
+
+        # 2. 确保在 message_view 视野内
+        if not self.is_in_view:
+            if not self.scroll_into_view():
+                raise RuntimeError("无法将消息微调到可视范围内")
+
+        # 3. 如果没有 content_rect，截图识别
+        if not self.content_rect:
+            self._detect_regions()
+
+        return self._find_ctrl()
+
+    @property
     def center(self) -> Optional[Tuple[int, int]]:
         """
         获取消息内容区域的屏幕中心点坐标。
 
-        x 使用 content_rect（相对于控件截图的坐标）计算，
-        y 使用控件实时的 BoundingRectangle 中心并向上偏移 10px，
-        因为消息滚动时 y 会变动，content_rect 的 y 是截图时的静态值。
+        content_rect 存储的是相对于控件截图的坐标 (x1, y1, x2, y2)，
+        通过控件实时的 BoundingRectangle 左上角偏移转换为屏幕坐标。
 
         Returns:
             (x, y) 屏幕坐标，无法计算时返回 None
@@ -2502,24 +2637,25 @@ class Message:
             return None
         try:
             rect = ctrl.BoundingRectangle
-            x1, _, x2, _ = self.content_rect
-            cx = rect.left + (x1 + x2) // 2
-            cy = (rect.top + rect.bottom) // 2 - 8
-            return (cx, cy)
         except Exception:
-            rect = ctrl.BoundingRectangle
-            cy = (rect.top + rect.bottom) // 2 - 8 # 向上偏移10px保证引用消息悬浮位置正确
-            if self.bubble_rect:
-                bl, bt, br, bb = self.bubble_rect
-                # bubble_rect 的 x 坐标不变，y 坐标从控件实时位置重新计算
-                cx = (bl + br) // 2
-            elif self.source == Source.SELF:
-                cx = rect.right - rect.width() // 4
-            elif self.source == Source.OTHERS:
-                cx = rect.left + rect.width() // 4
-            else:
-                cx = (rect.left + rect.right) // 2
+            return None
+
+        # 优先使用 content_rect（相对于控件截图的坐标）
+        if self.content_rect:
+            x1, y1, x2, y2 = self.content_rect
+            cx = rect.left + (x1 + x2) // 2
+            cy = rect.top + (y1 + y2) // 2
             return (cx, cy)
+
+        # 回退：使用控件中心估算
+        if self.source == Source.SELF:
+            cx = rect.right - rect.width() // 4
+        elif self.source == Source.OTHERS:
+            cx = rect.left + rect.width() // 4
+        else:
+            cx = (rect.left + rect.right) // 2
+        cy = (rect.top + rect.bottom) // 2
+        return (cx, cy)
 
     @PIM.guard
     def scroll_to_visible(self, max_scroll: int = 30) -> bool:
@@ -2621,15 +2757,31 @@ class Message:
 
     @PIM.guard
     def hover(self) -> bool:
+        """
+        悬浮鼠标到消息内容区域中心。
+
+        流程：
+        1. _ensure_operable 确保消息在视野内并识别区域坐标
+        2. 通过 center 获取 content 区域的屏幕中心坐标
+        3. 移动鼠标到该坐标
+
+        Returns:
+            True 悬浮成功，False 失败
+        """
         if not self.chat:
             return False
 
         self.chat._activate_window()
 
-        if not self.scroll_to_visible():
+        try:
+            self._ensure_operable()
+        except RuntimeError:
             return False
 
-        cx, cy = self.center
+        pos = self.center
+        if not pos:
+            return False
+        cx, cy = pos
 
         if not background:
             auto.SetCursorPos(cx, cy)
@@ -2690,7 +2842,6 @@ class Message:
             raise WxControlNotFoundError(f"右键菜单中未找到'{menu_name}'选项")
 
         input_wx.click(menu_item)
-        time.sleep(0.3)
 
     @PIM.guard
     def quote(self) -> None:
@@ -2857,11 +3008,14 @@ class Message:
             raise WxControlNotFoundError("未找到'发送'按钮")
 
         # 等待按钮可用
-        for _ in range(10):
+        deadline = time.monotonic() + 3
+        btn_enabled = False
+        while time.monotonic() < deadline:
             if send_btn.IsEnabled:
+                btn_enabled = True
                 break
             time.sleep(0.3)
-        else:
+        if not btn_enabled:
             raise RuntimeError("'发送'按钮未启用，可能接收者未正确选中")
 
         input_wx.click(send_btn)
@@ -3986,9 +4140,9 @@ class RedPacketMessage(Message):
         open_btn = self.chat._win.ButtonControl(
             ClassName="mmui::XButton",
             Name=i_("拆开"),
-            searchDepth=10,
+            searchDepth=16,
         )
-        if open_btn.Exists(maxSearchSeconds=3):
+        if open_btn.Exists(maxSearchSeconds=16):
             input_wx.click(open_btn)
 
         # 等待红包结果窗口出现，截图 OCR 识别
@@ -5267,18 +5421,101 @@ def _parse_session_name(raw: str, session: Optional[Session] = None) -> SessionI
     """
     解析会话 ListItem 的 Name 属性。
 
-    典型格式（换行分隔）：
-      "雕虫小技 一群\\n...\\n17:15\\n消息免打扰\\n"
+    微信会话 Name 格式（换行分隔）：
+      "{name}\\n{已置顶}\\n{[N条] }\\n{last_msg}\\n{msg_time}\\n{消息免打扰}\\n"
+
+    各行可能出现的标记行（非消息内容）：
+      - "已置顶": 置顶标记
+      - "消息免打扰": 免打扰标记
+      - "[N条] " 或 "[N条]": 未读消息数（可能独占一行，也可能在消息行开头）
+
+    示例：
+      "马新才\\n已置顶\\n[1条] \\n你这边企微协议封号吗？\\n2025/11/25\\n"
+      "雕虫小技 一群\\n🥬🐶: 绷不住了\\n12:07\\n消息免打扰\\n"
+      "公众号\\n[11条] 监利发布: ...\\n14:03\\n"
+
+    解析策略：
+    1. 第一行固定为 name
+    2. 从末尾向前扫描，跳过标记行，找到时间行
+    3. name 和时间行之间过滤掉标记行，剩余拼接为 last_msg
+    4. 从所有中间行中提取 [N条] 未读标记
     """
     parts = [p for p in raw.split("\n") if p.strip()]
     item = SessionItem(session)
-    item.name = parts[0] if parts else ""
-    item.last_msg = parts[1] if len(parts) > 1 else ""
-    item.msg_time = parts[2] if len(parts) > 2 else ""
+    item.raw_text = raw
+
+    if not parts:
+        return item
+
+    item.name = parts[0]
+
+    # 已知标记（整行匹配时过滤）
+    mark_set = {i_("消息免打扰"), "已置顶"}
+
+    # 未读数正则：独占一行的 "[N条]" 或 "[N条] "
+    unread_line_re = re.compile(r"^\[(\d+)条\]\s*$")
+    # 未读数正则：行首的 "[N条] " 前缀
+    unread_prefix_re = re.compile(r"^\[(\d+)条\]\s*")
+
+    # 时间正则
+    time_re = re.compile(
+        r'^('
+        r'\d{1,2}:\d{2}'
+        r'|昨天\s*\d{1,2}:\d{2}'
+        r'|前天\s*\d{1,2}:\d{2}'
+        r'|星期[一二三四五六日]\s*\d{1,2}:\d{2}'
+        r'|\d{1,2}/\d{1,2}'
+        r'|\d{4}/\d{1,2}/\d{1,2}'
+        r'|\d{4}年\d{1,2}月\d{1,2}日'
+        r')$'
+    )
+
+    # 从末尾向前找时间行（跳过标记行）
+    time_idx = -1
+    for i in range(len(parts) - 1, 0, -1):
+        if parts[i] in mark_set:
+            continue
+        if unread_line_re.match(parts[i]):
+            continue
+        if time_re.match(parts[i]):
+            time_idx = i
+            break
+        break
+
+    # 确定中间行范围
+    if time_idx > 0:
+        item.msg_time = parts[time_idx]
+        middle = parts[1:time_idx]
+    else:
+        middle = parts[1:]
+
+    # 从中间行中提取未读数、过滤标记行、拼接 last_msg
+    msg_lines = []
+    for line in middle:
+        # 跳过标记行
+        if line in mark_set:
+            continue
+        # 独占一行的未读标记
+        um = unread_line_re.match(line)
+        if um:
+            item.unread_count = int(um.group(1))
+            continue
+        # 行首未读前缀
+        pm = unread_prefix_re.match(line)
+        if pm:
+            item.unread_count = int(pm.group(1))
+            line = line[pm.end():]
+            if not line:
+                continue
+        msg_lines.append(line)
+
+    item.last_msg = "\n".join(msg_lines)
+
+    # 免打扰标记
     item.muted = i_("消息免打扰") in raw
-    m = re.search(r"\[(\d+)条\]", raw)
-    if m:
-        item.unread = m.group(0)
+
+    return item
+
     return item
 
 
@@ -5571,10 +5808,12 @@ class SessionItem:
         name: str = "",
         last_msg: str = "",
         msg_time: str = "",
-        unread: str = "",
+        unread_count: int = 0,
         muted: bool = False,
         is_active: bool = False,
+        raw_text: str = "",
         runtime_id: tuple = (),
+        control: Optional[auto.Control] = None,
     ):
         """
         初始化会话项。
@@ -5584,82 +5823,244 @@ class SessionItem:
             name: 会话名称。
             last_msg: 最后一条消息摘要。
             msg_time: 消息时间文本。
-            unread: 未读条数文本，如 "[9条]"。
+            unread_count: 未读消息条数，0 表示无未读。
             muted: 是否消息免打扰。
             is_active: 是否为当前选中（激活）的会话。
+            raw_text: 控件 Name 属性原始文本。
             runtime_id: UI Automation RuntimeId，用于唯一标识控件。
+            control: UI Automation 控件引用，用于直接操作。
         """
         self.session = session
         self.name = name
         self.last_msg = last_msg
         self.msg_time = msg_time
-        self.unread = unread
+        self.unread_count = unread_count
         self.muted = muted
         self.is_active = is_active
+        self.raw_text = raw_text
         self.runtime_id = runtime_id
+        self.control = control
 
-    def pin(self) -> None:
-        """置顶会话"""
-        self.session._session_context_action(self.name, i_("置顶"))
+    def _get_control(self) -> auto.Control:
+        """
+        获取会话项的 UI 控件。
 
-    def unpin(self) -> None:
-        """取消置顶会话"""
-        self.session._session_context_action(self.name, i_("取消置顶"))
+        优先使用已缓存的 control 引用，其次通过 session._ensure_session_visible 查找。
 
-    def mark_as_unread(self) -> None:
-        """标为未读"""
-        self.session._session_context_action(self.name, i_("标为未读"))
+        Returns:
+            会话项的 ListItemControl 控件
 
-    def mark_as_read(self) -> None:
-        """标为已读"""
-        self.session._session_context_action(self.name, i_("标为已读"))
+        Raises:
+            WxControlNotFoundError: 控件未找到时抛出
+        """
+        if self.control is not None:
+            try:
+                # 验证控件仍然有效
+                _ = self.control.BoundingRectangle
+                return self.control
+            except Exception:
+                self.control = None
+        # 回退到通过 session 查找
+        self.control = self.session._ensure_session_visible(self.name)
+        return self.control
 
-    def mute(self) -> None:
-        """消息免打扰"""
-        self.session._session_context_action(self.name, i_("消息免打扰"))
+    def scroll_to_visible(self) -> bool:
+        """
+        确保会话项在会话列表的可见区域内（可被点击）。
 
-    def unmute(self) -> None:
-        """允许消息通知"""
-        self.session._session_context_action(self.name, i_("允许消息通知"))
+        前置条件：控件已通过 _get_control() 找到（存在于 UIA 树中）。
+        本方法通过滚动将控件带入列表的可视矩形范围内。
 
-    def separate(self) -> None:
+        Returns:
+            True 会话项已在可见区域内，False 滚动失败
+        """
+        ctrl = self._get_control()
+        lc = self.session._list_control
+        if not lc.Exists(0, 0):
+            return False
+
+        list_rect = lc.BoundingRectangle
+        max_scroll = 30
+
+        for _ in range(max_scroll):
+            try:
+                ctrl_rect = ctrl.BoundingRectangle
+            except Exception:
+                self.control = None
+                ctrl = self._get_control()
+                ctrl_rect = ctrl.BoundingRectangle
+
+            if ctrl_rect.top >= list_rect.top and ctrl_rect.bottom <= list_rect.bottom:
+                return True
+
+            cx = (list_rect.left + list_rect.right) // 2
+            cy = (list_rect.top + list_rect.bottom) // 2
+
+            if ctrl_rect.top < list_rect.top:
+                scroll_at(cx, cy, 120)
+            elif ctrl_rect.bottom > list_rect.bottom:
+                scroll_at(cx, cy, -120)
+            else:
+                return True
+
+            time.sleep(0.1)
+
+        return False
+
+    def _ensure_operable(self) -> auto.Control:
+        """
+        确保会话项可操作：先通过 _get_control 找到控件，再 scroll_to_visible 滚动到可见。
+
+        Returns:
+            可操作的 ListItemControl 控件
+        """
+        ctrl = self._get_control()
+        self.scroll_to_visible()
+        return ctrl
+
+    def _right_click(self) -> None:
+        """右键点击此会话项，弹出上下文菜单"""
+        if self.session.wx:
+            self.session.wx.activate()
+        ctrl = self._ensure_operable()
+        input_wx.click(ctrl, button="right")
+
+    def _context_action(self, menu_name: str) -> None:
+        """对此会话项执行右键菜单操作，菜单项不存在时抛异常"""
+        self.session._ensure_ready()
+        self._right_click()
+        self.session._click_context_menu_item(menu_name)
+        # 操作后会话位置可能变化，清除缓存强制下次重新查找
+        self.control = None
+
+    def _try_context_action(self, menu_name: str) -> bool:
+        """
+        尝试执行右键菜单操作。
+
+        菜单项存在则点击并返回 True，不存在则关闭菜单返回 False（不抛异常）。
+        用于幂等操作：如果目标菜单项不存在，说明已经是目标状态。
+        """
+        self.session._ensure_ready()
+        self._right_click()
+        menu_win = self.session._win.WindowControl(ClassName="mmui::XMenu")
+        if not menu_win.Exists(maxSearchSeconds=2):
+            return False
+        menu_item = menu_win.MenuItemControl(
+            ClassName="mmui::XMenuView",
+            AutomationId="XMenuItem",
+            Name=menu_name,
+        )
+        if not menu_item.Exists(maxSearchSeconds=1):
+            input_wx.send_keys(self.session._win, "{Esc}")
+            return False
+        input_wx.click(menu_item)
+        # 操作后会话位置可能变化，清除缓存强制下次重新查找
+        self.control = None
+        return True
+
+    def pin(self) -> SessionItem:
+        """置顶会话（已置顶则跳过）"""
+        self._try_context_action(i_("置顶"))
+        return self
+
+    def unpin(self) -> SessionItem:
+        """取消置顶会话（未置顶则跳过）"""
+        self._try_context_action(i_("取消置顶"))
+        return self
+
+    def mark_as_unread(self) -> SessionItem:
+        """标为未读（已未读则跳过）"""
+        self._try_context_action(i_("标为未读"))
+        return self
+
+    def mark_as_read(self) -> SessionItem:
+        """标为已读（已已读则跳过）"""
+        self._try_context_action(i_("标为已读"))
+        return self
+
+    def mute(self) -> SessionItem:
+        """消息免打扰（已免打扰则跳过）"""
+        self._try_context_action(i_("消息免打扰"))
+        return self
+
+    def unmute(self) -> SessionItem:
+        """允许消息通知（已允许则跳过）"""
+        self._try_context_action(i_("允许消息通知"))
+        return self
+
+    def separate(self) -> SessionItem:
         """独立窗口显示"""
-        self.session._session_context_action(self.name, i_("独立窗口显示"))
+        self._context_action(i_("独立窗口显示"))
+        return self
 
     def separate_by_click(self) -> SeparateChat:
         """双击打开独立窗口，返回 SeparateChat 实例"""
         session = self.session
         if session.wx:
             session.wx.activate()
-        item = session._ensure_session_visible(self.name)
-        input_wx.click(item, click="double")
+        ctrl = self._ensure_operable()
+        input_wx.click(ctrl, click="double")
         return SeparateChat(session.wx, self.name)
 
-    def hide(self) -> None:
+    def hide(self) -> SessionItem:
         """不显示该会话"""
-        self.session._session_context_action(self.name, i_("不显示"))
+        self._context_action(i_("不显示"))
+        return self
 
-    def delete(self) -> None:
+    def delete(self) -> SessionItem:
         """删除会话（危险操作，会清除聊天记录）"""
-        session = self.session
-        session._session_context_action(self.name, i_("删除"))
-        confirm_btn = session._win.ButtonControl(Name=i_("删除"), ClassName="mmui::XOutlineButton")
+        self._context_action(i_("删除"))
+        confirm_btn = self.session._win.ButtonControl(Name=i_("删除"), ClassName="mmui::XOutlineButton")
         if not confirm_btn.Exists(maxSearchSeconds=2):
             raise WxControlNotFoundError("未找到删除确认弹窗")
         input_wx.click(confirm_btn)
+        return self
 
-    def open(self) -> None:
-        """激活会话"""
-        self.session.open(self.name)
+    def open(self) -> SessionItem:
+        """激活会话（直接点击控件）"""
+        self.session._ensure_ready()
+        ctrl = self._ensure_operable()
+        try:
+            pattern = ctrl.GetSelectionItemPattern()
+            if pattern and pattern.IsSelected:
+                for aid in Chat.TITLE_LABEL_IDS:
+                    title = self.session._win.TextControl(AutomationId=aid)
+                    if title.Exists(0, 0) and title.Name == self.name:
+                        return self
+                input_wx.click(ctrl)
+                return self
+        except Exception:
+            pass
+        input_wx.click(ctrl)
+        return self
 
-    def close(self) -> None:
+    def close(self) -> SessionItem:
         """取消激活（如果处于激活状态则取消选中）"""
-        self.session.close(self.name)
+        self.session._ensure_ready()
+        ctrl = self._ensure_operable()
+        try:
+            pattern = ctrl.GetSelectionItemPattern()
+            if not pattern or not pattern.IsSelected:
+                return self
+        except Exception:
+            return self
+        input_wx.click(ctrl)
+        return self
 
     def __repr__(self) -> str:
-        muted_tag = " [免打扰]" if self.muted else ""
-        active_tag = " [激活]" if self.is_active else ""
-        return f"SessionItem({self.name!r}, {self.msg_time}{muted_tag}{active_tag})"
+        return (f"SessionItem(name={self.name!r}, last_msg={self.last_msg!r}, "
+                f"msg_time={self.msg_time!r}, unread_count={self.unread_count}, "
+                f"muted={self.muted}, is_active={self.is_active})")
+
+    def to_dict(self) -> dict:
+        return {
+            "name": self.name,
+            "last_msg": self.last_msg,
+            "msg_time": self.msg_time,
+            "unread_count": self.unread_count,
+            "muted": self.muted,
+            "is_active": self.is_active,
+        }
 
 
 class Session:
@@ -5711,6 +6112,7 @@ class Session:
             if not ctrl.Name:
                 continue
             item = _parse_session_name(ctrl.Name, session=self)
+            item.control = ctrl
             try:
                 rid = tuple(ctrl.GetRuntimeId())
                 item.runtime_id = rid
@@ -5756,7 +6158,6 @@ class Session:
         if not item.Exists(maxSearchSeconds=2):
             raise WxControlNotFoundError(f"会话列表中未找到: {name}")
         input_wx.click(item)
-        time.sleep(0.3)
 
     def _get_search_edit(self) -> auto.EditControl:
         return self._win.EditControl(
@@ -5837,7 +6238,6 @@ class Session:
         cx = (rect.left + rect.right) // 2
         cy = (rect.top + rect.bottom) // 2
         auto.WheelDown(cx, cy, abs(delta)) if direction == "down" else auto.WheelUp(cx, cy, abs(delta))
-        time.sleep(0.3)
 
     def all(self, step: int = 5, max_scrolls: int = 500) -> List[SessionItem]:
         """
@@ -5904,6 +6304,290 @@ class Session:
 
         return all_sessions
 
+    def get_sessions(self, count: Optional[int] = None) -> List[SessionItem]:
+        """
+        获取会话列表。
+
+        通过选中第一条会话，然后逐条按 Down 键遍历，
+        每次获取当前激活的 SessionItem。
+        当按 Down 后激活项不变时说明已到最后一条。
+
+        Args:
+            count: 要获取的会话数量，None 获取全部
+
+        Returns:
+            按出现顺序排列的会话列表
+        """
+        return list(self.iter_sessions_by_next_sibling(count=count))
+
+    def iter_sessions(self, count: Optional[int] = None) -> None:
+        """
+        逐条获取会话列表（生成器）。
+
+        与 get_sessions 相同的遍历逻辑，但每获取到一条新会话立即 yield，
+        适合边获取边操作的场景。
+
+        Args:
+            count: 要获取的会话数量，None 获取全部
+
+        Yields:
+            SessionItem 实例
+        """
+        self._ensure_ready()
+        lc = self._list_control
+        if not lc.Exists(maxSearchSeconds=3):
+            raise WxControlNotFoundError("未找到会话列表控件")
+
+        input_wx.focus(lc)
+
+        # 回到顶部
+        input_wx.send_keys(lc, "{Home}")
+
+        # 点击第一条会话使其激活（如果已激活则跳过）
+        first_item = None
+        for ctrl, _ in auto.WalkControl(lc):
+            if ctrl.ControlType == auto.ControlType.ListItemControl and ctrl.Name:
+                first_item = ctrl
+                break
+        if not first_item:
+            return
+        try:
+            pattern = first_item.GetSelectionItemPattern()
+            if not pattern or not pattern.IsSelected:
+                input_wx.click(first_item)
+        except Exception:
+            input_wx.click(first_item)
+
+        list_rect = lc.BoundingRectangle
+        last_rid: tuple = ()
+        bottom_same_rid_count = 0
+        yielded = 0
+        deadline = time.monotonic() + 60
+
+        while time.monotonic() < deadline:
+            item = self._get_selected_item(lc)
+            if item is None:
+                break
+
+            if item.runtime_id != last_rid:
+                bottom_same_rid_count = 0
+                yield item
+                yielded += 1
+
+                if count is not None and yielded >= count:
+                    return
+
+            try:
+                ctrl_rect = item.control.BoundingRectangle
+                if abs(ctrl_rect.bottom - list_rect.bottom) <= 2 and item.runtime_id == last_rid:
+                    bottom_same_rid_count += 1
+                    if bottom_same_rid_count >= 2:
+                        return
+            except Exception:
+                pass
+
+            last_rid = item.runtime_id
+            input_wx.send_keys(self._win, "{Down}")
+
+    def iter_sessions_by_next_sibling(self, count: Optional[int] = None):
+        """
+        逐条获取会话列表（生成器）（可以获取未读消息数）。
+
+        yield 的 SessionItem 保留未读数（在被选中之前解析 Name）。
+        通过获取当前选中项的下一个兄弟控件，先解析再按 Down 选中。
+
+        Args:
+            count: 要获取的会话数量，None 获取全部
+
+        Yields:
+            SessionItem 实例（未读数为选中前的值）
+        """
+        self._ensure_ready()
+        lc = self._list_control
+        if not lc.Exists(maxSearchSeconds=3):
+            raise WxControlNotFoundError("未找到会话列表控件")
+
+        input_wx.focus(lc)
+
+        # 回到顶部
+        input_wx.send_keys(lc, "{Home}")
+
+        # 找到第一条
+        first_ctrl = None
+        for ctrl, _ in auto.WalkControl(lc):
+            if ctrl.ControlType == auto.ControlType.ListItemControl and ctrl.Name:
+                first_ctrl = ctrl
+                break
+
+        if not first_ctrl:
+            return
+
+        # 解析第一条（选中前，未读数完整）
+        item = _parse_session_name(first_ctrl.Name, session=self)
+        item.control = first_ctrl
+        try:
+            item.runtime_id = tuple(first_ctrl.GetRuntimeId())
+        except Exception:
+            pass
+
+        # 确保第一条被选中（如果已激活则先取消再重新激活，触发刷新）
+        pattern = first_ctrl.GetSelectionItemPattern()
+        if pattern and pattern.IsSelected:
+            # 重新激活
+            input_wx.click(first_ctrl)
+            time.sleep(1)
+            input_wx.click(first_ctrl)
+        else:
+            # 直接激活
+            input_wx.click(first_ctrl)
+
+        yield item
+        yielded = 1
+        if count is not None and yielded >= count:
+            return
+
+        list_rect = lc.BoundingRectangle
+        last_rid = item.runtime_id
+        bottom_same_rid_count = 0
+
+        while True:
+            # 获取当前选中控件的下一个兄弟（未被选中，未读数完整）
+            current_ctrl = self._get_selected_ctrl(lc)
+            if not current_ctrl:
+                break
+
+            next_ctrl = current_ctrl.GetNextSiblingControl()
+            if next_ctrl is None:
+                break
+
+            if next_ctrl and next_ctrl.Name and \
+                    next_ctrl.ControlType == auto.ControlType.ListItemControl:
+                # 解析下一条（选中前）
+                try:
+                    next_rid = tuple(next_ctrl.GetRuntimeId())
+                except Exception:
+                    next_rid = ()
+
+                next_item = _parse_session_name(next_ctrl.Name, session=self)
+                next_item.control = next_ctrl
+                next_item.runtime_id = next_rid
+
+                # 按 Down 选中下一条
+                input_wx.send_keys(self._win, "{Down}")
+                time.sleep(0.05)
+
+                if next_rid == last_rid:
+                    try:
+                        ctrl_rect = next_ctrl.BoundingRectangle
+                        if abs(ctrl_rect.bottom - list_rect.bottom) == 0:
+                            bottom_same_rid_count += 1
+                            if bottom_same_rid_count >= 2:
+                                return
+                    except Exception:
+                        pass
+                    continue
+
+                last_rid = next_rid
+                bottom_same_rid_count = 0
+                yield next_item
+                yielded += 1
+                if count is not None and yielded >= count:
+                    return
+            else:
+                # 没有下一个兄弟（可能需要滚动露出更多），使用滚轮微调
+                cx = (list_rect.left + list_rect.right) // 2
+                cy = (list_rect.top + list_rect.bottom) // 2
+                scroll_at(cx, cy, -120)  # 向下滚动一格
+                time.sleep(0.15)
+
+                # 滚动后重新获取当前选中项的下一个兄弟
+                current_ctrl = self._get_selected_ctrl(lc)
+                if not current_ctrl:
+                    break
+
+                next_sibling = current_ctrl.GetNextSiblingControl()
+                if next_sibling and next_sibling.Name and \
+                        next_sibling.ControlType == auto.ControlType.ListItemControl:
+                    try:
+                        new_rid = tuple(next_sibling.GetRuntimeId())
+                    except Exception:
+                        new_rid = ()
+
+                    if new_rid == last_rid:
+                        bottom_same_rid_count += 1
+                        if bottom_same_rid_count >= 2:
+                            return
+                        continue
+
+                    # 解析下一条（选中前）
+                    new_item = _parse_session_name(next_sibling.Name, session=self)
+                    new_item.control = next_sibling
+                    new_item.runtime_id = new_rid
+
+                    # 按 Down 选中下一条
+                    input_wx.send_keys(self._win, "{Down}")
+                    time.sleep(0.05)
+
+                    last_rid = new_rid
+                    bottom_same_rid_count = 0
+                    yield new_item
+                    yielded += 1
+                    if count is not None and yielded >= count:
+                        return
+                else:
+                    # 滚动后仍然没有下一个兄弟，说明已到底部
+                    bottom_same_rid_count += 1
+                    if bottom_same_rid_count >= 2:
+                        return
+
+    def _get_selected_ctrl(self, lc: auto.ListControl) -> Optional[auto.Control]:
+        """获取会话列表中当前被选中的控件"""
+        for ctrl, _ in auto.WalkControl(lc):
+            if ctrl.ControlType != auto.ControlType.ListItemControl:
+                continue
+            if not ctrl.Name:
+                continue
+            try:
+                pattern = ctrl.GetSelectionItemPattern()
+                if pattern and pattern.IsSelected:
+                    return ctrl
+            except Exception:
+                continue
+        return None
+
+    def _get_selected_item(self, lc: auto.ListControl) -> Optional[SessionItem]:
+        """
+        获取会话列表中当前被选中（激活）的 SessionItem。
+
+        通过 SelectionItemPattern.IsSelected 判断选中状态，
+        解析控件 Name 属性构造 SessionItem。
+
+        Args:
+            lc: 会话列表 ListControl
+
+        Returns:
+            当前选中的 SessionItem，未找到返回 None
+        """
+        for ctrl, _ in auto.WalkControl(lc):
+            if ctrl.ControlType != auto.ControlType.ListItemControl:
+                continue
+            if not ctrl.Name:
+                continue
+            try:
+                pattern = ctrl.GetSelectionItemPattern()
+                if pattern and pattern.IsSelected:
+                    item = _parse_session_name(ctrl.Name, session=self)
+                    item.control = ctrl
+                    item.is_active = True
+                    try:
+                        item.runtime_id = tuple(ctrl.GetRuntimeId())
+                    except Exception:
+                        pass
+                    return item
+            except Exception:
+                continue
+        return None
+
     def _ensure_session_visible(self, name: str) -> auto.ListItemControl:
         """
         确保指定会话在可见区域内，返回对应的 ListItemControl。
@@ -5925,14 +6609,9 @@ class Session:
         time.sleep(0.2)
 
         # 先滚动到顶部
-        scroll_pattern = lc.GetScrollPattern()
-        if scroll_pattern:
-            scroll_pattern.SetScrollPercent(-1, 0)
-        else:
-            input_wx.send_keys(lc, "{Home}")
+        input_wx.send_keys(lc, "{Home}")
         time.sleep(0.3)
 
-        # 检查顶部是否可见
         if item.Exists(0, 0):
             return item
 
@@ -5940,14 +6619,10 @@ class Session:
         step = 5
         no_new_count = 0
         prev_names: Set[str] = set()
-        for _ in range(500):
-            sp = lc.GetScrollPattern()
-            if sp:
-                v = sp.VerticalScrollPercent
-                if v >= 100 or v < 0:
-                    break
-
+        deadline = time.monotonic() + 30
+        while time.monotonic() < deadline:
             input_wx.send_keys(lc, "{Down}" * step)
+            time.sleep(0.1)
 
             if item.Exists(0, 0):
                 return item
@@ -5962,11 +6637,6 @@ class Session:
             prev_names = curr_names
 
         raise WxControlNotFoundError(f"会话列表中未找到: {name}")
-
-    def _right_click_session(self, name: str) -> None:
-        """右键点击指定会话，弹出上下文菜单"""
-        item = self._ensure_session_visible(name)
-        input_wx.click(item, button="right")
 
     def _click_context_menu_item(self, menu_name: str) -> None:
         """
@@ -5988,96 +6658,60 @@ class Session:
             raise WxControlNotFoundError(f"菜单中未找到: {menu_name}")
         input_wx.click(menu_item)
 
-    def _session_context_action(self, name: str, menu_name: str) -> None:
-        """对指定会话执行右键菜单操作"""
+    def _get_session_item(self, name: str) -> SessionItem:
+        """
+        根据名称获取 SessionItem 实例（带控件引用）。
+
+        先确保微信窗口激活且会话列表可见，再通过 _ensure_session_visible
+        查找控件，构造 SessionItem 并缓存控件引用。
+
+        Args:
+            name: 会话名称
+
+        Returns:
+            SessionItem 实例
+        """
         self._ensure_ready()
-        self._right_click_session(name)
-        self._click_context_menu_item(menu_name)
+        ctrl = self._ensure_session_visible(name)
+        return SessionItem(session=self, name=name, control=ctrl, runtime_id=tuple(ctrl.GetRuntimeId()))
 
-    @PIM.guard
-    def pin(self, name: str) -> None:
-        """置顶会话"""
-        self._session_context_action(name, i_("置顶"))
-
-    @PIM.guard
-    def unpin(self, name: str) -> None:
-        """取消置顶会话"""
-        self._session_context_action(name, i_("取消置顶"))
-
-    @PIM.guard
-    def mark_as_unread(self, name: str) -> None:
-        """标为未读"""
-        self._session_context_action(name, i_("标为未读"))
-
-    @PIM.guard
-    def mark_as_read(self, name: str) -> None:
-        """标为已读"""
-        self._session_context_action(name, i_("标为已读"))
-
-    @PIM.guard
-    def mute(self, name: str) -> None:
-        """消息免打扰"""
-        self._session_context_action(name, i_("消息免打扰"))
-
-    @PIM.guard
-    def unmute(self, name: str) -> None:
-        """允许消息通知"""
-        self._session_context_action(name, i_("允许消息通知"))
-
-    @PIM.guard
-    def separate(self, name: str) -> None:
-        """独立窗口显示"""
-        self._session_context_action(name, i_("独立窗口显示"))
-
-    @PIM.guard
-    def hide(self, name: str) -> None:
-        """不显示该会话"""
-        self._session_context_action(name, i_("不显示"))
-
-    @PIM.guard
-    def close(self, name: str) -> None:
-        """关闭指定会话：如果该会话处于激活状态，点击一下取消选中"""
+    def _click_quick_action_button(self) -> None:
+        """点击快捷操作按钮"""
         self._ensure_ready()
-        item = self._ensure_session_visible(name)
-        try:
-            pattern = item.GetSelectionItemPattern()
-            if not pattern or not pattern.IsSelected:
-                return
-        except Exception:
-            return
-        input_wx.click(item)
-
-    @PIM.guard
-    def open(self, name: str) -> None:
-        """通过在会话列表中查找并点击来打开指定会话，如果已激活则不操作"""
-        self._ensure_ready()
-        item = self._ensure_session_visible(name)
-        try:
-            pattern = item.GetSelectionItemPattern()
-            if pattern and pattern.IsSelected:
-                # 已激活但可能聊天区域未显示该会话（窗口之前未打开），
-                # 点击一下确保聊天区域切换到该会话
-                for aid in Chat.TITLE_LABEL_IDS:
-                    title = self._win.TextControl(AutomationId=aid)
-                    if title.Exists(0, 0) and title.Name == name:
-                        return
-                # 标题不匹配，说明聊天区域未显示，点击刷新
-                input_wx.click(item)
-                return
-        except Exception:
-            pass
-        input_wx.click(item)
-
-    @PIM.guard
-    def delete(self, name: str) -> None:
-        """删除会话（危险操作，会清除聊天记录）"""
-        self._session_context_action(name, i_("删除"))
-        confirm_btn = self._win.ButtonControl(
-            Name=i_("删除"), ClassName="mmui::XOutlineButton",
+        btn = self._win.ButtonControl(
+            ClassName="mmui::XButton",
+            Name=i_("快捷操作"),
         )
-        if not confirm_btn.Exists(maxSearchSeconds=2):
-            raise WxControlNotFoundError("未找到删除确认弹窗")
-        input_wx.click(confirm_btn)
+        if not btn.Exists(maxSearchSeconds=2):
+            raise WxControlNotFoundError("未找到快捷操作按钮")
+        input_wx.click(btn)
+
+    def _click_quick_action_item(self, item_name: str) -> None:
+        """
+        点击快捷操作菜单中的指定项。
+        菜单列表: AutomationId="chat_more_entry"
+        菜单项: ClassName="mmui::ChatMoreCellView"
+        """
+        menu_list = self._win.ListControl(
+            ClassName="mmui::XTableView",
+            AutomationId="chat_more_entry",
+        )
+        if not menu_list.Exists(maxSearchSeconds=2):
+            raise RuntimeError("快捷操作菜单未弹出")
+        item = menu_list.ListItemControl(
+            ClassName="mmui::ChatMoreCellView",
+            Name=item_name,
+        )
+        if not item.Exists(maxSearchSeconds=1):
+            # 关闭菜单
+            self._click_quick_action_button()
+            raise WxControlNotFoundError(f"快捷操作菜单中未找到: {item_name}")
+        input_wx.click(item)
+
+    def _quick_action(self, item_name: str) -> None:
+        """执行快捷操作"""
+        self._click_quick_action_button()
+        self._click_quick_action_item(item_name)
 
     @PIM.guard
     def search_and_select(self, keyword: str, chat_type: Optional[List[str]] = None) -> bool:
@@ -6117,47 +6751,48 @@ class Session:
         return self.search_and_select(keyword, chat_type=[i_("最常使用"), i_("联系人"), i_("功能")])
 
     @PIM.guard
-    def search_group(self, keyword: str) -> bool:
+    def search_room(self, keyword: str) -> bool:
         """搜索群聊并打开会话"""
         return self.search_and_select(keyword, chat_type=[i_("最常使用"), i_("群聊"), i_("功能")])
 
-    def _click_quick_action_button(self) -> None:
-        """点击快捷操作按钮"""
+    @PIM.guard
+    def open_session(self, nickname: str, timeout: float = 5) -> Chat:
+        """通过在会话列表中查找并点击来打开指定会话，返回 Chat 对象
+
+        Args:
+            nickname: 会话名称
+            timeout:  等待聊天区域出现的超时时间（秒），默认 5 秒
+        """
         self._ensure_ready()
-        btn = self._win.ButtonControl(
-            ClassName="mmui::XButton",
-            Name=i_("快捷操作"),
-        )
-        if not btn.Exists(maxSearchSeconds=2):
-            raise WxControlNotFoundError("未找到快捷操作按钮")
-        input_wx.click(btn)
+        self.open(nickname)
+        deadline = time.monotonic() + timeout
+        while time.monotonic() < deadline:
+            chat = self.wx.chat
+            if chat is not None:
+                return chat
+            time.sleep(0.3)
+        raise RuntimeError(f"打开会话失败: {nickname}（等待 {timeout}s 超时）")
 
-    def _click_quick_action_item(self, item_name: str) -> None:
-        """
-        点击快捷操作菜单中的指定项。
-        菜单列表: AutomationId="chat_more_entry"
-        菜单项: ClassName="mmui::ChatMoreCellView"
-        """
-        menu_list = self._win.ListControl(
-            ClassName="mmui::XTableView",
-            AutomationId="chat_more_entry",
-        )
-        if not menu_list.Exists(maxSearchSeconds=2):
-            raise RuntimeError("快捷操作菜单未弹出")
-        item = menu_list.ListItemControl(
-            ClassName="mmui::ChatMoreCellView",
-            Name=item_name,
-        )
-        if not item.Exists(maxSearchSeconds=1):
-            # 关闭菜单
-            self._click_quick_action_button()
-            raise WxControlNotFoundError(f"快捷操作菜单中未找到: {item_name}")
-        input_wx.click(item)
+    @PIM.guard
+    def open_session_by_search(self, nickname: str, chat_type: Optional[List[str]] = None,
+                               force_search: bool = False, timeout: float = 5) -> Chat:
+        """通过搜索打开指定会话，返回 Chat 对象
 
-    def _quick_action(self, item_name: str) -> None:
-        """执行快捷操作"""
-        self._click_quick_action_button()
-        self._click_quick_action_item(item_name)
+        Args:
+            nickname:     会话名称
+            chat_type:    优先匹配的分类
+            force_search: 是否强制走搜索流程
+            timeout:      等待聊天区域出现的超时时间（秒），默认 5 秒
+        """
+        self._ensure_ready()
+        self.open_by_search(nickname, chat_type, force_search)
+        deadline = time.monotonic() + timeout
+        while time.monotonic() < deadline:
+            chat = self.wx.chat
+            if chat is not None:
+                return chat
+            time.sleep(0.3)
+        raise RuntimeError(f"打开会话失败: {nickname}（等待 {timeout}s 超时）")
 
     @PIM.guard
     def create_room(self, nickname_list: List[str]) -> None:
@@ -6431,8 +7066,7 @@ class Session:
             raise WxControlNotFoundError("未找到确定按钮")
         input_wx.click(confirm_btn)
 
-    @PIM.guard
-    def new_note(self) -> NoteEditor:
+    def _new_note(self) -> NoteEditor:
         """
         新建笔记，返回笔记编辑窗口对象。
 
@@ -6443,31 +7077,6 @@ class Session:
         return NoteEditor(self.wx)
 
     @PIM.guard
-    def open_session(self, nickname: str) -> Chat:
-        """通过在会话列表中查找并点击来打开指定会话，返回 Chat 对象"""
-        self._ensure_ready()
-        self.open(nickname)
-        for _ in range(10):
-            chat = self.wx.chat
-            if chat is not None:
-                return chat
-            time.sleep(0.3)
-        raise RuntimeError(f"打开会话失败: {nickname}")
-
-    @PIM.guard
-    def open_session_by_search(self, nickname: str, chat_type: Optional[List[str]] = None,
-                               force_search: bool = False) -> Chat:
-        """通过搜索打开指定会话，返回 Chat 对象"""
-        self._ensure_ready()
-        self.open_by_search(nickname, chat_type, force_search)
-        for _ in range(10):
-            chat = self.wx.chat
-            if chat is not None:
-                return chat
-            time.sleep(0.3)
-        raise RuntimeError(f"打开会话失败: {nickname}")
-
-    @PIM.guard
     def create_note(self, content: str) -> None:
         """
         创建笔记并写入内容，完成后关闭笔记窗口。
@@ -6476,10 +7085,70 @@ class Session:
             content: 笔记内容
         """
         self._ensure_ready()
-        note = self.new_note()
+        note = self._new_note()
         note.set_content(content)
         note.save()
         note.close()
+
+    @PIM.guard
+    def pin(self, name: str) -> SessionItem:
+        """置顶会话"""
+        return self._get_session_item(name).pin()
+
+    @PIM.guard
+    def unpin(self, name: str) -> SessionItem:
+        """取消置顶会话"""
+        return self._get_session_item(name).unpin()
+
+    @PIM.guard
+    def mark_as_unread(self, name: str) -> SessionItem:
+        """标为未读"""
+        return self._get_session_item(name).mark_as_unread()
+
+    @PIM.guard
+    def mark_as_read(self, name: str) -> SessionItem:
+        """标为已读"""
+        return self._get_session_item(name).mark_as_read()
+
+    @PIM.guard
+    def mute(self, name: str) -> SessionItem:
+        """消息免打扰"""
+        return self._get_session_item(name).mute()
+
+    @PIM.guard
+    def unmute(self, name: str) -> SessionItem:
+        """允许消息通知"""
+        return self._get_session_item(name).unmute()
+
+    @PIM.guard
+    def separate(self, name: str) -> SessionItem:
+        """独立窗口显示"""
+        return self._get_session_item(name).separate()
+
+    @PIM.guard
+    def hide(self, name: str) -> SessionItem:
+        """不显示该会话"""
+        return self._get_session_item(name).hide()
+
+    @PIM.guard
+    def separate_by_click(self, name: str) -> SeparateChat:
+        """双击打开独立窗口，返回 SeparateChat 实例"""
+        return self._get_session_item(name).separate_by_click()
+
+    @PIM.guard
+    def close(self, name: str) -> SessionItem:
+        """关闭指定会话：如果该会话处于激活状态，点击一下取消选中"""
+        return self._get_session_item(name).close()
+
+    @PIM.guard
+    def open(self, name: str) -> SessionItem:
+        """通过在会话列表中查找并点击来打开指定会话，如果已激活则不操作，返回 SessionItem"""
+        return self._get_session_item(name).open()
+
+    @PIM.guard
+    def delete(self, name: str) -> SessionItem:
+        """删除会话（危险操作，会清除聊天记录）"""
+        return self._get_session_item(name).delete()
 
     def __str__(self) -> str:
         try:
@@ -7764,11 +8433,14 @@ class Chat:
             raise WxControlNotFoundError("未找到'发送'按钮")
 
         # 等待按钮变为可用
-        for _ in range(10):
+        deadline = time.monotonic() + 3
+        btn_enabled = False
+        while time.monotonic() < deadline:
             if send_btn.IsEnabled:
+                btn_enabled = True
                 break
             time.sleep(0.3)
-        else:
+        if not btn_enabled:
             self._close_collection_panel()
             raise RuntimeError("'发送'按钮未启用，可能收藏项未正确选中")
 
@@ -8282,18 +8954,20 @@ class Chat:
 
         # 选中后等待面板刷新完成，再点击之前预获取的发送按钮
         # 等待按钮变为可用
-        for _ in range(10):
+        deadline = time.monotonic() + 3
+        btn_enabled = False
+        while time.monotonic() < deadline:
             try:
                 if send_btn.IsEnabled:
+                    btn_enabled = True
                     break
             except Exception:
                 pass
             time.sleep(0.3)
-        else:
+        if not btn_enabled:
             raise RuntimeError("'发送'按钮未启用，可能接收者未正确选中")
 
         input_wx.click(send_btn)
-        time.sleep(0.5)
 
     def _cleanup_send_card(self) -> None:
         """清理 send_card 过程中可能残留的弹窗和面板"""
@@ -8510,12 +9184,11 @@ class Chat:
             ClassName="mmui::ChatSessionCell",
             AutomationId=f"session_item_{contact_name}",
         )
-        
+
         if not item.Exists(maxSearchSeconds=2):
             raise WxControlNotFoundError(f"会话列表中未找到: {contact_name}")
-        
+
         input_wx.click(item, click="double")
-        time.sleep(0.5)
 
         # 等待独立窗口出现并返回
         try:
@@ -8559,9 +9232,164 @@ class Chat:
             return
         self._activate_window()
         input_wx.focus(lc)
-        time.sleep(0.1)
         input_wx.send_keys(lc, "{End}")
-        time.sleep(0.3)
+
+    def iter_recently_messages(self, count: Optional[int] = None):
+        """
+        逐条获取最近的聊天消息（惰性生成器，从底部开始向上采集）。
+
+        从消息列表底部开始，先 yield 当前页最底部的消息，
+        然后逐步向上翻页继续采集。
+        yield 顺序：从最新到最旧（底部 → 顶部）。
+
+        消息是惰性的：yield 时只解析基本信息（类型、raw_name、runtime_id），
+        不做截图识别。调用 hover() 等操作时才会通过 _ensure_operable()
+        自动完成：滚动到视野 → 截图识别 headimg_rect/nickname_rect/content_rect。
+
+        停止条件：按 PageUp 后第一条消息的 top 仍与 message_view 的 top 重合，
+        说明已经到顶无法再翻页。
+
+        Args:
+            count: 要获取的消息数量，None 获取所有消息（滚动到顶部）
+
+        Yields:
+            Message 实例（从最新到最旧，惰性加载区域坐标）
+        """
+        self._activate_window()
+
+        lc = self._message_list
+        if not lc.Exists(maxSearchSeconds=2):
+            return
+
+        view_rect = self.message_view_rect
+        if not view_rect:
+            return
+
+        # 先滚动到底部
+        self.page_end()
+
+        seen_ids: Set[int] = set()
+        top_count = 0
+        yielded = 0
+
+        while True:
+            # 获取当前可见消息（轻量模式，不做截图识别）
+            visible = self._get_visible_messages_lazy()
+
+            # 收集本页新消息，倒序 yield（从底部/最新的开始）
+            new_msgs = [msg for msg in visible if msg.msg_id not in seen_ids]
+            for msg in reversed(new_msgs):
+                seen_ids.add(msg.msg_id)
+                yield msg
+                yielded += 1
+                if count is not None and yielded >= count:
+                    return
+
+            # 检查是否到顶：第一条消息 top 与 message_view top 重合
+            is_at_top = False
+            if visible:
+                try:
+                    first_ctrl = visible[0].control
+                    if first_ctrl:
+                        first_rect = first_ctrl.BoundingRectangle
+                        if abs(first_rect.top - view_rect[1]) <= 2:
+                            is_at_top = True
+                except Exception:
+                    pass
+
+            if is_at_top:
+                top_count += 1
+                if top_count >= 2:
+                    return
+            else:
+                top_count = 0
+
+            # 向上滚动
+            cx = (view_rect[0] + view_rect[2]) // 2
+            cy = (view_rect[1] + view_rect[3]) // 2
+            scroll_at(cx, cy, 120 * 5)
+
+    def _get_visible_messages_lazy(self) -> List[Message]:
+        """
+        轻量获取当前可见消息列表（不做截图识别）。
+
+        只解析控件的 ClassName、Name、RuntimeId，构造消息对象，
+        不调用 _detect_sender（不截图、不 OCR）。
+        headimg_rect/nickname_rect/content_rect 留空，
+        等调用 hover() 时通过 _ensure_operable() → _detect_regions() 惰性填充。
+        """
+        lc = self._message_list
+        if not lc.Exists(maxSearchSeconds=2):
+            return []
+
+        # ClassName -> 消息子类映射
+        cls_map: Dict[str, type] = {
+            "mmui::ChatTextItemView": TextMessage,
+            "mmui::ChatImageItemView": ImageMessage,
+            "mmui::ChatFileItemView": FileMessage,
+            "mmui::ChatVoiceItemView": VoiceMessage,
+            "mmui::ChatVideoItemView": VideoMessage,
+            "mmui::ChatPersonalCardItemView": PersonalCardMessage,
+            "mmui::ChatBubbleReferItemView": QuoteMessage,
+            "mmui::ChatEmojiItemView": EmotionMessage,
+            "mmui::ChatMusicItemView": MusicMessage,
+            "mmui::ChatMiniProgramItemView": LinkMessage,
+            "mmui::ChatItemView": SystemMessage,
+        }
+
+        chat_name = self.chat_name or "对方"
+        is_room = self.chat_type == "群聊"
+
+        messages: List[Message] = []
+        for ctrl, _ in auto.WalkControl(lc):
+            if ctrl.ControlType != auto.ControlType.ListItemControl:
+                continue
+
+            ui_cls = ctrl.ClassName or ""
+            raw_name = ctrl.Name or ""
+
+            if not raw_name and ui_cls not in cls_map:
+                continue
+
+            try:
+                rid = tuple(ctrl.GetRuntimeId())
+            except Exception:
+                rid = ()
+
+            msg_cls = cls_map.get(ui_cls)
+
+            if QuoteMessage.match(raw_name):
+                msg_cls = QuoteMessage
+            elif ui_cls == "mmui::ChatBubbleItemView":
+                msg_cls = self._classify_bubble(raw_name)
+            elif ui_cls == "mmui::ChatBubbleReferItemView":
+                msg_cls = self._classify_bubble_refer(raw_name)
+
+            if msg_cls is None:
+                msg_cls = OtherMessage
+
+            if msg_cls is SystemMessage:
+                sys_msg = SystemMessage(
+                    content=raw_name, timestamp=raw_name,
+                    raw_name=raw_name, ui_cls=ui_cls, runtime_id=rid,
+                    room=chat_name if is_room else None,
+                    chat=self, control=ctrl,
+                )
+                messages.append(sys_msg)
+                continue
+
+            # 惰性构造：不检测 sender/source，不截图
+            msg = self._build_message(
+                msg_cls, raw_name,
+                sender="", source=Source.UNKNOWN,
+                runtime_id=rid, bubble_rect=(),
+                room=chat_name if is_room else None,
+                chat=self, control=ctrl,
+                headimg_rect=(), nickname_rect=(), content_rect=(),
+                ui_cls=ui_cls,
+            )
+            messages.append(msg)
+        return messages
 
     def get_visible_messages(self, sender_cache: Dict[int, tuple] = None) -> List[Message]:
         """
@@ -9568,7 +10396,8 @@ class Chat:
                 input_wx.click(self._win.ButtonControl(Name=i_("我知道了")))
 
             # 等待操作窗口消失后再收起聊天信息面板
-            for _ in range(30):
+            deadline = time.monotonic() + 30
+            while time.monotonic() < deadline:
                 check_picker = self._win.WindowControl(
                     ClassName="mmui::SessionPickerWindow",
                     searchDepth=1,
@@ -9737,7 +10566,8 @@ class Chat:
                 time.sleep(0.3)
 
             # 等待操作窗口消失后再收起聊天信息面板
-            for _ in range(30):
+            deadline = time.monotonic() + 30
+            while time.monotonic() < deadline:
                 check_picker = self._win.WindowControl(
                     ClassName="mmui::SessionPickerWindow",
                     searchDepth=1,
@@ -10202,7 +11032,8 @@ class Chat:
                 time.sleep(1)
 
                 # 等待群公告窗口关闭
-                for _ in range(10):
+                deadline = time.monotonic() + 30
+                while time.monotonic() < deadline:
                     if not get_hwnd(pane_title):
                         break
                     time.sleep(3)
@@ -10845,7 +11676,6 @@ class Chat:
         time.sleep(0.5)
 
         self._click_contact_avatar()
-        time.sleep(0.5)
 
     def _click_profile_menu_item(self, menu_name: str) -> None:
         """
@@ -11324,6 +12154,7 @@ class Chat:
 
             input_wx.click(remark_edit)
             time.sleep(0.2)
+
             input_wx.send_keys(remark_edit, "{Ctrl}a{Del}")
             time.sleep(0.1)
 
@@ -11337,7 +12168,6 @@ class Chat:
             if not ok_btn.Exists(maxSearchSeconds=2):
                 raise WxControlNotFoundError("未找到'完成'按钮")
             input_wx.click(ok_btn)
-            time.sleep(0.3)
 
             logger.debug(f"设置备注成功: {self.chat_name} -> {remark}")
 
@@ -11508,7 +12338,6 @@ class Chat:
                 Name=i_("完成"),
             )
             input_wx.click(ok_btn)
-            time.sleep(0.3)
             logger.debug(f"移除标签成功: {self.chat_name} -> {labels}")
 
         except Exception:
@@ -11614,7 +12443,6 @@ class Chat:
                 Name=i_("完成"),
             )
             input_wx.click(ok_btn)
-            time.sleep(0.3)
             logger.debug(f"添加电话号码成功: {self.chat_name} -> {phones}")
 
         except Exception:
@@ -11694,8 +12522,6 @@ class Chat:
             if not ok_btn.Exists(maxSearchSeconds=2):
                 raise WxControlNotFoundError("未找到'完成'按钮")
             input_wx.click(ok_btn)
-            time.sleep(0.3)
-
             logger.debug(f"添加备注图片成功: {self.chat_name} -> {images}")
 
         except Exception:
@@ -11781,7 +12607,6 @@ class Chat:
                 Name=i_("完成"),
             )
             input_wx.click(ok_btn)
-            time.sleep(0.3)
             logger.debug(f"移除电话号码成功: {self.chat_name} -> {phones}")
 
         except Exception:
@@ -11924,7 +12749,6 @@ class Chat:
                 input_wx.send_keys(self._win, "{Esc}")
                 raise WxControlNotFoundError("未找到'设为星标朋友'菜单项")
             input_wx.click(menu_item)
-            time.sleep(0.3)
             logger.debug(f"设为星标朋友成功: {self.chat_name}")
         except Exception:
             self._cleanup_profile()
@@ -11957,7 +12781,6 @@ class Chat:
                 input_wx.send_keys(self._win, "{Esc}")
                 raise WxControlNotFoundError("未找到'不再设为星标朋友'菜单项")
             input_wx.click(menu_item)
-            time.sleep(0.3)
             logger.debug(f"取消星标朋友成功: {self.chat_name}")
         except Exception:
             self._cleanup_profile()
@@ -11995,7 +12818,6 @@ class Chat:
             confirm_btn = self._win.ButtonControl(Name=i_("确定"))
             if confirm_btn.Exists(maxSearchSeconds=3):
                 input_wx.click(confirm_btn)
-                time.sleep(0.3)
                 logger.debug(f"加入黑名单成功: {self.chat_name}")
             else:
                 logger.warning(f"未找到确认按钮，加入黑名单可能未完成: {self.chat_name}")
@@ -12031,7 +12853,6 @@ class Chat:
                 input_wx.send_keys(self._win, "{Esc}")
                 raise WxControlNotFoundError("未找到'移出黑名单'菜单项")
             input_wx.click(menu_item)
-            time.sleep(0.3)
             logger.debug(f"移出黑名单成功: {self.chat_name}")
         except Exception:
             self._cleanup_profile()
@@ -12051,7 +12872,6 @@ class Chat:
             confirm_btn = self._win.ButtonControl(Name=i_("删除"))
             if confirm_btn.Exists(maxSearchSeconds=3):
                 input_wx.click(confirm_btn)
-                time.sleep(0.3)
                 logger.debug(f"删除联系人成功: {self.chat_name}")
             else:
                 logger.warning(f"未找到'删除'确认按钮，删除联系人可能未完成: {self.chat_name}")
@@ -12128,7 +12948,6 @@ class Chat:
             cancel_btn = perm_pop.ButtonControl(Name=i_("取消"))
             if cancel_btn.Exists(maxSearchSeconds=1):
                 input_wx.click(cancel_btn)
-            time.sleep(0.3)
 
             logger.debug(f"获取朋友权限成功: {self.chat_name} -> {result}")
             return result
@@ -12225,12 +13044,10 @@ class Chat:
                 )
                 if ok_btn.Exists(maxSearchSeconds=2):
                     input_wx.click(ok_btn)
-                    time.sleep(0.3)
             else:
                 cancel_btn = perm_pop.ButtonControl(Name=i_("取消"))
                 if cancel_btn.Exists(maxSearchSeconds=1):
                     input_wx.click(cancel_btn)
-                    time.sleep(0.2)
 
             logger.debug(f"设置朋友权限成功: {self.chat_name} -> permission={permission}, "
                         f"hide_my={hide_my_posts}, hide_their={hide_their_posts}")
@@ -12680,7 +13497,6 @@ class MomentItem:
 
         # 未点赞，关闭操作栏
         input_wx.send_keys(None, "{Esc}")
-        time.sleep(0.2)
         return True
 
     def comment(self, content: str) -> bool:
@@ -13323,8 +14139,6 @@ class Moment(WeixinWindow):
                 logger.warning(f"点赞失败: {item.sender} - {e}")
                 continue
 
-            time.sleep(0.5)
-
         logger.info(f"批量点赞完成: 成功 {len(liked)} 条")
         return liked
 
@@ -13388,8 +14202,6 @@ class Moment(WeixinWindow):
             except Exception as e:
                 logger.warning(f"评论失败: {item.sender} - {e}")
                 continue
-
-            time.sleep(0.5)
 
         logger.info(f"批量评论完成: 成功 {len(commented)} 条")
         return commented
@@ -13912,7 +14724,8 @@ class Moment(WeixinWindow):
         input_wx.click(publish_btn)
 
         # 等待发布面板消失
-        for _ in range(30):
+        deadline = time.monotonic() + 30
+        while time.monotonic() < deadline:
             if not panel.Exists(maxSearchSeconds=1):
                 logger.debug("朋友圈发布成功")
                 return True
@@ -13982,7 +14795,7 @@ class ChatFile:
         date: str = "",
         status: str = "",
         raw_text: str = "",
-        _cell: Optional[auto.Control] = None,
+        control: Optional[auto.Control] = None,
     ):
         """
         初始化聊天文件信息。
@@ -13997,7 +14810,7 @@ class ChatFile:
             date: 日期文本。
             status: 状态文本（空字符串表示已下载）。
             raw_text: 原始 Name 属性文本。
-            _cell: UI 控件引用（内部使用）。
+            control: UI 控件引用（内部使用）。
         """
         self.file_manager = file_manager
         self.name = name
@@ -14008,7 +14821,7 @@ class ChatFile:
         self.date = date
         self.status = status
         self.raw_text = raw_text
-        self._cell = _cell
+        self.control = control
 
     def __str__(self) -> str:
         status = self.status if self.status else "已下载"
@@ -14018,18 +14831,18 @@ class ChatFile:
                 f"大小: {self.size} | 状态: {status}")
 
     def _ensure_ready(self) -> None:
-        """确保 file_manager 和 _cell 可用，且文件管理器窗口已打开"""
+        """确保 file_manager 和 control 可用，且文件管理器窗口已打开"""
         if not self.file_manager:
             raise RuntimeError("ChatFile 未关联 FileManager 实例")
-        if not self._cell:
-            raise RuntimeError("ChatFile 未关联 UI 控件（_cell 为空）")
+        if not self.control:
+            raise RuntimeError("ChatFile 未关联 UI 控件（control 为空）")
         if not self.file_manager.exists:
             raise RuntimeError("聊天文件窗口未打开")
 
     def _right_click_and_find_menu(self) -> auto.Control:
         """右键点击文件项并返回弹出的菜单控件"""
         self.file_manager.activate()
-        input_wx.click(self._cell, button="right")
+        input_wx.click(self.control, button="right")
         menu = self.file_manager._find_context_menu_by_point()
         if not menu:
             raise WxControlNotFoundError("未找到右键菜单")
@@ -14489,7 +15302,7 @@ class FileManager(WeixinWindow):
         for cell in self._find_all_file_cells(self._win):
             chat_file = self.parse_file_cell_text(cell.Name)
             if chat_file:
-                chat_file._cell = cell
+                chat_file.control = cell
                 files.append(chat_file)
         return files
 
@@ -15295,19 +16108,23 @@ class Weixin(WeixinWindow):
         with open(save_path, "wb") as f:
             f.write(png_bytes)
 
-    def check_new_msg(self) -> int:
+    def check_new_msg(self) -> bool:
         """
-        通过对导航栏微信图标截图 OCR 识别未读消息数量。
+        通过对导航栏微信图标截图，扫描红色角标像素判断是否有新消息。
 
-        对导航栏的"微信"按钮进行截图，识别红色角标上的数字。
-        截图保存为 _debug_check_new_msg.png 方便调试。
+        红色角标像素值：(250, 81, 81)。
+        检测到该像素即表示有未读消息。
 
         Returns:
-            未读消息数量，0 表示无新消息
+            True 有新消息，False 无新消息
+
+        Raises:
+            RuntimeError: 无法获取窗口句柄
+            WxControlNotFoundError: 未找到微信按钮控件
         """
         hwnd = self._win.NativeWindowHandle
         if not hwnd:
-            return 0
+            raise RuntimeError("无法获取微信窗口句柄")
 
         # 获取导航栏微信按钮控件
         tabbar = self.navigator._tabbar
@@ -15317,30 +16134,21 @@ class Weixin(WeixinWindow):
             searchDepth=5,
         )
         if not wx_btn.Exists(0, 0):
-            return 0
+            raise WxControlNotFoundError("未找到导航栏'微信'按钮")
 
         # 截图微信按钮区域
-        try:
-            png_bytes = capture_control(hwnd, wx_btn, mode="print_window")
-        except Exception:
-            return 0
+        png_bytes = capture_control(hwnd, wx_btn, mode="print_window")
 
-        # OCR 识别角标数字
-        try:
-            ocr_result = self.get_image_text(png_bytes)
-        except Exception:
-            return 0
+        # 扫描红色角标像素
+        img = Image.open(io.BytesIO(png_bytes)).convert("RGB")
+        w, h = img.size
+        for y in range(h):
+            for x in range(w):
+                r, g, b = img.getpixel((x, y))
+                if r == 250 and g == 81 and b == 81:
+                    return True
 
-        # 从 OCR 结果中提取数字
-        for text in ocr_result:
-            text = text.strip()
-            if text.isdigit():
-                return int(text)
-            # 处理 "99+" 等格式
-            if text.rstrip("+").isdigit():
-                return int(text.rstrip("+"))
-
-        return 0
+        return False
 
     def get_self_profile(self) -> dict:
         """获取当前登录账号的个人资料（昵称、微信号）"""
