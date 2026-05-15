@@ -2842,7 +2842,6 @@ class Message:
             raise WxControlNotFoundError(f"右键菜单中未找到'{menu_name}'选项")
 
         input_wx.click(menu_item)
-        time.sleep(0.3)
 
     @PIM.guard
     def quote(self) -> None:
@@ -4141,9 +4140,9 @@ class RedPacketMessage(Message):
         open_btn = self.chat._win.ButtonControl(
             ClassName="mmui::XButton",
             Name=i_("拆开"),
-            searchDepth=10,
+            searchDepth=16,
         )
-        if open_btn.Exists(maxSearchSeconds=3):
+        if open_btn.Exists(maxSearchSeconds=16):
             input_wx.click(open_btn)
 
         # 等待红包结果窗口出现，截图 OCR 识别
@@ -6319,7 +6318,7 @@ class Session:
         Returns:
             按出现顺序排列的会话列表
         """
-        return list(self.iter_sessions(count=count))
+        return list(self.iter_sessions_by_next_sibling(count=count))
 
     def iter_sessions(self, count: Optional[int] = None) -> None:
         """
@@ -6389,6 +6388,172 @@ class Session:
 
             last_rid = item.runtime_id
             input_wx.send_keys(self._win, "{Down}")
+
+    def iter_sessions_by_next_sibling(self, count: Optional[int] = None):
+        """
+        逐条获取会话列表（生成器）（可以获取未读消息数）。
+
+        yield 的 SessionItem 保留未读数（在被选中之前解析 Name）。
+        通过获取当前选中项的下一个兄弟控件，先解析再按 Down 选中。
+
+        Args:
+            count: 要获取的会话数量，None 获取全部
+
+        Yields:
+            SessionItem 实例（未读数为选中前的值）
+        """
+        self._ensure_ready()
+        lc = self._list_control
+        if not lc.Exists(maxSearchSeconds=3):
+            raise WxControlNotFoundError("未找到会话列表控件")
+
+        input_wx.focus(lc)
+
+        # 回到顶部
+        input_wx.send_keys(lc, "{Home}")
+
+        # 找到第一条
+        first_ctrl = None
+        for ctrl, _ in auto.WalkControl(lc):
+            if ctrl.ControlType == auto.ControlType.ListItemControl and ctrl.Name:
+                first_ctrl = ctrl
+                break
+
+        if not first_ctrl:
+            return
+
+        # 解析第一条（选中前，未读数完整）
+        item = _parse_session_name(first_ctrl.Name, session=self)
+        item.control = first_ctrl
+        try:
+            item.runtime_id = tuple(first_ctrl.GetRuntimeId())
+        except Exception:
+            pass
+
+        # 确保第一条被选中（如果已激活则先取消再重新激活，触发刷新）
+        pattern = first_ctrl.GetSelectionItemPattern()
+        if pattern and pattern.IsSelected:
+            # 重新激活
+            input_wx.click(first_ctrl)
+            time.sleep(1)
+            input_wx.click(first_ctrl)
+        else:
+            # 直接激活
+            input_wx.click(first_ctrl)
+
+        yield item
+        yielded = 1
+        if count is not None and yielded >= count:
+            return
+
+        list_rect = lc.BoundingRectangle
+        last_rid = item.runtime_id
+        bottom_same_rid_count = 0
+
+        while True:
+            # 获取当前选中控件的下一个兄弟（未被选中，未读数完整）
+            current_ctrl = self._get_selected_ctrl(lc)
+            if not current_ctrl:
+                break
+
+            next_ctrl = current_ctrl.GetNextSiblingControl()
+            if next_ctrl is None:
+                break
+
+            if next_ctrl and next_ctrl.Name and \
+                    next_ctrl.ControlType == auto.ControlType.ListItemControl:
+                # 解析下一条（选中前）
+                try:
+                    next_rid = tuple(next_ctrl.GetRuntimeId())
+                except Exception:
+                    next_rid = ()
+
+                next_item = _parse_session_name(next_ctrl.Name, session=self)
+                next_item.control = next_ctrl
+                next_item.runtime_id = next_rid
+
+                # 按 Down 选中下一条
+                input_wx.send_keys(self._win, "{Down}")
+                time.sleep(0.05)
+
+                if next_rid == last_rid:
+                    try:
+                        ctrl_rect = next_ctrl.BoundingRectangle
+                        if abs(ctrl_rect.bottom - list_rect.bottom) == 0:
+                            bottom_same_rid_count += 1
+                            if bottom_same_rid_count >= 2:
+                                return
+                    except Exception:
+                        pass
+                    continue
+
+                last_rid = next_rid
+                bottom_same_rid_count = 0
+                yield next_item
+                yielded += 1
+                if count is not None and yielded >= count:
+                    return
+            else:
+                # 没有下一个兄弟（可能需要滚动露出更多），使用滚轮微调
+                cx = (list_rect.left + list_rect.right) // 2
+                cy = (list_rect.top + list_rect.bottom) // 2
+                scroll_at(cx, cy, -120)  # 向下滚动一格
+                time.sleep(0.15)
+
+                # 滚动后重新获取当前选中项的下一个兄弟
+                current_ctrl = self._get_selected_ctrl(lc)
+                if not current_ctrl:
+                    break
+
+                next_sibling = current_ctrl.GetNextSiblingControl()
+                if next_sibling and next_sibling.Name and \
+                        next_sibling.ControlType == auto.ControlType.ListItemControl:
+                    try:
+                        new_rid = tuple(next_sibling.GetRuntimeId())
+                    except Exception:
+                        new_rid = ()
+
+                    if new_rid == last_rid:
+                        bottom_same_rid_count += 1
+                        if bottom_same_rid_count >= 2:
+                            return
+                        continue
+
+                    # 解析下一条（选中前）
+                    new_item = _parse_session_name(next_sibling.Name, session=self)
+                    new_item.control = next_sibling
+                    new_item.runtime_id = new_rid
+
+                    # 按 Down 选中下一条
+                    input_wx.send_keys(self._win, "{Down}")
+                    time.sleep(0.05)
+
+                    last_rid = new_rid
+                    bottom_same_rid_count = 0
+                    yield new_item
+                    yielded += 1
+                    if count is not None and yielded >= count:
+                        return
+                else:
+                    # 滚动后仍然没有下一个兄弟，说明已到底部
+                    bottom_same_rid_count += 1
+                    if bottom_same_rid_count >= 2:
+                        return
+
+    def _get_selected_ctrl(self, lc: auto.ListControl) -> Optional[auto.Control]:
+        """获取会话列表中当前被选中的控件"""
+        for ctrl, _ in auto.WalkControl(lc):
+            if ctrl.ControlType != auto.ControlType.ListItemControl:
+                continue
+            if not ctrl.Name:
+                continue
+            try:
+                pattern = ctrl.GetSelectionItemPattern()
+                if pattern and pattern.IsSelected:
+                    return ctrl
+            except Exception:
+                continue
+        return None
 
     def _get_selected_item(self, lc: auto.ListControl) -> Optional[SessionItem]:
         """
@@ -9102,7 +9267,6 @@ class Chat:
 
         # 先滚动到底部
         self.page_end()
-        time.sleep(0.3)
 
         seen_ids: Set[int] = set()
         top_count = 0
