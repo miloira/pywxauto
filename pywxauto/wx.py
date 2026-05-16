@@ -9141,6 +9141,8 @@ class Chat:
         支持完全匹配和模糊匹配，包含 "所有人" 时只 @所有人。
         对于昵称含空格的成员，取最长关键字搜索，然后通过 Down 键逐项
         匹配直到找到完全匹配的群成员昵称。
+
+        找不到的群成员会跳过（记录警告日志），不会中断整个发送流程。
         """
         if not at_members:
             return
@@ -9168,7 +9170,11 @@ class Chat:
                     AutomationId="chat_mention_list", searchDepth=4,
                 )
                 if not menu.Exists(maxSearchSeconds=2):
-                    raise RuntimeError(f"@群成员失败，未弹出候选菜单: {member}")
+                    logger.warning(f"@群成员跳过，未弹出候选菜单: {member}")
+                    # 清除已输入的 @昵称 文本
+                    input_wx.send_keys(chat_input, "{Ctrl}a{Del}")
+                    time.sleep(0.2)
+                    continue
 
                 controls = []
                 for ctrl, _ in auto.WalkControl(menu):
@@ -9183,10 +9189,22 @@ class Chat:
                     input_wx.send_keys(None, "{Enter}")
                     time.sleep(0.5)
                 elif len(fuzzy) > 1:
-                    names = [c.Name for c in fuzzy]
-                    raise RuntimeError(f"@群成员模糊匹配到多个: {names}")
+                    # 模糊匹配到多个，选第一个完全匹配的，没有则跳过
+                    logger.warning(f"@群成员模糊匹配到多个，跳过: {member} -> {[c.Name for c in fuzzy]}")
+                    input_wx.send_keys(None, "{Esc}")
+                    time.sleep(0.3)
+                    # 清除已输入的 @昵称 文本
+                    input_wx.send_keys(chat_input, "{Ctrl}a{Del}")
+                    time.sleep(0.2)
+                    continue
                 else:
-                    raise WxControlNotFoundError(f"@群成员失败，未找到: {member}")
+                    logger.warning(f"@群成员跳过，未找到: {member}")
+                    input_wx.send_keys(None, "{Esc}")
+                    time.sleep(0.3)
+                    # 清除已输入的 @昵称 文本
+                    input_wx.send_keys(chat_input, "{Ctrl}a{Del}")
+                    time.sleep(0.2)
+                    continue
             else:
                 # 昵称含空格：取最长关键字搜索，然后逐项匹配
                 member_keywords = member.split(" ")
@@ -9202,7 +9220,10 @@ class Chat:
                     AutomationId="chat_mention_list", searchDepth=4,
                 )
                 if not menu.Exists(maxSearchSeconds=2):
-                    raise RuntimeError(f"@群成员失败，未弹出候选菜单: {member}")
+                    logger.warning(f"@群成员跳过，未弹出候选菜单: {member}")
+                    input_wx.send_keys(chat_input, "{Ctrl}a{Del}")
+                    time.sleep(0.2)
+                    continue
 
                 controls = []
                 for ctrl, _ in auto.WalkControl(menu):
@@ -9213,7 +9234,12 @@ class Chat:
                 fuzzy = [c for c in controls if member_keyword in c.Name]
 
                 if len(fuzzy) == 0:
-                    raise WxControlNotFoundError(f"@群成员失败，未找到: {member}")
+                    logger.warning(f"@群成员跳过，未找到: {member}")
+                    input_wx.send_keys(None, "{Esc}")
+                    time.sleep(0.3)
+                    input_wx.send_keys(chat_input, "{Ctrl}a{Del}")
+                    time.sleep(0.2)
+                    continue
                 elif len(fuzzy) == 1:
                     # 唯一匹配，直接回车选中
                     input_wx.send_keys(None, "{Enter}")
@@ -9241,9 +9267,12 @@ class Chat:
                         count += 1
 
                     if not matched:
+                        logger.warning(f"@群成员跳过，未找到完全匹配: {member}")
                         input_wx.send_keys(None, "{Esc}")
                         time.sleep(0.3)
-                        raise WxControlNotFoundError(f"@群成员失败，未找到完全匹配: {member}")
+                        input_wx.send_keys(chat_input, "{Ctrl}a{Del}")
+                        time.sleep(0.2)
+                        continue
 
     def _click_voip_menu(self, menu_name: str) -> None:
         """
