@@ -325,9 +325,21 @@ def run(droplet_token, device_id, send_offline_msg):
 
         # ========================= 心跳管理 =========================
 
-        def start_heartbeat(self, interval: float = 10) -> "threading.Thread":
+        def start_heartbeat(self, interval: float = 10, logout_check=None) -> "threading.Thread":
+            """
+            启动心跳线程。
+
+            Args:
+                interval: 心跳间隔（秒）
+                logout_check: 可选的退出登录检测回调，返回 True 表示已退出登录
+            """
             def _heartbeat_loop():
                 while True:
+                    # 检测是否已退出登录（登录窗口出现）
+                    if logout_check and logout_check():
+                        logger.error("⚠️ 检测到微信登录窗口，账号已退出登录，程序即将停止...")
+                        os._exit(1)
+
                     try:
                         self.beat()
                         logger.info(f"💗 心跳发送成功")
@@ -1598,8 +1610,23 @@ def run(droplet_token, device_id, send_offline_msg):
     _refresh_company_config()
     logger.info(f"✅ 私域后台配置已加载")
 
+    # 退出登录检测函数
+    def _check_logout() -> bool:
+        """检测微信登录窗口是否出现（出现表示已退出登录）"""
+        try:
+            from pywxauto.wx import Login
+            import uiautomation as auto
+            login_win = auto.WindowControl(
+                ClassName=Login.WINDOW_CLASS,
+                ProcessId=wx.pid,
+                searchDepth=1,
+            )
+            return login_win.Exists(maxSearchSeconds=0)
+        except Exception:
+            return False
+
     # 启动心跳线程
-    siyu.start_heartbeat(interval=HEARTBEAT_INTERVAL)
+    siyu.start_heartbeat(interval=HEARTBEAT_INTERVAL, logout_check=_check_logout)
     logger.info(f"🚀 心跳线程已启动 (间隔 {HEARTBEAT_INTERVAL}s)")
 
     # 在文件传输助手发送启动通知
