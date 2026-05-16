@@ -435,7 +435,7 @@ def _set_language(lang: str) -> None:
 
 
 def _detect_language(pid: int = None) -> str:
-    kwargs = {"RegexName": "微信|Weixin", "searchDepth": 1}
+    kwargs = {"RegexName": "^(微信|Weixin)$", "searchDepth": 1}
     if pid:
         kwargs["ProcessId"] = pid
     win = auto.WindowControl(**kwargs)
@@ -9626,6 +9626,8 @@ class Chat:
             buf = io.BytesIO()
             sender_area.save(buf, format="PNG")
             img_bytes = buf.getvalue()
+            with open("sender_name.png", "wb") as f:
+                f.write(img_bytes)
             img_hash = hashlib.md5(img_bytes).hexdigest()
 
             # 命中缓存直接返回
@@ -15324,7 +15326,7 @@ class FileManager(WeixinWindow):
 class Weixin(WeixinWindow):
 
     WINDOW_CLASS = "mmui::MainWindow"
-    WINDOW_REGEX = "微信|Weixin"
+    WINDOW_REGEX = "^(微信|Weixin)$"
     WINDOW_WIDTH = 1200
     WINDOW_HEIGHT = 1000
     CHAT_WINDOW_WIDTH = 400
