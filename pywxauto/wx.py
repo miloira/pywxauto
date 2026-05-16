@@ -6406,8 +6406,8 @@ class Session:
     #   - "session_item_折叠的聊天"
     #   - "session_item_服务号"
     _NON_ACTIVATABLE_SESSION_IDS = {
-        "session_item_折叠的聊天",
-        "session_item_服务号",
+        # "session_item_折叠的聊天",
+        # "session_item_服务号",
     }
 
     @staticmethod
@@ -6508,17 +6508,6 @@ class Session:
         except Exception:
             pass
 
-        # 确保第一条被选中（如果已激活则先取消再重新激活，触发刷新）
-        pattern = first_ctrl.GetSelectionItemPattern()
-        if pattern and pattern.IsSelected:
-            # 重新激活
-            input_wx.click(first_ctrl)
-            time.sleep(1)
-            input_wx.click(first_ctrl)
-        else:
-            # 直接激活
-            input_wx.click(first_ctrl)
-
         yield item
         yielded = 1
         if count is not None and yielded >= count:
@@ -6539,7 +6528,7 @@ class Session:
                 # 没有下一个兄弟（可能需要滚动露出更多），使用滚轮微调
                 cx = (list_rect.left + list_rect.right) // 2
                 cy = (list_rect.top + list_rect.bottom) // 2
-                scroll_at(cx, cy, -120)  # 向下滚动一格
+                scroll_at(cx, cy, -120 * 10)  # 向下滚动一格
                 time.sleep(0.15)
 
                 # 滚动后重新从 last_yielded_ctrl 查找下一个兄弟
