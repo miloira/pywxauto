@@ -6464,7 +6464,7 @@ class Session:
             sibling = sibling.GetNextSiblingControl()
         return None
 
-    def iter_sessions_by_next_sibling(self, count: Optional[int] = None):
+    def iter_sessions_by_scroll(self, count: Optional[int] = None, speed: int = 10):
         """
         逐条获取会话列表（生成器）（可以获取未读消息数）。
 
@@ -6476,6 +6476,7 @@ class Session:
 
         Args:
             count: 要获取的会话数量，None 获取全部
+            speed: 滚动速度，默认为10 值越大滚动越快
 
         Yields:
             SessionItem 实例（未读数为选中前的值）
@@ -6493,7 +6494,7 @@ class Session:
         # 找到第一条
         first_ctrl = None
         for ctrl, _ in auto.WalkControl(lc):
-            if ctrl.ControlType == auto.ControlType.ListItemControl and ctrl.Name:
+            if ctrl.ControlType == auto.ControlType.ListItemControl:
                 first_ctrl = ctrl
                 break
 
@@ -6528,8 +6529,8 @@ class Session:
                 # 没有下一个兄弟（可能需要滚动露出更多），使用滚轮微调
                 cx = (list_rect.left + list_rect.right) // 2
                 cy = (list_rect.top + list_rect.bottom) // 2
-                scroll_at(cx, cy, -120 * 10)  # 向下滚动一格
-                time.sleep(0.15)
+                scroll_at(cx, cy, speed * -120)  # 向下滚动一格
+                time.sleep(0.01)
 
                 # 滚动后重新从 last_yielded_ctrl 查找下一个兄弟
                 next_ctrl = self._find_next_activatable_sibling(last_yielded_ctrl)
@@ -6557,8 +6558,8 @@ class Session:
                 # 滚动一下再重试
                 cx = (list_rect.left + list_rect.right) // 2
                 cy = (list_rect.top + list_rect.bottom) // 2
-                scroll_at(cx, cy, -120)
-                time.sleep(0.15)
+                scroll_at(cx, cy, speed * -120)
+                time.sleep(0.01)
                 continue
 
             next_item = _parse_session_name(next_ctrl.Name, session=self)
