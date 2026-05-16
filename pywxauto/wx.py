@@ -435,7 +435,7 @@ def _set_language(lang: str) -> None:
 
 
 def _detect_language(pid: int = None) -> str:
-    kwargs = {"RegexName": "微信|Weixin", "searchDepth": 1}
+    kwargs = {"RegexName": "^(微信|Weixin)$", "searchDepth": 1}
     if pid:
         kwargs["ProcessId"] = pid
     win = auto.WindowControl(**kwargs)
@@ -2544,6 +2544,7 @@ class Message:
 
         通过轮廓检测识别消息中的头像、昵称、内容区域的相对坐标，
         同时判断发送者（头像在左=对方，头像在右=自己）。
+        群聊中对方发的消息，如果识别到 nickname_rect，会进一步 OCR 提取真实昵称。
 
         前提：消息控件必须在 message_view 可视范围内（is_in_view=True）。
         """
@@ -2566,6 +2567,16 @@ class Message:
         if source != Source.UNKNOWN:
             self.source = source
             self.sender = sender
+
+        # 群聊中对方发的消息，OCR 识别昵称区域提取真实发送者昵称
+        is_room = self.chat.chat_type == "群聊"
+        if source == Source.OTHERS and is_room and nickname_rect:
+            try:
+                ocr_sender = self.chat._ocr_sender_name(hwnd, ctrl, nickname_rect, headimg_rect)
+                if ocr_sender:
+                    self.sender = ocr_sender
+            except Exception:
+                pass
 
     def refresh(self) -> Message:
         """
@@ -6304,7 +6315,7 @@ class Session:
 
         return all_sessions
 
-    def get_sessions(self, count: Optional[int] = None) -> List[SessionItem]:
+    def get_sessions(self, count: Optional[int] = None, speed: int = 10) -> List[SessionItem]:
         """
         获取会话列表。
 
@@ -6314,13 +6325,14 @@ class Session:
 
         Args:
             count: 要获取的会话数量，None 获取全部
+            speed: 滚动速度，默认为10 值越大滚动越快
 
         Returns:
             按出现顺序排列的会话列表
         """
-        return list(self.iter_sessions_by_next_sibling(count=count))
+        return list(self.iter_sessions_by_scroll(count=count, speed=speed))
 
-    def iter_sessions(self, count: Optional[int] = None) -> None:
+    def iter_sessions_by_activate(self, count: Optional[int] = None) -> None:
         """
         逐条获取会话列表（生成器）。
 
@@ -6389,15 +6401,83 @@ class Session:
             last_rid = item.runtime_id
             input_wx.send_keys(self._win, "{Down}")
 
-    def iter_sessions_by_next_sibling(self, count: Optional[int] = None):
+    # 不可通过 Down 键激活的会话项 AutomationId 关键词集合
+    # 服务号聚合入口、折叠群聊入口等特殊项，按 Down 键时微信会跳过它们
+    # 它们的 ClassName 仍然是 "mmui::ChatSessionCell"，但 AutomationId 不同：
+    #   - "session_item_折叠的聊天"
+    #   - "session_item_服务号"
+    _NON_ACTIVATABLE_SESSION_IDS = {
+        # "session_item_折叠的聊天",
+        # "session_item_服务号",
+    }
+
+    @staticmethod
+    def _is_non_activatable(ctrl: auto.Control) -> bool:
+        """
+        判断会话列表中的控件是否为不可通过 Down 键激活的特殊项。
+
+        微信会话列表中存在一些特殊项（服务号聚合入口、折叠群聊入口），
+        按 Down 键时微信会跳过它们，导致选中项不变。
+
+        这些特殊项的 ClassName 与普通会话相同（mmui::ChatSessionCell），
+        通过 AutomationId 区分：
+        - "session_item_折叠的聊天"
+        - "session_item_服务号"
+
+        Args:
+            ctrl: 会话列表中的 ListItemControl
+
+        Returns:
+            True 该项不可通过 Down 键激活，False 可正常激活
+        """
+        try:
+            aid = ctrl.AutomationId or ""
+        except Exception:
+            aid = ""
+
+        # 通过 AutomationId 精确匹配已知的不可激活项
+        if aid in Session._NON_ACTIVATABLE_SESSION_IDS:
+            return True
+
+        return False
+
+    def _find_next_activatable_sibling(self, ctrl: auto.Control) -> Optional[auto.Control]:
+        """
+        从指定控件开始，沿 GetNextSiblingControl 方向查找下一个可激活的会话项。
+
+        跳过服务号、折叠群聊等不可通过 Down 键激活的特殊项。
+
+        Args:
+            ctrl: 起始控件（当前选中项）
+
+        Returns:
+            下一个可激活的 ListItemControl，未找到返回 None
+        """
+        sibling = ctrl.GetNextSiblingControl()
+        # 最多跳过 10 个不可激活项（防止无限循环）
+        for _ in range(10):
+            if sibling is None:
+                return None
+            if (sibling.ControlType == auto.ControlType.ListItemControl
+                    and sibling.Name
+                    and not self._is_non_activatable(sibling)):
+                return sibling
+            sibling = sibling.GetNextSiblingControl()
+        return None
+
+    def iter_sessions_by_scroll(self, count: Optional[int] = None, speed: int = 10):
         """
         逐条获取会话列表（生成器）（可以获取未读消息数）。
 
         yield 的 SessionItem 保留未读数（在被选中之前解析 Name）。
-        通过获取当前选中项的下一个兄弟控件，先解析再按 Down 选中。
+        通过追踪上一次 yield 的控件，直接从该控件出发找下一个可激活兄弟，
+        不依赖"当前选中项"状态，避免服务号等不可激活项导致的死循环。
+
+        自动跳过不可激活的特殊项（服务号聚合入口、折叠群聊入口）。
 
         Args:
             count: 要获取的会话数量，None 获取全部
+            speed: 滚动速度，默认为10 值越大滚动越快
 
         Yields:
             SessionItem 实例（未读数为选中前的值）
@@ -6415,7 +6495,7 @@ class Session:
         # 找到第一条
         first_ctrl = None
         for ctrl, _ in auto.WalkControl(lc):
-            if ctrl.ControlType == auto.ControlType.ListItemControl and ctrl.Name:
+            if ctrl.ControlType == auto.ControlType.ListItemControl:
                 first_ctrl = ctrl
                 break
 
@@ -6430,115 +6510,72 @@ class Session:
         except Exception:
             pass
 
-        # 确保第一条被选中（如果已激活则先取消再重新激活，触发刷新）
-        pattern = first_ctrl.GetSelectionItemPattern()
-        if pattern and pattern.IsSelected:
-            # 重新激活
-            input_wx.click(first_ctrl)
-            time.sleep(1)
-            input_wx.click(first_ctrl)
-        else:
-            # 直接激活
-            input_wx.click(first_ctrl)
-
         yield item
         yielded = 1
         if count is not None and yielded >= count:
             return
 
         list_rect = lc.BoundingRectangle
+        # 追踪上一次 yield 的控件，作为查找下一个兄弟的起点
+        last_yielded_ctrl = first_ctrl
         last_rid = item.runtime_id
         bottom_same_rid_count = 0
 
         while True:
-            # 获取当前选中控件的下一个兄弟（未被选中，未读数完整）
-            current_ctrl = self._get_selected_ctrl(lc)
-            if not current_ctrl:
-                break
+            # 核心改动：从上一次 yield 的控件出发找下一个可激活兄弟
+            # 不再依赖 _get_selected_ctrl，避免服务号等不可激活项的影响
+            next_ctrl = self._find_next_activatable_sibling(last_yielded_ctrl)
 
-            next_ctrl = current_ctrl.GetNextSiblingControl()
             if next_ctrl is None:
-                break
-
-            if next_ctrl and next_ctrl.Name and \
-                    next_ctrl.ControlType == auto.ControlType.ListItemControl:
-                # 解析下一条（选中前）
-                try:
-                    next_rid = tuple(next_ctrl.GetRuntimeId())
-                except Exception:
-                    next_rid = ()
-
-                next_item = _parse_session_name(next_ctrl.Name, session=self)
-                next_item.control = next_ctrl
-                next_item.runtime_id = next_rid
-
-                # 按 Down 选中下一条
-                input_wx.send_keys(self._win, "{Down}")
-                time.sleep(0.05)
-
-                if next_rid == last_rid:
-                    try:
-                        ctrl_rect = next_ctrl.BoundingRectangle
-                        if abs(ctrl_rect.bottom - list_rect.bottom) == 0:
-                            bottom_same_rid_count += 1
-                            if bottom_same_rid_count >= 2:
-                                return
-                    except Exception:
-                        pass
-                    continue
-
-                last_rid = next_rid
-                bottom_same_rid_count = 0
-                yield next_item
-                yielded += 1
-                if count is not None and yielded >= count:
-                    return
-            else:
                 # 没有下一个兄弟（可能需要滚动露出更多），使用滚轮微调
                 cx = (list_rect.left + list_rect.right) // 2
                 cy = (list_rect.top + list_rect.bottom) // 2
-                scroll_at(cx, cy, -120)  # 向下滚动一格
-                time.sleep(0.15)
+                scroll_at(cx, cy, speed * -120)  # 向下滚动一格
+                time.sleep(0.01)
 
-                # 滚动后重新获取当前选中项的下一个兄弟
-                current_ctrl = self._get_selected_ctrl(lc)
-                if not current_ctrl:
-                    break
-
-                next_sibling = current_ctrl.GetNextSiblingControl()
-                if next_sibling and next_sibling.Name and \
-                        next_sibling.ControlType == auto.ControlType.ListItemControl:
-                    try:
-                        new_rid = tuple(next_sibling.GetRuntimeId())
-                    except Exception:
-                        new_rid = ()
-
-                    if new_rid == last_rid:
-                        bottom_same_rid_count += 1
-                        if bottom_same_rid_count >= 2:
-                            return
-                        continue
-
-                    # 解析下一条（选中前）
-                    new_item = _parse_session_name(next_sibling.Name, session=self)
-                    new_item.control = next_sibling
-                    new_item.runtime_id = new_rid
-
-                    # 按 Down 选中下一条
-                    input_wx.send_keys(self._win, "{Down}")
-                    time.sleep(0.05)
-
-                    last_rid = new_rid
-                    bottom_same_rid_count = 0
-                    yield new_item
-                    yielded += 1
-                    if count is not None and yielded >= count:
-                        return
-                else:
+                # 滚动后重新从 last_yielded_ctrl 查找下一个兄弟
+                next_ctrl = self._find_next_activatable_sibling(last_yielded_ctrl)
+                if next_ctrl is None:
                     # 滚动后仍然没有下一个兄弟，说明已到底部
                     bottom_same_rid_count += 1
                     if bottom_same_rid_count >= 2:
                         return
+                    continue
+
+            if not next_ctrl.Name or \
+                    next_ctrl.ControlType != auto.ControlType.ListItemControl:
+                break
+
+            # 解析下一条（选中前，保留未读数）
+            try:
+                next_rid = tuple(next_ctrl.GetRuntimeId())
+            except Exception:
+                next_rid = ()
+
+            if next_rid == last_rid:
+                bottom_same_rid_count += 1
+                if bottom_same_rid_count >= 2:
+                    return
+                # 滚动一下再重试
+                cx = (list_rect.left + list_rect.right) // 2
+                cy = (list_rect.top + list_rect.bottom) // 2
+                scroll_at(cx, cy, speed * -120)
+                time.sleep(0.01)
+                continue
+
+            next_item = _parse_session_name(next_ctrl.Name, session=self)
+            next_item.control = next_ctrl
+            next_item.runtime_id = next_rid
+
+            # 更新追踪状态
+            last_yielded_ctrl = next_ctrl
+            last_rid = next_rid
+            bottom_same_rid_count = 0
+
+            yield next_item
+            yielded += 1
+            if count is not None and yielded >= count:
+                return
 
     def _get_selected_ctrl(self, lc: auto.ListControl) -> Optional[auto.Control]:
         """获取会话列表中当前被选中的控件"""
@@ -9020,6 +9057,8 @@ class Chat:
         支持完全匹配和模糊匹配，包含 "所有人" 时只 @所有人。
         对于昵称含空格的成员，取最长关键字搜索，然后通过 Down 键逐项
         匹配直到找到完全匹配的群成员昵称。
+
+        找不到的群成员会跳过（记录警告日志），不会中断整个发送流程。
         """
         if not at_members:
             return
@@ -9047,7 +9086,11 @@ class Chat:
                     AutomationId="chat_mention_list", searchDepth=4,
                 )
                 if not menu.Exists(maxSearchSeconds=2):
-                    raise RuntimeError(f"@群成员失败，未弹出候选菜单: {member}")
+                    logger.warning(f"@群成员跳过，未弹出候选菜单: {member}")
+                    # 清除已输入的 @昵称 文本
+                    input_wx.send_keys(chat_input, "{Ctrl}a{Del}")
+                    time.sleep(0.2)
+                    continue
 
                 controls = []
                 for ctrl, _ in auto.WalkControl(menu):
@@ -9062,10 +9105,22 @@ class Chat:
                     input_wx.send_keys(None, "{Enter}")
                     time.sleep(0.5)
                 elif len(fuzzy) > 1:
-                    names = [c.Name for c in fuzzy]
-                    raise RuntimeError(f"@群成员模糊匹配到多个: {names}")
+                    # 模糊匹配到多个，选第一个完全匹配的，没有则跳过
+                    logger.warning(f"@群成员模糊匹配到多个，跳过: {member} -> {[c.Name for c in fuzzy]}")
+                    input_wx.send_keys(None, "{Esc}")
+                    time.sleep(0.3)
+                    # 清除已输入的 @昵称 文本
+                    input_wx.send_keys(chat_input, "{Ctrl}a{Del}")
+                    time.sleep(0.2)
+                    continue
                 else:
-                    raise WxControlNotFoundError(f"@群成员失败，未找到: {member}")
+                    logger.warning(f"@群成员跳过，未找到: {member}")
+                    input_wx.send_keys(None, "{Esc}")
+                    time.sleep(0.3)
+                    # 清除已输入的 @昵称 文本
+                    input_wx.send_keys(chat_input, "{Ctrl}a{Del}")
+                    time.sleep(0.2)
+                    continue
             else:
                 # 昵称含空格：取最长关键字搜索，然后逐项匹配
                 member_keywords = member.split(" ")
@@ -9081,7 +9136,10 @@ class Chat:
                     AutomationId="chat_mention_list", searchDepth=4,
                 )
                 if not menu.Exists(maxSearchSeconds=2):
-                    raise RuntimeError(f"@群成员失败，未弹出候选菜单: {member}")
+                    logger.warning(f"@群成员跳过，未弹出候选菜单: {member}")
+                    input_wx.send_keys(chat_input, "{Ctrl}a{Del}")
+                    time.sleep(0.2)
+                    continue
 
                 controls = []
                 for ctrl, _ in auto.WalkControl(menu):
@@ -9092,7 +9150,12 @@ class Chat:
                 fuzzy = [c for c in controls if member_keyword in c.Name]
 
                 if len(fuzzy) == 0:
-                    raise WxControlNotFoundError(f"@群成员失败，未找到: {member}")
+                    logger.warning(f"@群成员跳过，未找到: {member}")
+                    input_wx.send_keys(None, "{Esc}")
+                    time.sleep(0.3)
+                    input_wx.send_keys(chat_input, "{Ctrl}a{Del}")
+                    time.sleep(0.2)
+                    continue
                 elif len(fuzzy) == 1:
                     # 唯一匹配，直接回车选中
                     input_wx.send_keys(None, "{Enter}")
@@ -9120,9 +9183,12 @@ class Chat:
                         count += 1
 
                     if not matched:
+                        logger.warning(f"@群成员跳过，未找到完全匹配: {member}")
                         input_wx.send_keys(None, "{Esc}")
                         time.sleep(0.3)
-                        raise WxControlNotFoundError(f"@群成员失败，未找到完全匹配: {member}")
+                        input_wx.send_keys(chat_input, "{Ctrl}a{Del}")
+                        time.sleep(0.2)
+                        continue
 
     def _click_voip_menu(self, menu_name: str) -> None:
         """
@@ -9292,7 +9358,7 @@ class Chat:
                     first_ctrl = visible[0].control
                     if first_ctrl:
                         first_rect = first_ctrl.BoundingRectangle
-                        if abs(first_rect.top - view_rect[1]) <= 2:
+                        if abs(first_rect.top - view_rect[1]) == 0:
                             is_at_top = True
                 except Exception:
                     pass
@@ -9307,7 +9373,7 @@ class Chat:
             # 向上滚动
             cx = (view_rect[0] + view_rect[2]) // 2
             cy = (view_rect[1] + view_rect[3]) // 2
-            scroll_at(cx, cy, 120 * 5)
+            scroll_at(cx, cy, 120 * 10)
 
     def _get_visible_messages_lazy(self) -> List[Message]:
         """
@@ -9491,13 +9557,18 @@ class Chat:
                 sender, source, bubble_rect, headimg_rect, nickname_rect, content_rect = self._detect_sender(
                     hwnd, ctrl, chat_name,
                 )
-                # 群聊中对方发的消息，OCR 识别控件顶部 0-38px 区域提取真实发送者昵称
+                # 群聊中对方发的消息，OCR 识别昵称区域提取真实发送者昵称
                 if source == Source.OTHERS and is_room:
-                    try:
-                        ocr_sender = self._ocr_sender_name(hwnd, ctrl)
-                        sender = ocr_sender if ocr_sender else None
-                    except Exception:
-                        sender = None
+                    if nickname_rect:
+                        try:
+                            ocr_sender = self._ocr_sender_name(hwnd, ctrl, nickname_rect, headimg_rect)
+                            logger.debug(f"[OCR昵称] nickname_rect={nickname_rect}, ocr_sender={ocr_sender!r}")
+                            sender = ocr_sender if ocr_sender else None
+                        except Exception as e:
+                            logger.debug(f"[OCR昵称] 异常: {e}")
+                            sender = None
+                    else:
+                        logger.debug(f"[OCR昵称] 跳过: nickname_rect 为空, raw_name={raw_name[:30]!r}")
                 # 写入缓存
                 if sender_cache is not None and cache_key is not None:
                     sender_cache[cache_key] = (sender, source, bubble_rect, headimg_rect, nickname_rect, content_rect)
@@ -9551,7 +9622,7 @@ class Chat:
             return MergeMessage
         if note_kw in name:
             return NoteMessage
-        if name.endswith(red_packet_kw) and "  " in name:
+        if name.endswith(red_packet_kw):
             return RedPacketMessage
         if name.endswith(transfer_kw) and name.startswith("￥"):
             return TransferMessage
@@ -9586,19 +9657,27 @@ class Chat:
     # 图片 hash → OCR 识别结果缓存（避免重复 OCR 相同头像/昵称区域）
     _ocr_sender_cache: Dict[str, str] = {}
 
-    def _ocr_sender_name(self, hwnd: int, ctrl: auto.Control) -> str:
+    def _ocr_sender_name(self, hwnd: int, ctrl: auto.Control, nickname_rect: tuple, headimg_rect: tuple = ()) -> str:
         """
-        通过 OCR 识别消息控件顶部 0-38px 区域，提取群聊中的发送者昵称。
+        通过 OCR 识别消息控件的昵称区域，提取群聊中的发送者昵称。
+
+        使用 nickname_rect（轮廓检测识别出的昵称区域坐标）精确裁剪，
+        然后对裁剪区域执行 OCR。
 
         使用图片 hash 缓存：相同的昵称截图区域直接返回缓存结果，避免重复 OCR。
 
         Args:
             hwnd: 窗口句柄
             ctrl: 消息 ListItemControl 控件
+            nickname_rect: 昵称区域相对于控件截图的坐标 (x1, y1, x2, y2)
 
         Returns:
             识别到的发送者昵称，识别失败返回空字符串
         """
+        if not nickname_rect:
+            logger.debug("[OCR昵称] nickname_rect 为空，跳过")
+            return ""
+
         try:
             if hwnd:
                 png_bytes = capture_control(hwnd, ctrl, offset_right=15, mode="print_window")
@@ -9616,11 +9695,33 @@ class Chat:
                         pass
 
             w, h = img.size
-            if h <= 38 or w <= 0:
+            logger.debug(f"[OCR昵称] 控件截图尺寸: {w}x{h}, nickname_rect={nickname_rect}")
+            if w <= 0 or h <= 0:
                 return ""
 
-            # 裁剪顶部 0-38px 区域（昵称显示区域）
-            sender_area = img.crop((60, 0, w - 60, 38))
+            # 使用 headimg_rect 定位昵称区域：
+            # 昵称在头像右边、头像上半部分的区域
+            # 裁剪范围：x 从头像右边缘到图片右边，y 从图片顶部到头像中线
+            if headimg_rect:
+                hx1, hy1, hx2, hy2 = headimg_rect
+                head_mid_y = hy1 + (hy2 - hy1) // 2
+                x1 = max(0, hx2 + 5)  # 头像右边缘 + 5px 间距
+                y1 = 0
+                x2 = w
+                y2 = min(h, head_mid_y)
+            else:
+                # 没有 headimg_rect 时回退到消息控件高度的上半部分
+                x1 = 0
+                y1 = 0
+                x2 = w
+                y2 = h // 2
+
+            if x2 <= x1 or y2 <= y1:
+                logger.debug(f"[OCR昵称] 裁剪区域无效: ({x1},{y1},{x2},{y2})")
+                return ""
+
+            sender_area = img.crop((x1, y1, x2, y2))
+            logger.debug(f"[OCR昵称] 裁剪区域: ({x1},{y1},{x2},{y2}), 尺寸: {sender_area.size}")
 
             # 计算图片 hash
             buf = io.BytesIO()
@@ -9630,21 +9731,27 @@ class Chat:
 
             # 命中缓存直接返回
             if img_hash in Chat._ocr_sender_cache:
-                return Chat._ocr_sender_cache[img_hash]
+                cached = Chat._ocr_sender_cache[img_hash]
+                logger.debug(f"[OCR昵称] 缓存命中: hash={img_hash[:8]}, sender={cached!r}")
+                return cached
 
             # OCR 识别
             ocr_result = self._get_image_text(img_bytes)
+            logger.debug(f"[OCR昵称] OCR结果: {ocr_result}")
 
             if not ocr_result:
-                Chat._ocr_sender_cache[img_hash] = ""
+                # 不缓存空结果，下次遇到相同图片时重试 OCR
+                logger.debug("[OCR昵称] OCR 未识别到文字")
                 return ""
 
             # 取第一个识别结果作为发送者昵称
             sender_name = next(iter(ocr_result), "").strip()
             Chat._ocr_sender_cache[img_hash] = sender_name
+            logger.debug(f"[OCR昵称] 识别成功: {sender_name!r}")
             return sender_name
 
-        except Exception:
+        except Exception as e:
+            logger.debug(f"[OCR昵称] 异常: {e}")
             return ""
 
     @staticmethod
@@ -15324,7 +15431,7 @@ class FileManager(WeixinWindow):
 class Weixin(WeixinWindow):
 
     WINDOW_CLASS = "mmui::MainWindow"
-    WINDOW_REGEX = "微信|Weixin"
+    WINDOW_REGEX = "^(微信|Weixin)$"
     WINDOW_WIDTH = 1200
     WINDOW_HEIGHT = 1000
     CHAT_WINDOW_WIDTH = 400
