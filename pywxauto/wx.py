@@ -6389,12 +6389,80 @@ class Session:
             last_rid = item.runtime_id
             input_wx.send_keys(self._win, "{Down}")
 
+    # 不可通过 Down 键激活的会话项 AutomationId 关键词集合
+    # 服务号聚合入口、折叠群聊入口等特殊项，按 Down 键时微信会跳过它们
+    # 它们的 ClassName 仍然是 "mmui::ChatSessionCell"，但 AutomationId 不同：
+    #   - "session_item_折叠的聊天"
+    #   - "session_item_服务号"
+    _NON_ACTIVATABLE_SESSION_IDS = {
+        "session_item_折叠的聊天",
+        "session_item_服务号",
+    }
+
+    @staticmethod
+    def _is_non_activatable(ctrl: auto.Control) -> bool:
+        """
+        判断会话列表中的控件是否为不可通过 Down 键激活的特殊项。
+
+        微信会话列表中存在一些特殊项（服务号聚合入口、折叠群聊入口），
+        按 Down 键时微信会跳过它们，导致选中项不变。
+
+        这些特殊项的 ClassName 与普通会话相同（mmui::ChatSessionCell），
+        通过 AutomationId 区分：
+        - "session_item_折叠的聊天"
+        - "session_item_服务号"
+
+        Args:
+            ctrl: 会话列表中的 ListItemControl
+
+        Returns:
+            True 该项不可通过 Down 键激活，False 可正常激活
+        """
+        try:
+            aid = ctrl.AutomationId or ""
+        except Exception:
+            aid = ""
+
+        # 通过 AutomationId 精确匹配已知的不可激活项
+        if aid in Session._NON_ACTIVATABLE_SESSION_IDS:
+            return True
+
+        return False
+
+    def _find_next_activatable_sibling(self, ctrl: auto.Control) -> Optional[auto.Control]:
+        """
+        从指定控件开始，沿 GetNextSiblingControl 方向查找下一个可激活的会话项。
+
+        跳过服务号、折叠群聊等不可通过 Down 键激活的特殊项。
+
+        Args:
+            ctrl: 起始控件（当前选中项）
+
+        Returns:
+            下一个可激活的 ListItemControl，未找到返回 None
+        """
+        sibling = ctrl.GetNextSiblingControl()
+        # 最多跳过 10 个不可激活项（防止无限循环）
+        for _ in range(10):
+            if sibling is None:
+                return None
+            if (sibling.ControlType == auto.ControlType.ListItemControl
+                    and sibling.Name
+                    and not self._is_non_activatable(sibling)):
+                return sibling
+            sibling = sibling.GetNextSiblingControl()
+        return None
+
     def iter_sessions_by_next_sibling(self, count: Optional[int] = None):
         """
         逐条获取会话列表（生成器）（可以获取未读消息数）。
 
         yield 的 SessionItem 保留未读数（在被选中之前解析 Name）。
         通过获取当前选中项的下一个兄弟控件，先解析再按 Down 选中。
+
+        自动跳过不可激活的特殊项（服务号聚合入口、折叠群聊入口），
+        当按 Down 后选中项未变化时，检查是否因为下一个兄弟是特殊项，
+        如果是则多按几次 Down 跳过。
 
         Args:
             count: 要获取的会话数量，None 获取全部
@@ -6451,12 +6519,12 @@ class Session:
         bottom_same_rid_count = 0
 
         while True:
-            # 获取当前选中控件的下一个兄弟（未被选中，未读数完整）
+            # 获取当前选中控件的下一个可激活兄弟（跳过服务号/折叠群聊）
             current_ctrl = self._get_selected_ctrl(lc)
             if not current_ctrl:
                 break
 
-            next_ctrl = current_ctrl.GetNextSiblingControl()
+            next_ctrl = self._find_next_activatable_sibling(current_ctrl)
             if next_ctrl is None:
                 break
 
@@ -6473,21 +6541,35 @@ class Session:
                 next_item.runtime_id = next_rid
 
                 # 按 Down 选中下一条
-                input_wx.send_keys(self._win, "{Down}")
-                time.sleep(0.05)
+                # 如果中间有不可激活项，需要多按几次 Down 跳过
+                self._press_down_to_select(current_ctrl, next_ctrl, lc)
 
-                if next_rid == last_rid:
+                # 验证是否成功选中了目标项
+                new_selected = self._get_selected_ctrl(lc)
+                if new_selected:
                     try:
-                        ctrl_rect = next_ctrl.BoundingRectangle
-                        if abs(ctrl_rect.bottom - list_rect.bottom) == 0:
-                            bottom_same_rid_count += 1
-                            if bottom_same_rid_count >= 2:
-                                return
+                        selected_rid = tuple(new_selected.GetRuntimeId())
                     except Exception:
-                        pass
-                    continue
+                        selected_rid = ()
 
-                last_rid = next_rid
+                    if selected_rid == last_rid:
+                        # 选中项仍未变化，可能真的到底了
+                        try:
+                            ctrl_rect = next_ctrl.BoundingRectangle
+                            if abs(ctrl_rect.bottom - list_rect.bottom) == 0:
+                                bottom_same_rid_count += 1
+                                if bottom_same_rid_count >= 2:
+                                    return
+                        except Exception:
+                            pass
+                        continue
+
+                    last_rid = selected_rid
+                else:
+                    if next_rid == last_rid:
+                        continue
+                    last_rid = next_rid
+
                 bottom_same_rid_count = 0
                 yield next_item
                 yielded += 1
@@ -6500,12 +6582,12 @@ class Session:
                 scroll_at(cx, cy, -120)  # 向下滚动一格
                 time.sleep(0.15)
 
-                # 滚动后重新获取当前选中项的下一个兄弟
+                # 滚动后重新获取当前选中项的下一个可激活兄弟
                 current_ctrl = self._get_selected_ctrl(lc)
                 if not current_ctrl:
                     break
 
-                next_sibling = current_ctrl.GetNextSiblingControl()
+                next_sibling = self._find_next_activatable_sibling(current_ctrl)
                 if next_sibling and next_sibling.Name and \
                         next_sibling.ControlType == auto.ControlType.ListItemControl:
                     try:
@@ -6524,9 +6606,8 @@ class Session:
                     new_item.control = next_sibling
                     new_item.runtime_id = new_rid
 
-                    # 按 Down 选中下一条
-                    input_wx.send_keys(self._win, "{Down}")
-                    time.sleep(0.05)
+                    # 按 Down 选中下一条（跳过中间不可激活项）
+                    self._press_down_to_select(current_ctrl, next_sibling, lc)
 
                     last_rid = new_rid
                     bottom_same_rid_count = 0
@@ -6539,6 +6620,46 @@ class Session:
                     bottom_same_rid_count += 1
                     if bottom_same_rid_count >= 2:
                         return
+
+    def _press_down_to_select(self, current_ctrl: auto.Control,
+                              target_ctrl: auto.Control,
+                              lc: auto.ListControl) -> None:
+        """
+        通过按 Down 键将选中项从 current_ctrl 移动到 target_ctrl。
+
+        当 current_ctrl 和 target_ctrl 之间存在不可激活的特殊项时，
+        需要多按几次 Down 键才能跳过这些项到达目标。
+
+        策略：
+        1. 计算 current_ctrl 和 target_ctrl 之间的兄弟数量（含不可激活项）
+        2. 按对应次数的 Down 键
+        3. 验证选中项是否到达目标，未到达则继续按 Down（最多重试 5 次）
+
+        Args:
+            current_ctrl: 当前选中的控件
+            target_ctrl:  目标控件
+            lc:           会话列表 ListControl
+        """
+        # 计算中间需要跳过的项数
+        skip_count = 0
+        sibling = current_ctrl.GetNextSiblingControl()
+        for _ in range(10):
+            if sibling is None:
+                break
+            try:
+                if tuple(sibling.GetRuntimeId()) == tuple(target_ctrl.GetRuntimeId()):
+                    break
+            except Exception:
+                pass
+            skip_count += 1
+            sibling = sibling.GetNextSiblingControl()
+
+        # 按 Down 键次数 = 跳过的项数 + 1（到达目标）
+        down_count = skip_count + 1
+        for _ in range(down_count):
+            input_wx.send_keys(self._win, "{Down}")
+            time.sleep(0.03)
+        time.sleep(0.05)
 
     def _get_selected_ctrl(self, lc: auto.ListControl) -> Optional[auto.Control]:
         """获取会话列表中当前被选中的控件"""
