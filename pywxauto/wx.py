@@ -6315,7 +6315,7 @@ class Session:
 
         return all_sessions
 
-    def get_sessions(self, count: Optional[int] = None) -> List[SessionItem]:
+    def get_sessions(self, count: Optional[int] = None, speed: int = 10) -> List[SessionItem]:
         """
         获取会话列表。
 
@@ -6325,13 +6325,14 @@ class Session:
 
         Args:
             count: 要获取的会话数量，None 获取全部
+            speed: 滚动速度，默认为10 值越大滚动越快
 
         Returns:
             按出现顺序排列的会话列表
         """
-        return list(self.iter_sessions_by_next_sibling(count=count))
+        return list(self.iter_sessions_by_scroll(count=count, speed=speed))
 
-    def iter_sessions(self, count: Optional[int] = None) -> None:
+    def iter_sessions_by_activate(self, count: Optional[int] = None) -> None:
         """
         逐条获取会话列表（生成器）。
 
@@ -9357,7 +9358,7 @@ class Chat:
                     first_ctrl = visible[0].control
                     if first_ctrl:
                         first_rect = first_ctrl.BoundingRectangle
-                        if abs(first_rect.top - view_rect[1]) <= 2:
+                        if abs(first_rect.top - view_rect[1]) == 0:
                             is_at_top = True
                 except Exception:
                     pass
@@ -9372,7 +9373,7 @@ class Chat:
             # 向上滚动
             cx = (view_rect[0] + view_rect[2]) // 2
             cy = (view_rect[1] + view_rect[3]) // 2
-            scroll_at(cx, cy, 120 * 5)
+            scroll_at(cx, cy, 120 * 10)
 
     def _get_visible_messages_lazy(self) -> List[Message]:
         """
