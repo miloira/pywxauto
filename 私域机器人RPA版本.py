@@ -46,6 +46,11 @@ def run(droplet_token, device_id, send_offline_msg):
     from pywxauto.wx import Weixin, MessageStatus
 
     logger = logging.getLogger(__name__)
+    logging.basicConfig(
+        level=logging.INFO,
+        format="%(asctime)s [%(levelname)s] %(message)s",
+        datefmt="%Y-%m-%d %H:%M:%S",
+    )
 
 
     class SiyuError(Exception):
@@ -115,7 +120,7 @@ def run(droplet_token, device_id, send_offline_msg):
 
         def _handle_response(self, resp: requests.Response) -> dict:
             """统一处理响应，检查 HTTP 状态码和业务错误码"""
-            print("================>", resp.json())
+            # print("================>", resp.json())
             resp.raise_for_status()
             data = resp.json()
             code = data.get("code", -1)
@@ -167,7 +172,6 @@ def run(droplet_token, device_id, send_offline_msg):
 
             self.robot_id = result["robot_id"]
             self._session.headers["droplet-robot-id"] = self.robot_id
-            logger.info(f"机器人已连接: robot_id={self.robot_id}")
             return self.robot_id
 
         def beat(self) -> None:
@@ -321,18 +325,18 @@ def run(droplet_token, device_id, send_offline_msg):
 
         # ========================= 心跳管理 =========================
 
-        def start_heartbeat(self, interval: float = 22) -> "threading.Thread":
+        def start_heartbeat(self, interval: float = 10) -> "threading.Thread":
             def _heartbeat_loop():
                 while True:
                     try:
                         self.beat()
+                        logger.info(f"💗 心跳发送成功")
                     except Exception as e:
-                        logger.warning(f"心跳失败: {e}")
+                        logger.error(f"💗 心跳发送失败: {e}")
                     time.sleep(interval)
 
             t = threading.Thread(target=_heartbeat_loop, daemon=True, name="siyu-heartbeat")
             t.start()
-            logger.info(f"心跳线程已启动 (间隔 {interval}s)")
             return t
 
         def __repr__(self):
@@ -654,7 +658,7 @@ def run(droplet_token, device_id, send_offline_msg):
                 data = json.loads(url_decoded)
                 msg_list.append(data)
             except Exception as e:
-                print(f"  ⚠️ 解析离线消息行失败: {e}")
+                logger.warning(f"  ⚠️ 解析离线消息行失败: {e}")
         return msg_list
 
     def _send_grpc_message(file_path: str):
@@ -671,23 +675,23 @@ def run(droplet_token, device_id, send_offline_msg):
                     "/room/get_rooms",
                 ]:
                     continue
-                print(f"  📨 重放离线消息: {api_path}")
+                logger.info(f"  🔄 重放离线消息: {api_path}")
                 requests.post(
                     f"http://{API_HOST}:{API_PORT}/droplet/call",
                     json={"type": "siyu_cmd", "data": data},
                     timeout=10,
                 )
             os.remove(file_path)
-            print(f"  ✅ 离线消息文件已处理并删除: {file_path}")
+            logger.info(f"  ✅ 离线消息文件已处理并删除: {file_path}")
         except Exception as e:
-            print(f"  ❌ 处理离线消息失败: {file_path} - {e}")
+            logger.error(f"  ❌ 处理离线消息失败: {file_path} - {e}")
             traceback.print_exc()
 
     def _process_offline_grpc_msg():
         """检查并处理所有离线消息文件"""
         for path in _get_offline_grpc_paths():
             if os.path.exists(path):
-                print(f"  📬 发现离线消息文件: {path}")
+                logger.info(f"  📩 发现离线消息文件: {path}")
                 _send_grpc_message(path)
 
     def _delete_offline_grpc_msg():
@@ -696,9 +700,9 @@ def run(droplet_token, device_id, send_offline_msg):
             if os.path.exists(path):
                 try:
                     os.remove(path)
-                    print(f"  🗑️ 已删除离线消息文件: {path}")
+                    logger.info(f"  🗑️ 已删除离线消息文件: {path}")
                 except Exception as e:
-                    print(f"  ⚠️ 删除离线消息文件失败: {path} - {e}")
+                    logger.warning(f"  ⚠️ 删除离线消息文件失败: {path} - {e}")
 
     # ==============================
     # ExcelFileHandler
@@ -717,7 +721,7 @@ def run(droplet_token, device_id, send_offline_msg):
                 return
 
             file_name = os.path.basename(event.src_path)
-            print(f"\n[{datetime.now().strftime('%H:%M:%S')}] 🆕 检测到新文件: {file_name}")
+            logger.info(f"\n[{datetime.now().strftime('%H:%M:%S')}] 📄 检测到新文件: {file_name}")
 
             threading.Thread(
                 target=self._handle_new_file,
@@ -727,9 +731,9 @@ def run(droplet_token, device_id, send_offline_msg):
 
         def _handle_new_file(self, src_path: str):
             """等待文件写入完成 → 打开聊天文件 → 获取今天表格 → 逐个下载删除"""
-            print(f"  ⏳ 等待文件写入完成...")
+            logger.info(f"  ⏳ 等待文件写入完成...")
             if not wait_file_stable(src_path):
-                print(f"  ❌ 文件写入超时或已消失")
+                logger.error(f"  ❌ 文件写入超时或已消失")
                 return
 
             with wx_lock:
@@ -741,39 +745,39 @@ def run(droplet_token, device_id, send_offline_msg):
         def _download_today_files(self):
             """打开聊天文件窗口，获取今天的表格文件，逐个另存为并删除"""
             try:
-                print(f"  📂 打开聊天文件窗口...")
+                logger.info(f"  📂 打开聊天文件窗口...")
                 self._wx.file_manager.open(filter_type="表格")
                 time.sleep(1)
 
                 today_files = self._wx.file_manager.get_today_files()
                 if not today_files:
-                    print(f"  📭 今天没有表格文件")
+                    logger.info(f"  📭 今天没有表格文件")
                     self._wx.file_manager.close()
                     return
 
-                print(f"  📋 今天共 {len(today_files)} 个表格文件，开始处理...")
+                logger.info(f"  📑 今天共 {len(today_files)} 个表格文件，开始处理...")
 
                 for i, f in enumerate(reversed(today_files), 1):
                     if not f.control:
-                        print(f"  ⚠️ [{i}] 跳过（无控件引用）: {f.name}")
+                        logger.warning(f"  ⚠️ [{i}] 跳过（无控件引用）: {f.name}")
                         continue
 
                     # 机器人自己发的文件直接删除，不下载
                     if f.sender == bot_nickname:
                         try:
                             self._wx.file_manager.delete_file(f)
-                            print(f"  🗑️ [{i}/{len(today_files)}] 机器人自身文件直接删除: {f.name}")
+                            logger.info(f"  ♻️ [{i}/{len(today_files)}] 机器人自身文件跳过删除: {f.name}")
                         except Exception as e:
-                            print(f"  ⚠️ 删除异常: {f.name} - {e}")
+                            logger.warning(f"  ⚠️ 删除异常: {f.name} - {e}")
                         continue
 
                     # 联系人发的表格直接删除，不下载
                     if f.chat_type == "contact":
                         try:
                             self._wx.file_manager.delete_file(f)
-                            print(f"  🗑️ [{i}/{len(today_files)}] 联系人文件直接删除: {f.name}")
+                            logger.info(f"  ♻️ [{i}/{len(today_files)}] 联系人文件跳过删除: {f.name}")
                         except Exception as e:
-                            print(f"  ⚠️ 删除异常: {f.name} - {e}")
+                            logger.warning(f"  ⚠️ 删除异常: {f.name} - {e}")
                         continue
 
                     # 文件名包含忽略关键词，直接删除
@@ -781,18 +785,18 @@ def run(droplet_token, device_id, send_offline_msg):
                     if ignore_file_keywords and any(kw in f.name for kw in ignore_file_keywords):
                         try:
                             self._wx.file_manager.delete_file(f)
-                            print(f"  🚫 [{i}/{len(today_files)}] 文件名含忽略关键词，直接删除: {f.name}")
+                            logger.info(f"  ⛔ [{i}/{len(today_files)}] 文件名含忽略关键词，直接删除: {f.name}")
                         except Exception as e:
-                            print(f"  ⚠️ 删除异常: {f.name} - {e}")
+                            logger.warning(f"  ⚠️ 删除异常: {f.name} - {e}")
                         continue
 
                     # 超过 2MB 的文件直接删除，不下载
                     if parse_file_size(f.size) > EXCEL_FILE_MAX_SIZE:
                         try:
                             self._wx.file_manager.delete_file(f)
-                            print(f"  🗑️ [{i}/{len(today_files)}] 文件超过2M直接删除: {f.name} ({f.size})")
+                            logger.info(f"  📏 [{i}/{len(today_files)}] 文件超大直接删除: {f.name} ({f.size})")
                         except Exception as e:
-                            print(f"  ⚠️ 删除异常: {f.name} - {e}")
+                            logger.warning(f"  ⚠️ 删除异常: {f.name} - {e}")
                         continue
 
                     # 消息预校验
@@ -806,12 +810,12 @@ def run(droplet_token, device_id, send_offline_msg):
                                 reason = precheck.get("reason", "服务端拒绝")
                                 try:
                                     self._wx.file_manager.delete_file(f)
-                                    print(f"  🚫 [{i}/{len(today_files)}] 预校验跳过并删除: {f.name} ({reason})")
+                                    logger.info(f"  ⛔ [{i}/{len(today_files)}] 预校验跳过并删除: {f.name} ({reason})")
                                 except Exception as e:
-                                    print(f"  ⚠️ 删除异常: {f.name} - {e}")
+                                    logger.warning(f"  ⚠️ 删除异常: {f.name} - {e}")
                                 continue
                         except Exception as e:
-                            print(f"  ⚠️ 预校验异常（继续处理）: {f.name} - {e}")
+                            logger.warning(f"  ⚠️ 预校验异常（继续处理）: {f.name} - {e}")
 
                     # 文件名校验
                     if self._siyu:
@@ -826,16 +830,16 @@ def run(droplet_token, device_id, send_offline_msg):
                                 reason = validate.get("reason", "文件名无效")
                                 try:
                                     self._wx.file_manager.delete_file(f)
-                                    print(f"  🚫 [{i}/{len(today_files)}] 文件校验不通过并删除: {f.name} ({reason})")
+                                    logger.info(f"  ⛔ [{i}/{len(today_files)}] 文件校验不通过并删除: {f.name} ({reason})")
                                 except Exception as e:
-                                    print(f"  ⚠️ 删除异常: {f.name} - {e}")
+                                    logger.warning(f"  ⚠️ 删除异常: {f.name} - {e}")
                                 continue
                         except Exception as e:
-                            print(f"  ⚠️ 文件校验异常（继续处理）: {f.name} - {e}")
+                            logger.warning(f"  ⚠️ 文件校验异常（继续处理）: {f.name} - {e}")
 
                     # 未下载的文件先触发下载
                     if f.status == "未下载":
-                        print(f"  📥 [{i}/{len(today_files)}] 下载中: {f.name}")
+                        logger.info(f"  ⬇️ [{i}/{len(today_files)}] 下载中: {f.name}")
                         try:
                             f.download()
                             time.sleep(3)
@@ -848,30 +852,30 @@ def run(droplet_token, device_id, send_offline_msg):
                                 except Exception:
                                     time.sleep(3)
                             if not downloaded:
-                                print(f"  ❌ 下载超时: {f.name}")
+                                logger.error(f"  ❌ 下载超时: {f.name}")
                                 continue
-                            print(f"  ✅ 下载完成: {f.name}")
+                            logger.info(f"  ✅ 下载完成: {f.name}")
                         except Exception as e:
-                            print(f"  ❌ 下载异常: {f.name} - {e}")
+                            logger.error(f"  ❌ 下载异常: {f.name} - {e}")
                             continue
 
                     # 通过右键复制获取文件的本地路径
-                    print(f"  📋 [{i}/{len(today_files)}] 获取文件路径: {f.name}")
+                    logger.info(f"  📎 [{i}/{len(today_files)}] 获取文件路径: {f.name}")
                     try:
                         file_path = f.copy()
                         time.sleep(0.5)
                         if not file_path or not os.path.exists(file_path):
-                            print(f"  ❌ 获取文件路径失败: {f.name} (path={file_path})")
+                            logger.error(f"  ❌ 获取文件路径失败: {f.name} (path={file_path})")
                             continue
-                        print(f"  ✅ 文件路径: {file_path}")
+                        logger.info(f"  ✅ 文件路径: {file_path}")
                     except Exception as e:
-                        print(f"  ❌ 复制获取路径异常: {f.name} - {e}")
+                        logger.error(f"  ❌ 复制获取路径异常: {f.name} - {e}")
                         continue
 
                     # 上传文件到服务端
                     upload_success = False
                     if self._siyu:
-                        print(f"  📤 [{i}/{len(today_files)}] 上传服务端: {f.name}")
+                        logger.info(f"  ⬆️ [{i}/{len(today_files)}] 上传服务端: {f.name}")
                         try:
                             result = self._siyu.file_upload_raw(
                                 file_path=file_path,
@@ -881,12 +885,12 @@ def run(droplet_token, device_id, send_offline_msg):
                             file_id = result.get("file_id", "")
                             row_count = result.get("row_count", 0)
                             valid_row_count = result.get("valid_row_count", 0)
-                            print(f"  ✅ 上传成功: file_id={file_id}, 总行数={row_count}, 有效行数={valid_row_count}")
+                            logger.info(f"  ✅ 上传成功: file_id={file_id}, 总行数={row_count}, 有效行数={valid_row_count}")
                             upload_success = True
                         except SiyuError as e:
-                            print(f"  ❌ 上传失败: {f.name} - {e}")
+                            logger.error(f"  ❌ 上传失败: {f.name} - {e}")
                         except Exception as e:
-                            print(f"  ❌ 上传异常: {f.name} - {e}")
+                            logger.error(f"  ❌ 上传异常: {f.name} - {e}")
                             traceback.print_exc()
 
                     # 上传成功后，定位到聊天位置并引用回复确认消息，然后删除文件
@@ -894,24 +898,24 @@ def run(droplet_token, device_id, send_offline_msg):
                         try:
                             f.switch_to_message()
                             self._wx.chat.send_at(f"【Excel下单】\n您的文件已收到：{f.name}，订单正在处理中，请耐心等待。", at_members=[f.sender])
-                            print(f"  ✅ 已回复（未匹配到消息引用）: {f.name}")
+                            logger.info(f"  ✅ 已回复（未匹配到消息引用）: {f.name}")
                         except Exception as e:
-                            print(f"  ⚠️ 回复异常（不影响删除）: {f.name} - {e}")
+                            logger.warning(f"  ⚠️ 回复异常（不影响删除）: {f.name} - {e}")
 
                         try:
                             time.sleep(0.5)
                             self._wx.file_manager.delete_file(f)
-                            print(f"  🗑️ 已删除: {f.name}")
+                            logger.info(f"  🗑️ 已删除: {f.name}")
                         except Exception as e:
-                            print(f"  ⚠️ 删除异常: {f.name} - {e}")
+                            logger.warning(f"  ⚠️ 删除异常: {f.name} - {e}")
                     else:
-                        print(f"  ⚠️ 上传未成功，保留文件不删除: {f.name}")
+                        logger.warning(f"  ⚠️ 上传未成功，保留文件不删除: {f.name}")
 
                 self._wx.file_manager.close()
-                print(f"  ✅ 全部处理完成")
+                logger.info(f"  ✅ 全部处理完成")
 
             except Exception as e:
-                print(f"  ❌ 处理异常: {e}")
+                logger.error(f"  ❌ 处理异常: {e}")
                 traceback.print_exc()
                 try:
                     self._wx.file_manager.close()
@@ -1104,7 +1108,7 @@ def run(droplet_token, device_id, send_offline_msg):
 
     def _handle_refresh_rooms(wx: Weixin, task: JxySiyuTask, task_mgr: SiYuTask):
         """处理 /contact/update_rooms_contacts — 刷新群列表"""
-        print("  📋 收到刷新群列表通知")
+        logger.info("  🔄 收到刷新群列表通知")
 
     # 任务类型 → 处理函数映射
     TASK_HANDLERS = {
@@ -1171,7 +1175,7 @@ def run(droplet_token, device_id, send_offline_msg):
 
         if api_path in _IGNORED_API_PATHS:
             msg = f"命令已忽略（桌面自动化模式不适用）: {api_path}"
-            print(msg)
+            logger.info(msg)
             return {
                 "code": 0,
                 "msg": msg,
@@ -1235,7 +1239,7 @@ def run(droplet_token, device_id, send_offline_msg):
             bot_id=robot_id,
         )
 
-        print(f"  📨 收到命令 [{api_path}] → 任务 [{task.id}] {task_name}")
+        logger.info(f"📥 收到命令 [{api_path}] → 任务 [{task.id}] {task_name}")
 
         return {
             "code": 0,
@@ -1289,14 +1293,14 @@ def run(droplet_token, device_id, send_offline_msg):
             return
 
         last_file_scan_time = now
-        print(f"\n[{datetime.now().strftime('%H:%M:%S')}] 🔍 空闲 {IDLE_FILE_SCAN_SECONDS}s，自动扫描聊天文件...")
+        logger.info(f"  🔎 空闲 {IDLE_FILE_SCAN_SECONDS}s，自动扫描聊天文件...")
 
         with wx_lock:
             try:
                 handler = ExcelFileHandler(wx, siyu=siyu)
                 handler._download_today_files()
             except Exception as e:
-                print(f"  ❌ 自动扫描异常: {e}")
+                logger.error(f"  ❌ 自动扫描异常: {e}")
                 traceback.print_exc()
             finally:
                 _mark_task_done()
@@ -1315,21 +1319,21 @@ def run(droplet_token, device_id, send_offline_msg):
                         task.id, TaskStatus.FAILED,
                         fail_reason=f"未知的任务类型: {task.task_type}",
                     )
-                    print(f"  ❌ 未知任务类型: {task.task_type} (id={task.id})")
+                    logger.error(f"  ❌ 未知任务类型: {task.task_type} (id={task.id})")
                     continue
 
                 task_mgr.update_status(task.id, TaskStatus.PROCESSING)
-                print(f"  ▶️ 执行任务 [{task.id}] {task.task_type}: {task.task_name}")
+                logger.info(f"  🚀 执行任务 [{task.id}] {task.task_type}: {task.task_name}")
 
                 try:
                     handler(wx, task, task_mgr)
                     task_mgr.update_status(task.id, TaskStatus.SUCCESS)
-                    print(f"  ✅ 任务成功 [{task.id}]")
+                    logger.info(f"  🚀 任务成功 [{task.id}]")
                 except Exception as e:
                     task_mgr.update_status(
                         task.id, TaskStatus.FAILED, fail_reason=str(e),
                     )
-                    print(f"  ❌ 任务失败 [{task.id}]: {e}")
+                    logger.error(f"  ❌ 任务失败 [{task.id}]: {e}")
                     traceback.print_exc()
             _mark_task_done()
 
@@ -1350,8 +1354,6 @@ def run(droplet_token, device_id, send_offline_msg):
         4. 对每条文本消息调用 message_precheck 校验群+发送者是否有效
         5. 有效则调用 text_order_report 上报文本订单
         """
-        logger.info("📡 文本单消息监听线程已启动")
-
         while True:
             try:
                 # 1. 检测是否有新消息
@@ -1367,7 +1369,7 @@ def run(droplet_token, device_id, send_offline_msg):
                     time.sleep(TEXT_ORDER_POLL_INTERVAL)
                     continue
 
-                logger.info(f"🔔 [{datetime.now().strftime('%H:%M:%S')}] 检测到新消息，扫描会话列表...")
+                logger.info(f"💬 [{datetime.now().strftime('%H:%M:%S')}] 检测到新消息，扫描会话列表...")
 
                 # 2. 遍历会话列表，找到有未读消息的会话
                 with wx_lock:
@@ -1378,7 +1380,7 @@ def run(droplet_token, device_id, send_offline_msg):
 
                             room_nickname = session_item.name
                             unread_count = session_item.unread_count
-                            logger.info(f"  📬 {room_nickname} ({unread_count}条未读)")
+                            logger.info(f"  💬 {room_nickname} ({unread_count}条未读)")
 
                             # 3. 打开会话，获取最近未读消息
                             try:
@@ -1539,16 +1541,14 @@ def run(droplet_token, device_id, send_offline_msg):
 
     os.makedirs(TEMP_DIR, exist_ok=True)
 
-    print("=" * 55)
-    print("  聚协云私域社群智能机器人RPA版本")
-    print("=" * 55)
+    logger.info("聚协云私域社群智能机器人RPA版本✨")
 
     # 初始化微信
     wx = Weixin(idle_wait=3)
-    print("✅ 微信已连接")
+    logger.info("✅ 微信已连接")
     self_info = wx.get_self_info()
     bot_nickname_local = self_info.get("nickname", "")
-    print(f"当前账号: {bot_nickname_local} (微信号: {self_info.get('account', '')})")
+    logger.info(f"🤖 {bot_nickname_local} (微信号: {self_info.get('account', '')})")
 
     # 更新 bot_nickname
     bot_nickname = bot_nickname_local
@@ -1564,7 +1564,7 @@ def run(droplet_token, device_id, send_offline_msg):
         account=self_info.get("account", ""),
         avatar=f"data:image/png;base64,{self_info.get('avatar', '')}" if self_info.get("avatar") else "",
     )
-    print(f"✅ 私域服务端已连接: robot_id={siyu.robot_id}")
+    logger.info(f"✅ 私域服务端已连接: robot_id={siyu.robot_id}")
 
     # 获取企业配置（忽略关键词等）
     ignore_file_keywords: List[str] = []
@@ -1589,28 +1589,27 @@ def run(droplet_token, device_id, send_offline_msg):
 
     # 首次加载
     _refresh_company_config()
-    logger.info(f"📋 企业配置已加载: 文件忽略关键词={ignore_file_keywords}, 文本忽略关键词={ignore_text_keywords}")
+    logger.info(f"✅ 私域后台配置已加载")
 
     # 启动心跳线程
     siyu.start_heartbeat(interval=HEARTBEAT_INTERVAL)
-    print("💓 心跳线程已启动")
+    logger.info(f"🚀 心跳线程已启动 (间隔 {HEARTBEAT_INTERVAL}s)")
 
     # 在文件传输助手发送启动通知
     startup_time = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
     wx.send_text("文件传输助手", f"[{startup_time}] 机器人启动成功！")
-    print("📨 已发送启动通知到文件传输助手")
+    logger.info("✅ 已发送启动通知到文件传输助手")
 
     # 发送消息后获取微信数据目录（发送消息会触发 db-wal 更新）
-    time.sleep(1)
     WECHAT_DATA_DIR = get_latest_wxid_dir()
     WECHAT_FILE_ROOT = rf"{WECHAT_DATA_DIR}\msg\file"
-    print(f"📁 微信数据目录: {WECHAT_DATA_DIR}")
+    logger.info(f"📂 微信数据目录: {WECHAT_DATA_DIR}")
 
     # 初始化任务管理器
     _db_dir = os.path.join(DROPLET_CLIENT_PATH, "GrpcMsg")
     os.makedirs(_db_dir, exist_ok=True)
     task_mgr = SiYuTask(db_path=os.path.join(_db_dir, "syrpa.db"))
-    print("✅ 任务数据库已就绪")
+    logger.info("✅ 任务数据库已就绪")
 
     # 启动 FastAPI 回调服务（后台线程）
     _api_task_mgr_ref[0] = task_mgr
@@ -1618,12 +1617,12 @@ def run(droplet_token, device_id, send_offline_msg):
         target=_start_api_server, daemon=True,
     )
     api_thread.start()
-    print(f"🌐 API 回调服务: http://{API_HOST}:{API_PORT}")
+    logger.info(f"🌐 API 回调服务: http://{API_HOST}:{API_PORT}")
 
     # 处理离线消息
     time.sleep(1)  # 等待 API 服务就绪
     if ENABLE_OFFLINE_MSG:
-        print("📬 处理离线消息...")
+        logger.info("📩 处理离线消息...")
         _process_offline_grpc_msg()
     else:
         _delete_offline_grpc_msg()
@@ -1635,7 +1634,7 @@ def run(droplet_token, device_id, send_offline_msg):
     observer = Observer()
     observer.schedule(file_handler, path=watch_dir, recursive=True)
     observer.start()
-    print(f"🔄 文件监听: {watch_dir}")
+    logger.info(f"📁 文件监听: {watch_dir}")
 
     # 启动文本单消息监听线程
     text_order_thread = threading.Thread(
@@ -1645,23 +1644,21 @@ def run(droplet_token, device_id, send_offline_msg):
         name="text-order-listener",
     )
     text_order_thread.start()
-    print(f"📡 文本单消息监听已启动 (轮询间隔 {TEXT_ORDER_POLL_INTERVAL}s)")
-
-    print(f"📋 任务轮询已启动")
-    print(f"按 Ctrl+C 停止")
-    print("=" * 55 + "\n")
+    logger.info(f"🚀 文本单消息监听已启动 (轮询间隔 {TEXT_ORDER_POLL_INTERVAL}s)")
+    logger.info(f"🚀 任务轮询已启动")
+    logger.info("✅ 所有模块就绪，开始运行")
 
     try:
         while True:
             try:
                 do_task(wx, task_mgr)
             except Exception as e:
-                print(f"⚠️ 任务轮询异常: {e}")
+                logger.warning(f"⚠️ 任务轮询异常: {e}")
                 traceback.print_exc()
 
             new_dir = get_current_month_dir()
             if new_dir != watch_dir:
-                print(f"\n📅 月份切换，更新监听目录: {new_dir}")
+                logger.info(f"\n📆 月份切换，更新监听目录: {new_dir}")
                 observer.unschedule_all()
                 watch_dir = new_dir
                 os.makedirs(watch_dir, exist_ok=True)
@@ -1676,10 +1673,10 @@ def run(droplet_token, device_id, send_offline_msg):
                     last_offline_msg_check_time = now
                     _process_offline_grpc_msg()
 
-            time.sleep(2)
+            time.sleep(5)
     except KeyboardInterrupt:
         observer.stop()
-        print("\n\n🛑 已停止")
+        logger.info("\n\n⏹️ 已停止")
     observer.join()
     # CODE END
 
