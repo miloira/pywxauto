@@ -2544,6 +2544,7 @@ class Message:
 
         通过轮廓检测识别消息中的头像、昵称、内容区域的相对坐标，
         同时判断发送者（头像在左=对方，头像在右=自己）。
+        群聊中对方发的消息，如果识别到 nickname_rect，会进一步 OCR 提取真实昵称。
 
         前提：消息控件必须在 message_view 可视范围内（is_in_view=True）。
         """
@@ -2566,6 +2567,16 @@ class Message:
         if source != Source.UNKNOWN:
             self.source = source
             self.sender = sender
+
+        # 群聊中对方发的消息，OCR 识别昵称区域提取真实发送者昵称
+        is_room = self.chat.chat_type == "群聊"
+        if source == Source.OTHERS and is_room and nickname_rect:
+            try:
+                ocr_sender = self.chat._ocr_sender_name(hwnd, ctrl, nickname_rect, headimg_rect)
+                if ocr_sender:
+                    self.sender = ocr_sender
+            except Exception:
+                pass
 
     def refresh(self) -> Message:
         """
@@ -9641,13 +9652,18 @@ class Chat:
                 sender, source, bubble_rect, headimg_rect, nickname_rect, content_rect = self._detect_sender(
                     hwnd, ctrl, chat_name,
                 )
-                # 群聊中对方发的消息，OCR 识别控件顶部 0-38px 区域提取真实发送者昵称
+                # 群聊中对方发的消息，OCR 识别昵称区域提取真实发送者昵称
                 if source == Source.OTHERS and is_room:
-                    try:
-                        ocr_sender = self._ocr_sender_name(hwnd, ctrl)
-                        sender = ocr_sender if ocr_sender else None
-                    except Exception:
-                        sender = None
+                    if nickname_rect:
+                        try:
+                            ocr_sender = self._ocr_sender_name(hwnd, ctrl, nickname_rect, headimg_rect)
+                            logger.debug(f"[OCR昵称] nickname_rect={nickname_rect}, ocr_sender={ocr_sender!r}")
+                            sender = ocr_sender if ocr_sender else None
+                        except Exception as e:
+                            logger.debug(f"[OCR昵称] 异常: {e}")
+                            sender = None
+                    else:
+                        logger.debug(f"[OCR昵称] 跳过: nickname_rect 为空, raw_name={raw_name[:30]!r}")
                 # 写入缓存
                 if sender_cache is not None and cache_key is not None:
                     sender_cache[cache_key] = (sender, source, bubble_rect, headimg_rect, nickname_rect, content_rect)
@@ -9736,19 +9752,27 @@ class Chat:
     # 图片 hash → OCR 识别结果缓存（避免重复 OCR 相同头像/昵称区域）
     _ocr_sender_cache: Dict[str, str] = {}
 
-    def _ocr_sender_name(self, hwnd: int, ctrl: auto.Control) -> str:
+    def _ocr_sender_name(self, hwnd: int, ctrl: auto.Control, nickname_rect: tuple, headimg_rect: tuple = ()) -> str:
         """
-        通过 OCR 识别消息控件顶部 0-38px 区域，提取群聊中的发送者昵称。
+        通过 OCR 识别消息控件的昵称区域，提取群聊中的发送者昵称。
+
+        使用 nickname_rect（轮廓检测识别出的昵称区域坐标）精确裁剪，
+        然后对裁剪区域执行 OCR。
 
         使用图片 hash 缓存：相同的昵称截图区域直接返回缓存结果，避免重复 OCR。
 
         Args:
             hwnd: 窗口句柄
             ctrl: 消息 ListItemControl 控件
+            nickname_rect: 昵称区域相对于控件截图的坐标 (x1, y1, x2, y2)
 
         Returns:
             识别到的发送者昵称，识别失败返回空字符串
         """
+        if not nickname_rect:
+            logger.debug("[OCR昵称] nickname_rect 为空，跳过")
+            return ""
+
         try:
             if hwnd:
                 png_bytes = capture_control(hwnd, ctrl, offset_right=15, mode="print_window")
@@ -9766,37 +9790,63 @@ class Chat:
                         pass
 
             w, h = img.size
-            if h <= 38 or w <= 0:
+            logger.debug(f"[OCR昵称] 控件截图尺寸: {w}x{h}, nickname_rect={nickname_rect}")
+            if w <= 0 or h <= 0:
                 return ""
 
-            # 裁剪顶部 0-38px 区域（昵称显示区域）
-            sender_area = img.crop((60, 0, w - 60, 38))
+            # 使用 headimg_rect 定位昵称区域：
+            # 昵称在头像右边、头像上半部分的区域
+            # 裁剪范围：x 从头像右边缘到图片右边，y 从图片顶部到头像中线
+            if headimg_rect:
+                hx1, hy1, hx2, hy2 = headimg_rect
+                head_mid_y = hy1 + (hy2 - hy1) // 2
+                x1 = max(0, hx2 + 5)  # 头像右边缘 + 5px 间距
+                y1 = 0
+                x2 = w
+                y2 = min(h, head_mid_y)
+            else:
+                # 没有 headimg_rect 时回退到消息控件高度的上半部分
+                x1 = 0
+                y1 = 0
+                x2 = w
+                y2 = h // 2
+
+            if x2 <= x1 or y2 <= y1:
+                logger.debug(f"[OCR昵称] 裁剪区域无效: ({x1},{y1},{x2},{y2})")
+                return ""
+
+            sender_area = img.crop((x1, y1, x2, y2))
+            logger.debug(f"[OCR昵称] 裁剪区域: ({x1},{y1},{x2},{y2}), 尺寸: {sender_area.size}")
 
             # 计算图片 hash
             buf = io.BytesIO()
             sender_area.save(buf, format="PNG")
             img_bytes = buf.getvalue()
-            with open("sender_name.png", "wb") as f:
-                f.write(img_bytes)
             img_hash = hashlib.md5(img_bytes).hexdigest()
 
             # 命中缓存直接返回
             if img_hash in Chat._ocr_sender_cache:
-                return Chat._ocr_sender_cache[img_hash]
+                cached = Chat._ocr_sender_cache[img_hash]
+                logger.debug(f"[OCR昵称] 缓存命中: hash={img_hash[:8]}, sender={cached!r}")
+                return cached
 
             # OCR 识别
             ocr_result = self._get_image_text(img_bytes)
+            logger.debug(f"[OCR昵称] OCR结果: {ocr_result}")
 
             if not ocr_result:
-                Chat._ocr_sender_cache[img_hash] = ""
+                # 不缓存空结果，下次遇到相同图片时重试 OCR
+                logger.debug("[OCR昵称] OCR 未识别到文字")
                 return ""
 
             # 取第一个识别结果作为发送者昵称
             sender_name = next(iter(ocr_result), "").strip()
             Chat._ocr_sender_cache[img_hash] = sender_name
+            logger.debug(f"[OCR昵称] 识别成功: {sender_name!r}")
             return sender_name
 
-        except Exception:
+        except Exception as e:
+            logger.debug(f"[OCR昵称] 异常: {e}")
             return ""
 
     @staticmethod
