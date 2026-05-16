@@ -521,18 +521,25 @@ def run(droplet_token, device_id, send_offline_msg):
     def get_latest_wxid_dir() -> str:
         """找出 xwechat_files 下最近有消息更新的 wxid_ 目录，返回其完整路径。"""
         from pathlib import Path
-        base_dir = Path.home() / "xwechat_files"
-        wxid_dirs = [d for d in base_dir.iterdir() if d.is_dir() and d.name.startswith("wxid_")]
+        # 搜索多个可能的 xwechat_files 目录
+        candidate_bases = [
+            Path.home() / "xwechat_files",
+            Path.home() / "Documents" / "xwechat_files",
+        ]
         results = []
-        for wxid_dir in wxid_dirs:
-            msg_dir = wxid_dir / "db_storage" / "message"
-            if not msg_dir.exists():
+        for base_dir in candidate_bases:
+            if not base_dir.exists():
                 continue
-            wal_files = [f for f in msg_dir.glob("message_*.db-wal") if re.match(r"message_\d+\.db-wal$", f.name)]
-            if not wal_files:
-                continue
-            latest_wal = max(wal_files, key=lambda f: f.stat().st_mtime)
-            results.append((wxid_dir, latest_wal.stat().st_mtime))
+            wxid_dirs = [d for d in base_dir.iterdir() if d.is_dir() and d.name.startswith("wxid_")]
+            for wxid_dir in wxid_dirs:
+                msg_dir = wxid_dir / "db_storage" / "message"
+                if not msg_dir.exists():
+                    continue
+                wal_files = [f for f in msg_dir.glob("message_*.db-wal") if re.match(r"message_\d+\.db-wal$", f.name)]
+                if not wal_files:
+                    continue
+                latest_wal = max(wal_files, key=lambda f: f.stat().st_mtime)
+                results.append((wxid_dir, latest_wal.stat().st_mtime))
         if not results:
             raise RuntimeError("未找到活跃的微信数据目录（xwechat_files/wxid_*）")
         return str(max(results, key=lambda x: x[1])[0])
