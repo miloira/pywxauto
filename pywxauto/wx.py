@@ -9717,7 +9717,7 @@ class Chat:
             return MergeMessage
         if note_kw in name:
             return NoteMessage
-        if name.endswith(red_packet_kw) and "  " in name:
+        if name.endswith(red_packet_kw):
             return RedPacketMessage
         if name.endswith(transfer_kw) and name.startswith("￥"):
             return TransferMessage
