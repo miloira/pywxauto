@@ -6465,6 +6465,15 @@ class Session:
             sibling = sibling.GetNextSiblingControl()
         return None
 
+    def _scroll_session_list_home(self, lc: auto.ListControl) -> None:
+        """将会话列表滚动回顶部"""
+        try:
+            if lc.Exists(maxSearchSeconds=2):
+                input_wx.focus(lc)
+                input_wx.send_keys(lc, "{Home}")
+        except Exception:
+            pass
+
     def iter_sessions_by_scroll(self, count: Optional[int] = None, speed: int = 10):
         """
         逐条获取会话列表（生成器）（可以获取未读消息数）。
@@ -6513,6 +6522,7 @@ class Session:
         yield item
         yielded = 1
         if count is not None and yielded >= count:
+            self._scroll_session_list_home(lc)
             return
 
         list_rect = lc.BoundingRectangle
@@ -6521,61 +6531,65 @@ class Session:
         last_rid = item.runtime_id
         bottom_same_rid_count = 0
 
-        while True:
-            # 核心改动：从上一次 yield 的控件出发找下一个可激活兄弟
-            # 不再依赖 _get_selected_ctrl，避免服务号等不可激活项的影响
-            next_ctrl = self._find_next_activatable_sibling(last_yielded_ctrl)
-
-            if next_ctrl is None:
-                # 没有下一个兄弟（可能需要滚动露出更多），使用滚轮微调
-                cx = (list_rect.left + list_rect.right) // 2
-                cy = (list_rect.top + list_rect.bottom) // 2
-                scroll_at(cx, cy, speed * -120)  # 向下滚动一格
-                time.sleep(0.01)
-
-                # 滚动后重新从 last_yielded_ctrl 查找下一个兄弟
+        try:
+            while True:
+                # 核心改动：从上一次 yield 的控件出发找下一个可激活兄弟
+                # 不再依赖 _get_selected_ctrl，避免服务号等不可激活项的影响
                 next_ctrl = self._find_next_activatable_sibling(last_yielded_ctrl)
+
                 if next_ctrl is None:
-                    # 滚动后仍然没有下一个兄弟，说明已到底部
+                    # 没有下一个兄弟（可能需要滚动露出更多），使用滚轮微调
+                    cx = (list_rect.left + list_rect.right) // 2
+                    cy = (list_rect.top + list_rect.bottom) // 2
+                    scroll_at(cx, cy, speed * -120)  # 向下滚动一格
+                    time.sleep(0.01)
+
+                    # 滚动后重新从 last_yielded_ctrl 查找下一个兄弟
+                    next_ctrl = self._find_next_activatable_sibling(last_yielded_ctrl)
+                    if next_ctrl is None:
+                        # 滚动后仍然没有下一个兄弟，说明已到底部
+                        bottom_same_rid_count += 1
+                        if bottom_same_rid_count >= 2:
+                            return
+                        continue
+
+                if not next_ctrl.Name or \
+                        next_ctrl.ControlType != auto.ControlType.ListItemControl:
+                    break
+
+                # 解析下一条（选中前，保留未读数）
+                try:
+                    next_rid = tuple(next_ctrl.GetRuntimeId())
+                except Exception:
+                    next_rid = ()
+
+                if next_rid == last_rid:
                     bottom_same_rid_count += 1
                     if bottom_same_rid_count >= 2:
                         return
+                    # 滚动一下再重试
+                    cx = (list_rect.left + list_rect.right) // 2
+                    cy = (list_rect.top + list_rect.bottom) // 2
+                    scroll_at(cx, cy, speed * -120)
+                    time.sleep(0.01)
                     continue
 
-            if not next_ctrl.Name or \
-                    next_ctrl.ControlType != auto.ControlType.ListItemControl:
-                break
+                next_item = _parse_session_name(next_ctrl.Name, session=self)
+                next_item.control = next_ctrl
+                next_item.runtime_id = next_rid
 
-            # 解析下一条（选中前，保留未读数）
-            try:
-                next_rid = tuple(next_ctrl.GetRuntimeId())
-            except Exception:
-                next_rid = ()
+                # 更新追踪状态
+                last_yielded_ctrl = next_ctrl
+                last_rid = next_rid
+                bottom_same_rid_count = 0
 
-            if next_rid == last_rid:
-                bottom_same_rid_count += 1
-                if bottom_same_rid_count >= 2:
+                yield next_item
+                yielded += 1
+                if count is not None and yielded >= count:
                     return
-                # 滚动一下再重试
-                cx = (list_rect.left + list_rect.right) // 2
-                cy = (list_rect.top + list_rect.bottom) // 2
-                scroll_at(cx, cy, speed * -120)
-                time.sleep(0.01)
-                continue
-
-            next_item = _parse_session_name(next_ctrl.Name, session=self)
-            next_item.control = next_ctrl
-            next_item.runtime_id = next_rid
-
-            # 更新追踪状态
-            last_yielded_ctrl = next_ctrl
-            last_rid = next_rid
-            bottom_same_rid_count = 0
-
-            yield next_item
-            yielded += 1
-            if count is not None and yielded >= count:
-                return
+        finally:
+            # 回到顶部（所有退出路径都会执行）
+            self._scroll_session_list_home(lc)
 
     def _get_selected_ctrl(self, lc: auto.ListControl) -> Optional[auto.Control]:
         """获取会话列表中当前被选中的控件"""
