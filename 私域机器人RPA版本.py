@@ -979,6 +979,14 @@ def run(droplet_token, device_id, enable_text_order, send_offline_msg):
                 self._wx.file_manager.close()
                 logger.info(f"  ✅ 全部处理完成")
 
+                # 关闭当前激活的会话（避免会话列表显示选中状态）
+                try:
+                    selected = self._wx.session.selected()
+                    if selected:
+                        self._wx.session.close(selected)
+                except Exception:
+                    pass
+
             except Exception as e:
                 logger.error(f"  ❌ 处理异常: {e}")
                 traceback.print_exc()
@@ -1662,7 +1670,7 @@ def run(droplet_token, device_id, enable_text_order, send_offline_msg):
     logger.info("聚协云私域社群智能机器人RPA版本✨")
 
     # 初始化微信
-    wx = Weixin(idle_wait=3)
+    wx = Weixin(idle_wait=3, ocr="rapidocr")
     logger.info("✅ 微信已连接")
     self_info = wx.get_self_info()
     bot_nickname_local = self_info.get("nickname", "")
