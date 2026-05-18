@@ -6035,7 +6035,7 @@ class SessionItem:
             pattern = ctrl.GetSelectionItemPattern()
             if pattern and pattern.IsSelected:
                 for aid in Chat.TITLE_LABEL_IDS:
-                    title = self.session._win.TextControl(AutomationId=aid)
+                    title = self.session._list_control.TextControl(AutomationId=aid)
                     if title.Exists(0, 0) and title.Name == self.name:
                         return self
                 input_wx.click(ctrl)
