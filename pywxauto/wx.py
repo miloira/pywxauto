@@ -15,10 +15,12 @@ import random
 import re
 import struct
 import subprocess
+import sys
 import tempfile
 import threading
 import time
 import urllib
+import winreg
 from collections import deque
 from datetime import date
 from enum import Enum
@@ -34,11 +36,9 @@ import win32con
 import win32gui
 import win32process
 import win32ui
-import winreg
-from PIL import Image, ImageFilter, ImageDraw
+from PIL import Image, ImageDraw, ImageFilter
 from pyee.base import EventEmitter
 from rapidocr import RapidOCR
-import sys
 
 try:
     from . import wcocr
