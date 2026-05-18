@@ -1110,7 +1110,8 @@ def get_wechat_wxocr_path() -> Optional[str]:
     if len(result) == 0:
         return None
 
-    return os.path.join(os.path.dirname(result[0]), "wxocr.dll")
+    # 路径中版本号为纯数字目录名，字符串排序取最后一个即为最大版本
+    return sorted(result)[-1]
 
 def _wechat3_version_int2str(v: int) -> str:
     """将微信3.x的版本号整数转换为字符串，如 0x63090a13 -> '3.9.10.19'"""
