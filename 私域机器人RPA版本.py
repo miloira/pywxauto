@@ -1856,7 +1856,7 @@ def run(droplet_token, device_id, enable_text_order, send_offline_msg):
                     last_offline_msg_check_time = now
                     _process_offline_grpc_msg()
 
-            time.sleep(5)
+            time.sleep(2)
     except KeyboardInterrupt:
         observer.stop()
         logger.info("\n\n⏹️ 已停止")
