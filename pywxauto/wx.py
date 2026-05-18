@@ -15606,7 +15606,7 @@ class Weixin(WeixinWindow):
         self.resize = resize
         hwnd = self._win.NativeWindowHandle
         if self.resize and hwnd:
-            # 根据桌面大小计算窗口尺寸：宽高为桌面的 1/6
+            # 根据桌面大小计算窗口尺寸
             desktop_width = win32api.GetSystemMetrics(win32con.SM_CXSCREEN)
             desktop_height = win32api.GetSystemMetrics(win32con.SM_CYSCREEN)
             self.WINDOW_WIDTH = desktop_width // 3
