@@ -15,19 +15,19 @@ DESCRIPTION = "微信 Windows 客户端 UI 自动化封装"
 URL = "https://github.com/miloira/pywxauto"
 EMAIL = "690126048@qq.com"
 AUTHOR = "Msky"
-REQUIRES_PYTHON = ">=3.10.0"
-VERSION = "0.0.1"
+REQUIRES_PYTHON = ">=3.8.0"
+VERSION = "0.0.2"
 
 # What packages are required for this module to be executed?
 REQUIRED = [
-    "uiautomation==2.0.29",
-    "pywin32==311",
-    "Pillow==12.1.1",
-    "requests==2.32.5",
-    "pyee==13.0.1",
-    "rapidocr==3.8.1",
-    "onnxruntime==1.25.1",
-    "windows-capture==2.0.0",
+    "uiautomation",
+    "pywin32",
+    "Pillow>=9.0.0,<13.0.0",
+    "requests>=2.28.0",
+    "pyee>=9.0.0",
+    "rapidocr>=1.0.0",
+    "onnxruntime>=1.14.0",
+    "windows-capture>=1.0.0",
 ]
 
 # What packages are optional?
@@ -120,9 +120,12 @@ setup(
         "License :: OSI Approved :: MIT License",
         "Programming Language :: Python",
         "Programming Language :: Python :: 3",
+        "Programming Language :: Python :: 3.8",
+        "Programming Language :: Python :: 3.9",
         "Programming Language :: Python :: 3.10",
         "Programming Language :: Python :: 3.11",
         "Programming Language :: Python :: 3.12",
+        "Programming Language :: Python :: 3.13",
         "Programming Language :: Python :: Implementation :: CPython",
     ],
     distclass=BinaryDistribution,
