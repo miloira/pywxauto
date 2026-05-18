@@ -15318,25 +15318,32 @@ class FileManager(WeixinWindow):
 
         文本格式: "文件名 发送人 | 来源 日期 状态 大小"
         """
-        if not cell_text:
+        if not cell_text or not isinstance(cell_text, str):
+            logger.debug(f"[parse_file_cell_text] 跳过无效 cell_text: type={type(cell_text)}, value={cell_text!r}")
             return None
+
+        logger.debug(f"[parse_file_cell_text] 原始文本: {cell_text!r}")
 
         separator = " | "
         sep_idx = cell_text.rfind(separator)
         if sep_idx <= 0:
+            logger.debug(f"[parse_file_cell_text] 未找到分隔符 ' | '，跳过: {cell_text!r}")
             return None
 
         left_part = cell_text[:sep_idx].strip()
         right_part = cell_text[sep_idx + len(separator):].strip()
+        logger.debug(f"[parse_file_cell_text] left_part={left_part!r}, right_part={right_part!r}")
 
         # 解析右侧: 来源 日期 [状态] 大小
         size_pattern = r'[\d.]+[BKMGT]'
         right_tokens = right_part.split()
+        logger.debug(f"[parse_file_cell_text] right_tokens={right_tokens!r}")
 
         if len(right_tokens) < 2:
+            logger.debug(f"[parse_file_cell_text] right_tokens 不足2个，跳过")
             return None
 
-        file_size = right_tokens[-1] if re.match(size_pattern, right_tokens[-1]) else ""
+        file_size = right_tokens[-1] if (isinstance(right_tokens[-1], str) and re.match(size_pattern, right_tokens[-1])) else ""
 
         # 日期格式:
         #   - 今天: 只显示时间 "10:53"
@@ -15420,12 +15427,35 @@ class FileManager(WeixinWindow):
             raise RuntimeError("聊天文件窗口未打开")
         self.activate()
 
+        cells = self._find_all_file_cells(self._win)
+        logger.info(f"[get_all_files] 找到 {len(cells)} 个文件控件")
+
         files = []
-        for cell in self._find_all_file_cells(self._win):
-            chat_file = self.parse_file_cell_text(cell.Name)
+        for idx, cell in enumerate(cells):
+            try:
+                cell_name = cell.Name
+            except Exception as e:
+                logger.warning(f"[get_all_files] [{idx}] 获取 cell.Name 异常: {e}")
+                continue
+
+            logger.info(f"[get_all_files] [{idx}] ClassName={cell.ClassName!r}, Name type={type(cell_name).__name__}, value={cell_name!r}")
+
+            if not isinstance(cell_name, str):
+                logger.warning(f"[get_all_files] [{idx}] cell.Name 非字符串，跳过: type={type(cell_name)}, value={cell_name!r}")
+                continue
+            if not cell_name:
+                logger.warning(f"[get_all_files] [{idx}] cell.Name 为空字符串，跳过")
+                continue
+
+            chat_file = self.parse_file_cell_text(cell_name)
             if chat_file:
                 chat_file.control = cell
                 files.append(chat_file)
+                logger.info(f"[get_all_files] [{idx}] ✅ 解析成功: {chat_file.name} | {chat_file.room} | {chat_file.size}")
+            else:
+                logger.warning(f"[get_all_files] [{idx}] ❌ 解析失败，原始文本: {cell_name!r}")
+
+        logger.info(f"[get_all_files] 最终解析出 {len(files)} 个有效文件")
         return files
 
     def get_today_files(self) -> List[ChatFile]:

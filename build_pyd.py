@@ -36,8 +36,10 @@ dist = Distribution({
         [ext],
         compiler_directives={
             "language_level": "3",      # Python 3 语法
-            "boundscheck": False,       # 关闭边界检查，提升性能
-            "wraparound": False,        # 关闭负索引检查
+            "boundscheck": True,        # 开启边界检查，避免段错误
+            "wraparound": True,         # 开启负索引检查
+            "initializedcheck": True,   # 检查变量是否初始化
+            "nonecheck": True,          # 检查 None 值访问
         },
     ),
 })
