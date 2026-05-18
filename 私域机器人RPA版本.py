@@ -30,6 +30,7 @@ def run(droplet_token, device_id, send_offline_msg):
     import uuid
     from datetime import datetime
     from enum import Enum
+    from pathlib import Path
     from typing import Dict, List, Optional, Tuple
 
     import openpyxl
@@ -43,7 +44,7 @@ def run(droplet_token, device_id, send_offline_msg):
     from watchdog.observers import Observer
     from watchdog.events import FileSystemEventHandler
 
-    from pywxauto.wx import Weixin, MessageStatus
+    from pywxauto.wx import Login, Weixin, MessageStatus
 
     logger = logging.getLogger(__name__)
     logging.basicConfig(
@@ -575,7 +576,6 @@ def run(droplet_token, device_id, send_offline_msg):
 
     def get_latest_wxid_dir() -> str:
         """找出 xwechat_files 下最近有消息更新的 wxid_ 目录，返回其完整路径。"""
-        from pathlib import Path
         # 搜索多个可能的 xwechat_files 目录
         candidate_bases = [
             Path.home() / "xwechat_files",
@@ -1711,14 +1711,7 @@ def run(droplet_token, device_id, send_offline_msg):
     def _check_logout() -> bool:
         """检测微信登录窗口是否出现（出现表示已退出登录）"""
         try:
-            from pywxauto.wx import Login
-            import uiautomation as auto
-            login_win = auto.WindowControl(
-                ClassName=Login.WINDOW_CLASS,
-                ProcessId=wx.pid,
-                searchDepth=1,
-            )
-            return login_win.Exists(maxSearchSeconds=0)
+            return Login(wx.pid).exists
         except Exception:
             return False
 
