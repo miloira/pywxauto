@@ -15468,7 +15468,7 @@ class Weixin(WeixinWindow):
         lock_input: bool = False, 
         resize: bool = False,
         install_path: Optional[str] = None,
-        ocr_engine: Literal["wcocr", "rapidocr"] = "wcocr",
+        ocr: Literal["wcocr", "rapidocr"] = "wcocr",
         wxocr_weixin_install_path: Optional[str] = None, 
         wxocr_plugin_path: Optional[str] = None
     ):
@@ -15491,17 +15491,17 @@ class Weixin(WeixinWindow):
             resize: True 时根据桌面大小自动调整微信窗口尺寸（宽高为桌面的 1/3 1/2），
                 False 时保持原窗口大小。默认 False。
             install_path: 微信安装路径，None 时自动从注册表检测。
-            ocr_engine: OCR 引擎选择，可选值：
+            ocr: OCR 引擎选择，可选值：
                 - "wcocr": 使用微信自带 OCR（默认，速度快）
                 - "rapidocr": 使用 RapidOCR（无需微信 OCR 插件）
             wxocr_weixin_install_path: 微信 OCR 插件所需的带版本号微信安装路径，
-                None 时自动检测。仅 ocr_engine="wcocr" 时有效。
+                None 时自动检测。仅 ocr="wcocr" 时有效。
             wxocr_plugin_path: 微信 OCR 插件 wxocr.dll 路径，
-                None 时自动检测。仅 ocr_engine="wcocr" 时有效。
+                None 时自动检测。仅 ocr="wcocr" 时有效。
 
         Raises:
             LoginError: 微信未安装、启动超时或登录超时时抛出。
-            ValueError: ocr_engine 参数无效时抛出。
+            ValueError: ocr 参数无效时抛出。
         """
         self.pid = pid
         self.background = background
@@ -15513,8 +15513,8 @@ class Weixin(WeixinWindow):
             PIM(idle_wait=self.idle_wait, lock_input=self.lock_input)
             PIM.start()
 
-        if ocr_engine not in ("wcocr", "rapidocr"):
-            raise ValueError(f"ocr_engine 参数必须为 'wcocr' 或 'rapidocr'，当前: {ocr_engine!r}")
+        if ocr not in ("wcocr", "rapidocr"):
+            raise ValueError(f"ocr 参数必须为 'wcocr' 或 'rapidocr'，当前: {ocr!r}")
 
         self.version = get_wechat_version(4)
         self.install_path = install_path or get_weixin_install_path()
@@ -15594,8 +15594,8 @@ class Weixin(WeixinWindow):
             # 微信语言未检测 开始自动检测
             self.auto_detect_lang(self.pid)
 
-        self._ocr_engine = ocr_engine
-        if self._ocr_engine == "wcocr":
+        self._ocr = ocr
+        if self._ocr == "wcocr":
             self.wxocr_weixin_install_path = wxocr_weixin_install_path or get_wechat_install_path(4)
             self.wxocr_plugin_path = wxocr_plugin_path or get_wechat_wxocr_path()
             wcocr.init(self.wxocr_plugin_path, self.wxocr_weixin_install_path)
@@ -16417,7 +16417,7 @@ class Weixin(WeixinWindow):
         Returns:
             {text: {center, left_top, right_bottom, width, height}} 字典
         """
-        if self._ocr_engine == "rapidocr":
+        if self._ocr == "rapidocr":
             return self._get_image_text_rapidocr(image)
         return self._get_image_text_wcocr(image)
 
@@ -16907,7 +16907,7 @@ class WeixinManager:
         idle_wait: float = 0,
         lock_input: bool = False,
         resize: bool = False,
-        ocr_engine: Literal["wcocr", "rapidocr"] = "wcocr",
+        ocr: Literal["wcocr", "rapidocr"] = "wcocr",
         wxocr_weixin_install_path: Optional[str] = None,
         wxocr_plugin_path: Optional[str] = None,
     ):
@@ -16924,7 +16924,7 @@ class WeixinManager:
                          True 时微信窗口宽高为桌面的 1/3 和 1/2，
                          聊天独立窗口宽度为微信窗口的 1/3，高度与微信窗口一致。
                          默认 False 保持原窗口大小。
-            ocr_engine:  OCR 引擎，"wcocr"（微信自带）或 "rapidocr"
+            ocr:  OCR 引擎，"wcocr"（微信自带）或 "rapidocr"
             wxocr_weixin_install_path: 微信 OCR 安装路径，None 时自动检测
             wxocr_plugin_path:         微信 OCR 插件路径，None 时自动检测
         """
@@ -16934,7 +16934,7 @@ class WeixinManager:
             "idle_wait": idle_wait,
             "lock_input": lock_input,
             "resize": resize,
-            "ocr_engine": ocr_engine,
+            "ocr": ocr,
             "wxocr_weixin_install_path": wxocr_weixin_install_path,
             "wxocr_plugin_path": wxocr_plugin_path,
         }
