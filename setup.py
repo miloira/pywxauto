@@ -16,7 +16,7 @@ URL = "https://github.com/miloira/pywxauto"
 EMAIL = "690126048@qq.com"
 AUTHOR = "Msky"
 REQUIRES_PYTHON = ">=3.8.0"
-VERSION = "0.0.2"
+VERSION = "0.0.1"
 
 # What packages are required for this module to be executed?
 REQUIRED = [
