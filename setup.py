@@ -22,12 +22,11 @@ VERSION = "0.0.1"
 REQUIRED = [
     "uiautomation",
     "pywin32",
-    "Pillow>=9.0.0,<13.0.0",
-    "requests>=2.28.0",
-    "pyee>=9.0.0",
-    "rapidocr>=1.0.0",
-    "onnxruntime>=1.14.0",
-    "windows-capture>=1.0.0",
+    "Pillow",
+    "requests",
+    "pyee",
+    "rapidocr",
+    "onnxruntime"
 ]
 
 # What packages are optional?
