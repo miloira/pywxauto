@@ -612,6 +612,7 @@ def run(droplet_token, device_id, send_offline_msg):
     API_PORT = 8000
     HEARTBEAT_INTERVAL = 10
     OFFLINE_MSG_CHECK_INTERVAL = 300  # 离线消息检查间隔（秒）
+    TEXT_ORDER_POLL_INTERVAL = 1  # 未读消息轮询间隔（秒）
     ENABLE_OFFLINE_MSG = False if send_offline_msg is None else bool(send_offline_msg.get("value", False) if isinstance(send_offline_msg, dict) else send_offline_msg)
 
     # ==============================
@@ -1403,8 +1404,6 @@ def run(droplet_token, device_id, send_offline_msg):
     # 文本单消息监听（未读消息轮询）
     # ==============================
 
-    TEXT_ORDER_POLL_INTERVAL = 3  # 未读消息轮询间隔（秒）
-
     def _text_order_listener(wx: Weixin, siyu: Siyu):
         """
         文本单消息监听线程。
@@ -1463,12 +1462,59 @@ def run(droplet_token, device_id, send_offline_msg):
                                 )
                             except Exception as e:
                                 logger.warning(f"    ⚠️ 预校验异常: {room_nickname} - {e}")
-                                continue
+
+                                # 关闭已打开的会话
+                                try:
+                                    session_item.close()
+                                except Exception:
+                                    pass
+
+                                # 检查还有没有新消息，没有就停止扫描
+                                try:
+                                    if not wx.check_new_messages():
+                                        break
+                                    else:
+                                        continue
+                                except Exception:
+                                    continue
 
                             if not precheck.get("should_process", False):
                                 reason = precheck.get("reason", "")
                                 logger.debug(f"    ⏭️ 跳过: {room_nickname} ({reason})")
-                                continue
+
+                                # 关闭已打开的会话
+                                try:
+                                    session_item.close()
+                                except Exception:
+                                    pass
+
+                                # 检查还有没有新消息，没有就停止扫描
+                                try:
+                                    if not wx.check_new_messages():
+                                        break
+                                    else:
+                                        continue
+                                except Exception:
+                                    continue
+
+                            msg_type = precheck.get("type", "")
+                            if msg_type != "distributor":
+                                logger.debug(f"    ⏭️ 非收单群，跳过: {room_nickname} (type={msg_type})")
+
+                                # 关闭已打开的会话
+                                try:
+                                    session_item.close()
+                                except Exception:
+                                    pass
+
+                                # 检查还有没有新消息，没有就停止扫描
+                                try:
+                                    if not wx.check_new_messages():
+                                        break
+                                    else:
+                                        continue
+                                except Exception:
+                                    continue
 
                             chat = wx.chat
                             if chat is None:
@@ -1479,9 +1525,6 @@ def run(droplet_token, device_id, send_offline_msg):
                             pending_replies: List[Tuple[str, str]] = []  # [(sender_nickname, reply_text), ...]
 
                             for msg in chat.iter_recently_messages(count=unread_count):
-                                msg.refresh()
-                                print(msg)
-
                                 # 只处理文本消息
                                 if msg.__class__.__name__ != "TextMessage":
                                     continue
@@ -1493,6 +1536,9 @@ def run(droplet_token, device_id, send_offline_msg):
                                 # 跳过空内容
                                 if not msg.content or not msg.content.strip():
                                     continue
+
+                                msg.refresh()
+                                print(msg)
 
                                 # 文本单前缀/内容校验
                                 _refresh_company_config()
@@ -1577,7 +1623,6 @@ def run(droplet_token, device_id, send_offline_msg):
                                     for sender_nick, reply_text in pending_replies:
                                         at_list = [sender_nick] if sender_nick else []
                                         chat.send_at(reply_text, at_members=at_list)
-                                        time.sleep(0.5)
                                 except Exception as e:
                                     logger.warning(f"    ⚠️ 回复消息发送异常: {e}")
 
@@ -1615,7 +1660,7 @@ def run(droplet_token, device_id, send_offline_msg):
     logger.info("聚协云私域社群智能机器人RPA版本✨")
 
     # 初始化微信
-    wx = Weixin(idle_wait=3, ocr_engine="rapidocr")
+    wx = Weixin(idle_wait=3)
     logger.info("✅ 微信已连接")
     self_info = wx.get_self_info()
     bot_nickname_local = self_info.get("nickname", "")
