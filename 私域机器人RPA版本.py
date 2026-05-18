@@ -104,10 +104,12 @@ def run(droplet_token, device_id, send_offline_msg):
             timeout: 请求超时时间（秒），默认 10
         """
 
-        def __init__(self, base_url: str, token: str, timeout: float = 10):
+        def __init__(self, base_url: str, token: str, timeout: float = 10, max_retries: int = 3, retry_delay: float = 2):
             self.base_url = base_url.rstrip("/")
             self.token = token
             self.timeout = timeout
+            self.max_retries = max_retries
+            self.retry_delay = retry_delay
             self.robot_id: Optional[str] = None
             self._session = requests.Session()
             self._session.headers.update({
@@ -120,7 +122,7 @@ def run(droplet_token, device_id, send_offline_msg):
 
         def _handle_response(self, resp: requests.Response) -> dict:
             """统一处理响应，检查 HTTP 状态码和业务错误码"""
-            # print("================>", resp.json())
+            print("================>", resp.json())
             resp.raise_for_status()
             data = resp.json()
             code = data.get("code", -1)
@@ -141,18 +143,31 @@ def run(droplet_token, device_id, send_offline_msg):
                 raise SiyuError(code, message or f"未知错误 code={code}")
 
         def _post(self, path: str, data: dict, need_robot_id: bool = True) -> dict:
-            """发送 POST 请求"""
+            """发送 POST 请求（带重试）"""
             headers = {}
             if need_robot_id and self.robot_id:
                 headers["droplet-robot-id"] = self.robot_id
 
-            resp = self._session.post(
-                self._url(f"/WebApi/v1{path}"),
-                json={"data": data},
-                headers=headers,
-                timeout=self.timeout,
-            )
-            return self._handle_response(resp)
+            last_exc = None
+            for attempt in range(1, self.max_retries + 1):
+                try:
+                    resp = self._session.post(
+                        self._url(f"/WebApi/v1{path}"),
+                        json={"data": data},
+                        headers=headers,
+                        timeout=self.timeout,
+                    )
+                    return self._handle_response(resp)
+                except (AuthError, PermissionError, MissingRobotIdError, BusinessError):
+                    raise  # 业务错误不重试
+                except Exception as e:
+                    last_exc = e
+                    if attempt < self.max_retries:
+                        logger.warning(f"⚠️ 请求 {path} 失败(第{attempt}次)，{self.retry_delay}s后重试: {e}")
+                        time.sleep(self.retry_delay)
+                    else:
+                        logger.error(f"❌ 请求 {path} 失败(已重试{self.max_retries}次): {e}")
+            raise last_exc
 
         # ========================= 接口方法 =========================
 
@@ -287,12 +302,26 @@ def run(droplet_token, device_id, send_offline_msg):
             headers = {}
             if self.robot_id:
                 headers["droplet-robot-id"] = self.robot_id
-            resp = self._session.get(
-                self._url("/api/siyu/company_config_get"),
-                headers=headers,
-                timeout=self.timeout,
-            )
-            return self._handle_response(resp)
+
+            last_exc = None
+            for attempt in range(1, self.max_retries + 1):
+                try:
+                    resp = self._session.get(
+                        self._url("/api/siyu/company_config_get"),
+                        headers=headers,
+                        timeout=self.timeout,
+                    )
+                    return self._handle_response(resp)
+                except (AuthError, PermissionError, MissingRobotIdError, BusinessError):
+                    raise
+                except Exception as e:
+                    last_exc = e
+                    if attempt < self.max_retries:
+                        logger.warning(f"⚠️ 请求 company_config_get 失败(第{attempt}次)，{self.retry_delay}s后重试: {e}")
+                        time.sleep(self.retry_delay)
+                    else:
+                        logger.error(f"❌ 请求 company_config_get 失败(已重试{self.max_retries}次): {e}")
+            raise last_exc
 
         def file_upload_raw(
             self,
@@ -307,21 +336,35 @@ def run(droplet_token, device_id, send_offline_msg):
             headers["Content-Type"] = None
 
             file_name = os.path.basename(file_path)
-            with open(file_path, "rb") as fp:
-                files = {"file": (file_name, fp)}
-                data = {
-                    "room_nickname": room_nickname,
-                    "sender_nickname": sender_nickname,
-                    "file_type": file_type,
-                }
-                resp = self._session.post(
-                    self._url("/WebApi/v1/siyu/v2_file_upload_raw"),
-                    files=files,
-                    data=data,
-                    headers=headers,
-                    timeout=max(self.timeout, 30),
-                )
-            return self._handle_response(resp)
+
+            last_exc = None
+            for attempt in range(1, self.max_retries + 1):
+                try:
+                    with open(file_path, "rb") as fp:
+                        files = {"file": (file_name, fp)}
+                        data = {
+                            "room_nickname": room_nickname,
+                            "sender_nickname": sender_nickname,
+                            "file_type": file_type,
+                        }
+                        resp = self._session.post(
+                            self._url("/WebApi/v1/siyu/v2_file_upload_raw"),
+                            files=files,
+                            data=data,
+                            headers=headers,
+                            timeout=max(self.timeout, 30),
+                        )
+                    return self._handle_response(resp)
+                except (AuthError, PermissionError, MissingRobotIdError, BusinessError):
+                    raise
+                except Exception as e:
+                    last_exc = e
+                    if attempt < self.max_retries:
+                        logger.warning(f"⚠️ 文件上传 {file_name} 失败(第{attempt}次)，{self.retry_delay}s后重试: {e}")
+                        time.sleep(self.retry_delay)
+                    else:
+                        logger.error(f"❌ 文件上传 {file_name} 失败(已重试{self.max_retries}次): {e}")
+            raise last_exc
 
         # ========================= 心跳管理 =========================
 
@@ -1394,7 +1437,11 @@ def run(droplet_token, device_id, send_offline_msg):
                 with wx_lock:
                     try:
                         for session_item in wx.session.iter_sessions_by_scroll():
+                            print(session_item)
                             if session_item.unread_count <= 0:
+                                continue
+
+                            if session_item.name in ("服务号", "折叠的聊天"):
                                 continue
 
                             room_nickname = session_item.name
@@ -1404,7 +1451,6 @@ def run(droplet_token, device_id, send_offline_msg):
                             # 3. 打开会话，获取最近未读消息
                             try:
                                 session_item.open()
-                                time.sleep(0.5)
                             except Exception as e:
                                 logger.warning(f"    ⚠️ 会话打开失败: {e}")
                                 continue
@@ -1434,6 +1480,7 @@ def run(droplet_token, device_id, send_offline_msg):
 
                             for msg in chat.iter_recently_messages(count=unread_count):
                                 msg.refresh()
+                                print(msg)
 
                                 # 只处理文本消息
                                 if msg.__class__.__name__ != "TextMessage":
@@ -1451,14 +1498,19 @@ def run(droplet_token, device_id, send_offline_msg):
                                 _refresh_company_config()
                                 if not _company_config_cache.get("skip_text_order_prefix_match", False):
                                     # 文本抓单规则 - 必须【@机器人 下单】才会抓取
-                                    prefix = f"@{bot_nickname}\u2005下单"
+                                    prefix = f"@{bot_nickname}"
+                                    content = msg.content.replace(f"@{bot_nickname}\u2005", "").strip()
                                     if not msg.content.startswith(prefix):
-                                        logger.debug(f"    ⏭️ 文本未以'{prefix}'开头，跳过: {msg.content[:30]}")
+                                        logger.info(f"    ⏭️ 文本未以'{prefix}'开头，跳过: {msg.content}")
+                                        continue
+                                    prefix = "下单"
+                                    if not content.startswith(prefix):
+                                        logger.debug(f"    ⏭️ 文本'@机器人'后未以'{prefix}'开头，跳过: {msg.content}")
                                         continue
                                 else:
                                     # 文本抓单规则 - 抓取所有包含手机号、地址的消息
                                     if not contains_province_name(msg.content) or not contains_phone_number(msg.content):
-                                        logger.debug(f"    ⏭️ 文本不含省份名或电话号码，跳过: {msg.content[:30]}")
+                                        logger.debug(f"    ⏭️ 文本不含省份名或电话号码，跳过: {msg.content}")
                                         continue
 
                                 # 跳过包含忽略关键词的文本
@@ -1474,7 +1526,7 @@ def run(droplet_token, device_id, send_offline_msg):
                                         sender_nickname,
                                         f"【文本下单失败】\n文本中存在忽略关键词：{matched_kw}",
                                     ))
-                                    logger.debug(f"    ⏭️ 文本含忽略关键词'{matched_kw}'，跳过: {msg.content[:30]}")
+                                    logger.debug(f"    ⏭️ 文本含忽略关键词'{matched_kw}'，跳过: {msg.content}")
                                     continue
 
                                 sender_nickname = msg.sender or ""
@@ -1505,13 +1557,13 @@ def run(droplet_token, device_id, send_offline_msg):
                                     siyu.text_order_report(
                                         room_nickname=room_nickname,
                                         sender_nickname=sender_nickname,
-                                        text=msg.content.strip(),
+                                        text=msg.content,
                                     )
                                     pending_replies.append((
                                         sender_nickname,
-                                        "【文本下单】\n您的订单已经收到，正在人工审核中，请耐心等待。",
+                                        f"【文本下单】\n您的订单已收到，正在人工审核中，请耐心等待。\n消息内容：\n{msg.content}",
                                     ))
-                                    logger.info(f"    ✅ 文本单上报: [{room_nickname}] {sender_nickname}: {msg.content[:30]}")
+                                    logger.info(f"    ✅ 文本单上报: [{room_nickname}] {sender_nickname}: {msg.content}")
                                 except Exception as e:
                                     pending_replies.append((
                                         sender_nickname,
@@ -1563,7 +1615,7 @@ def run(droplet_token, device_id, send_offline_msg):
     logger.info("聚协云私域社群智能机器人RPA版本✨")
 
     # 初始化微信
-    wx = Weixin(idle_wait=3)
+    wx = Weixin(idle_wait=3, ocr_engine="rapidocr")
     logger.info("✅ 微信已连接")
     self_info = wx.get_self_info()
     bot_nickname_local = self_info.get("nickname", "")
