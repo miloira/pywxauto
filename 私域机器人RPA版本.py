@@ -1,9 +1,10 @@
-def run(droplet_token, device_id, send_offline_msg):
+def run(droplet_token, device_id, enable_text_order, send_offline_msg):
     """
     HEADER START
 
     :param !droplet_token: {string} 客户端TOKEN
     :param !device_id: {string} 客户端设备ID
+    :param enable_text_order: {dict} 是否处理文本单
     :param send_offline_msg: {dict} 是否发送离线消息
     HEADER END
     """
@@ -614,6 +615,7 @@ def run(droplet_token, device_id, send_offline_msg):
     OFFLINE_MSG_CHECK_INTERVAL = 300  # 离线消息检查间隔（秒）
     TEXT_ORDER_POLL_INTERVAL = 1  # 未读消息轮询间隔（秒）
     ENABLE_OFFLINE_MSG = False if send_offline_msg is None else bool(send_offline_msg.get("value", False) if isinstance(send_offline_msg, dict) else send_offline_msg)
+    ENABLE_TEXT_ORDER = False if enable_text_order is None else bool(enable_text_order.get("value", False) if isinstance(enable_text_order, dict) else enable_text_order)
 
     # ==============================
     # 运行时状态
@@ -1761,14 +1763,17 @@ def run(droplet_token, device_id, send_offline_msg):
     logger.info(f"📁 文件监听: {watch_dir}")
 
     # 启动文本单消息监听线程
-    text_order_thread = threading.Thread(
-        target=_text_order_listener,
-        args=(wx, siyu),
-        daemon=True,
-        name="text-order-listener",
-    )
-    text_order_thread.start()
-    logger.info(f"🚀 文本单消息监听已启动 (轮询间隔 {TEXT_ORDER_POLL_INTERVAL}s)")
+    if ENABLE_TEXT_ORDER:
+        text_order_thread = threading.Thread(
+            target=_text_order_listener,
+            args=(wx, siyu),
+            daemon=True,
+            name="text-order-listener",
+        )
+        text_order_thread.start()
+        logger.info(f"🚀 文本单消息监听已启动 (轮询间隔 {TEXT_ORDER_POLL_INTERVAL}s)")
+    else:
+        logger.info("⏭️ 文本单消息监听已禁用")
     logger.info(f"🚀 任务轮询已启动")
     logger.info("✅ 所有模块就绪，开始运行")
 
@@ -1809,5 +1814,6 @@ if __name__ == "__main__":
     run(
         droplet_token="eyJ0eXAiOiJKV1QiLCJhbGciOiJIUzI1NiJ9.eyJpc3MiOiJKc3QiLCJhdWQiOiJKeHkiLCJzdWIiOiJKd3QiLCJpYXQiOjE3Nzg2MzY1NTMsImV4cCI6MTc3OTI0MTM1MywiY29faWQiOjEwMDAwMDMwMzgsImNvX25hbWUiOiLogZrljY_kupEiLCJ1X2lkIjo0MDA1NSwidV9uYW1lIjoi6IGa5Y2P5LqRMTEiLCJwZXJtaXNzaW9uIjpbMTAwMDAwMDVdLCJ0aW1lb3V0IjoxNzc5MjQxMzUzLCJlX2NvaWQiOjEzMjAwMjYzLCJlX3VpZCI6MTc0MjYxMTN9.yP-aO9IB1aC1u_1bHnXRxFS511FY4LYbCdULupbM6qc",
         device_id="rpa_DESKTOP-6512490_10111",
+        enable_text_order=True,
         send_offline_msg=None,
     )
