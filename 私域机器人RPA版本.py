@@ -129,20 +129,24 @@ def run(droplet_token, device_id, enable_text_order, send_offline_msg):
             data = resp.json()
             code = data.get("code", -1)
             message = data.get("message", "")
+            result = data.get("result", "")
 
             if code == 0:
-                return data.get("result") or {}
+                return result or {}
+
+            # 如果 result 是字符串，作为更详细的错误描述附加到 message
+            error_detail = result if isinstance(result, str) and result else message
 
             if code == 10001:
-                raise AuthError(code, message or "未认证，请重新登录")
+                raise AuthError(code, error_detail or "未认证，请重新登录")
             elif code == 10003:
-                raise PermissionError(code, message or "权限不足")
+                raise PermissionError(code, error_detail or "权限不足")
             elif code == 10008:
-                raise MissingRobotIdError(code, message or "缺少 droplet-robot-id header")
+                raise MissingRobotIdError(code, error_detail or "缺少 droplet-robot-id header")
             elif code == 20001:
-                raise BusinessError(code, message)
+                raise BusinessError(code, error_detail)
             else:
-                raise SiyuError(code, message or f"未知错误 code={code}")
+                raise SiyuError(code, error_detail or f"未知错误 code={code}")
 
         def _post(self, path: str, data: dict, need_robot_id: bool = True) -> dict:
             """发送 POST 请求（带重试）"""
@@ -939,6 +943,7 @@ def run(droplet_token, device_id, enable_text_order, send_offline_msg):
 
                     # 上传文件到服务端
                     upload_success = False
+                    upload_biz_error = False  # 服务端明确返回的业务错误（文件无效等）
                     if self._siyu:
                         logger.info(f"  ⬆️ [{i}/{len(today_files)}] 上传服务端: {f.name}")
                         try:
@@ -953,12 +958,18 @@ def run(droplet_token, device_id, enable_text_order, send_offline_msg):
                             logger.info(f"  ✅ 上传成功: file_id={file_id}, 总行数={row_count}, 有效行数={valid_row_count}")
                             upload_success = True
                         except SiyuError as e:
-                            logger.error(f"  ❌ 上传失败: {f.name} - {e}")
+                            # 服务端明确返回的业务错误（文件内容无效、订单为空等），文件应删除
+                            logger.error(f"  ❌ 上传失败(业务错误): {f.name} - {e}")
+                            upload_biz_error = True
+                            upload_biz_error_msg = e.message
                         except Exception as e:
-                            logger.error(f"  ❌ 上传异常: {f.name} - {e}")
+                            # 网络超时等非业务异常，保留文件下次重试
+                            logger.error(f"  ❌ 上传异常(网络等): {f.name} - {e}")
                             traceback.print_exc()
 
-                    # 上传成功后，定位到聊天位置并引用回复确认消息，然后删除文件
+                    # 上传成功：回复确认消息 + 删除文件
+                    # 业务错误：回复错误提示 + 删除文件（文件本身无效，重试也没用）
+                    # 网络异常：保留文件，等下次重试
                     if upload_success:
                         try:
                             f.switch_to_message()
@@ -966,7 +977,15 @@ def run(droplet_token, device_id, enable_text_order, send_offline_msg):
                             logger.info(f"  ✅ 已回复（未匹配到消息引用）: {f.name}")
                         except Exception as e:
                             logger.warning(f"  ⚠️ 回复异常（不影响删除）: {f.name} - {e}")
+                    elif upload_biz_error:
+                        try:
+                            f.switch_to_message()
+                            self._wx.chat.send_at(f"【Excel下单失败】\n文件：{f.name}\n原因：{upload_biz_error_msg}", at_members=[f.sender])
+                            logger.info(f"  ✅ 已回复业务错误提示: {f.name}")
+                        except Exception as e:
+                            logger.warning(f"  ⚠️ 回复异常（不影响删除）: {f.name} - {e}")
 
+                    if upload_success or upload_biz_error:
                         try:
                             time.sleep(0.5)
                             self._wx.file_manager.delete_file(f)
@@ -974,7 +993,7 @@ def run(droplet_token, device_id, enable_text_order, send_offline_msg):
                         except Exception as e:
                             logger.warning(f"  ⚠️ 删除异常: {f.name} - {e}")
                     else:
-                        logger.warning(f"  ⚠️ 上传未成功，保留文件不删除: {f.name}")
+                        logger.warning(f"  ⚠️ 上传未成功(非业务错误)，保留文件待重试: {f.name}")
 
                 self._wx.file_manager.close()
                 logger.info(f"  ✅ 全部处理完成")
