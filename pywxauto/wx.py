@@ -4396,7 +4396,7 @@ class Login(WeixinWindow):
     NICKNAME_ID = "current_login_nick_name"
     ENTER_BTN_CLASS = "mmui::XOutlineButton"
 
-    def __init__(self, pid: int):
+    def __init__(self, pid: Optional[int] = None):
         """初始化登录窗口操作实例，绑定微信登录窗口控件。
 
         Args:
