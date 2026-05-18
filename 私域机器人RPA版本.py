@@ -19,6 +19,35 @@ def run(droplet_token, device_id, enable_text_order, send_offline_msg):
     4. 全部处理完后关闭聊天文件窗口
     """
     # CODE START
+    import importlib
+    import subprocess
+    import sys
+
+    def import_from_url(url, package_name, verbose=False):
+        """从 URL 在线安装并导入 Python 包"""
+        with subprocess.Popen(
+            [sys.executable, "-m", "pip", "install", url],
+            stdout=subprocess.PIPE,
+            stderr=subprocess.STDOUT,
+            text=True,
+        ) as process:
+            for data in process.stdout:
+                if verbose:
+                    sys.stdout.write(data)
+                    sys.stdout.flush()
+        return importlib.import_module(package_name)
+
+    # 在线安装 pywxauto（如果未安装）
+    try:
+        from pywxauto.wx import Login, Weixin, MessageStatus
+    except ImportError:
+        import_from_url(
+            "https://files.erp321.com/droplet/client/rpa/pywxauto-0.0.1.tar.gz",
+            "pywxauto",
+            verbose=True,
+        )
+        from pywxauto.wx import Login, Weixin, MessageStatus
+
     import base64
     import json
     import logging
@@ -44,8 +73,6 @@ def run(droplet_token, device_id, enable_text_order, send_offline_msg):
     from sqlalchemy.orm import declarative_base, sessionmaker, Session as DBSession
     from watchdog.observers import Observer
     from watchdog.events import FileSystemEventHandler
-
-    from pywxauto.wx import Login, Weixin, MessageStatus
 
     logger = logging.getLogger(__name__)
     logging.basicConfig(
@@ -1835,12 +1862,3 @@ def run(droplet_token, device_id, enable_text_order, send_offline_msg):
         logger.info("\n\n⏹️ 已停止")
     observer.join()
     # CODE END
-
-
-if __name__ == "__main__":
-    run(
-        droplet_token="eyJ0eXAiOiJKV1QiLCJhbGciOiJIUzI1NiJ9.eyJpc3MiOiJKc3QiLCJhdWQiOiJKeHkiLCJzdWIiOiJKd3QiLCJpYXQiOjE3Nzg2MzY1NTMsImV4cCI6MTc3OTI0MTM1MywiY29faWQiOjEwMDAwMDMwMzgsImNvX25hbWUiOiLogZrljY_kupEiLCJ1X2lkIjo0MDA1NSwidV9uYW1lIjoi6IGa5Y2P5LqRMTEiLCJwZXJtaXNzaW9uIjpbMTAwMDAwMDVdLCJ0aW1lb3V0IjoxNzc5MjQxMzUzLCJlX2NvaWQiOjEzMjAwMjYzLCJlX3VpZCI6MTc0MjYxMTN9.yP-aO9IB1aC1u_1bHnXRxFS511FY4LYbCdULupbM6qc",
-        device_id="rpa_DESKTOP-6512490_10111",
-        enable_text_order=True,
-        send_offline_msg=None,
-    )
