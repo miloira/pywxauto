@@ -110,7 +110,7 @@ setup(
     },
     # 排除 pywxauto.py 源码，只保留 __init__.py
     exclude_package_data={
-        "pywxauto": ["pywxauto.py"],
+        "pywxauto": ["wx.py"],
     },
     install_requires=REQUIRED,
     extras_require=EXTRAS,
