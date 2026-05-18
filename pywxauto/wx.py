@@ -16215,7 +16215,7 @@ class Weixin(WeixinWindow):
         with open(save_path, "wb") as f:
             f.write(png_bytes)
 
-    def check_new_msg(self) -> bool:
+    def check_new_messages(self) -> bool:
         """
         通过对导航栏微信图标截图，扫描红色角标像素判断是否有新消息。
 

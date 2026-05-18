@@ -1367,7 +1367,7 @@ def run(droplet_token, device_id, send_offline_msg):
         文本单消息监听线程。
 
         流程：
-        1. check_new_msg() 检测微信导航栏是否有红色角标（新消息）
+        1. check_new_messages() 检测微信导航栏是否有红色角标（新消息）
         2. 有新消息时，iter_sessions_by_scroll 遍历会话列表找到有未读的会话
         3. 打开未读会话，iter_messages_by_scroll 获取最近未读消息
         4. 对每条文本消息调用 message_precheck 校验群+发送者是否有效
@@ -1378,9 +1378,9 @@ def run(droplet_token, device_id, send_offline_msg):
                 # 1. 检测是否有新消息
                 with wx_lock:
                     try:
-                        has_new = wx.check_new_msg()
+                        has_new = wx.check_new_messages()
                     except Exception as e:
-                        logger.warning(f"check_new_msg 异常: {e}")
+                        logger.warning(f"check_new_messages 异常: {e}")
                         time.sleep(TEXT_ORDER_POLL_INTERVAL)
                         continue
 
@@ -1537,7 +1537,7 @@ def run(droplet_token, device_id, send_offline_msg):
 
                             # 处理完一个会话后检查是否还有新消息，没有就停止扫描
                             try:
-                                if not wx.check_new_msg():
+                                if not wx.check_new_messages():
                                     break
                             except Exception:
                                 break
